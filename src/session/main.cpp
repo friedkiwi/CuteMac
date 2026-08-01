@@ -6,10 +6,12 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QMenuBar>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
 #include <QSpinBox>
@@ -17,6 +19,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <functional>
 
 #include "cutemac/config/Configuration.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
@@ -32,6 +36,8 @@ public:
         m_image.fill(Qt::white);
         setMinimumSize(512, 342);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        setFocusPolicy(Qt::StrongFocus);
+        setMouseTracking(true);
     }
 
     void setRunning(bool running)
@@ -57,6 +63,16 @@ public:
         update();
     }
 
+    void setMouseCallback(std::function<void(int, int, bool)> callback)
+    {
+        m_mouseCallback = std::move(callback);
+    }
+
+    void setKeyCallback(std::function<void(int, bool)> callback)
+    {
+        m_keyCallback = std::move(callback);
+    }
+
 protected:
     void paintEvent(QPaintEvent*) override
     {
@@ -76,6 +92,32 @@ protected:
         }
     }
 
+    void mouseMoveEvent(QMouseEvent* event) override
+    {
+        sendMouseEvent(event);
+    }
+
+    void mousePressEvent(QMouseEvent* event) override
+    {
+        setFocus(Qt::MouseFocusReason);
+        sendMouseEvent(event);
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override
+    {
+        sendMouseEvent(event);
+    }
+
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        sendKeyEvent(event, true);
+    }
+
+    void keyReleaseEvent(QKeyEvent* event) override
+    {
+        sendKeyEvent(event, false);
+    }
+
 private:
     [[nodiscard]] QRect displayRect() const
     {
@@ -85,8 +127,112 @@ private:
         return QRect(QPoint((width() - scaled.width()) / 2, (height() - scaled.height()) / 2), scaled);
     }
 
+    [[nodiscard]] QPoint macPointFor(const QPoint& widgetPoint) const
+    {
+        const auto target = displayRect();
+        if (!target.contains(widgetPoint)) {
+            return QPoint(std::clamp(widgetPoint.x() - target.left(), 0, target.width() - 1) * 512 / target.width(),
+                std::clamp(widgetPoint.y() - target.top(), 0, target.height() - 1) * 342 / target.height());
+        }
+
+        return QPoint((widgetPoint.x() - target.left()) * 512 / target.width(),
+            (widgetPoint.y() - target.top()) * 342 / target.height());
+    }
+
+    void sendMouseEvent(QMouseEvent* event)
+    {
+        if (!m_mouseCallback) {
+            return;
+        }
+        const auto point = macPointFor(event->pos());
+        m_mouseCallback(point.x(), point.y(), (event->buttons() & Qt::LeftButton) != 0);
+    }
+
+    void sendKeyEvent(QKeyEvent* event, bool pressed)
+    {
+        if (event->isAutoRepeat() || !m_keyCallback) {
+            return;
+        }
+        const auto code = macKeyCodeFor(event);
+        if (code >= 0) {
+            m_keyCallback(code, pressed);
+            event->accept();
+        }
+    }
+
+    [[nodiscard]] int macKeyCodeFor(QKeyEvent* event) const
+    {
+        switch (event->key()) {
+        case Qt::Key_A: return 0x00;
+        case Qt::Key_S: return 0x01;
+        case Qt::Key_D: return 0x02;
+        case Qt::Key_F: return 0x03;
+        case Qt::Key_H: return 0x04;
+        case Qt::Key_G: return 0x05;
+        case Qt::Key_Z: return 0x06;
+        case Qt::Key_X: return 0x07;
+        case Qt::Key_C: return 0x08;
+        case Qt::Key_V: return 0x09;
+        case Qt::Key_B: return 0x0b;
+        case Qt::Key_Q: return 0x0c;
+        case Qt::Key_W: return 0x0d;
+        case Qt::Key_E: return 0x0e;
+        case Qt::Key_R: return 0x0f;
+        case Qt::Key_Y: return 0x10;
+        case Qt::Key_T: return 0x11;
+        case Qt::Key_1: return 0x12;
+        case Qt::Key_2: return 0x13;
+        case Qt::Key_3: return 0x14;
+        case Qt::Key_4: return 0x15;
+        case Qt::Key_6: return 0x16;
+        case Qt::Key_5: return 0x17;
+        case Qt::Key_Equal: return 0x18;
+        case Qt::Key_9: return 0x19;
+        case Qt::Key_7: return 0x1a;
+        case Qt::Key_Minus: return 0x1b;
+        case Qt::Key_8: return 0x1c;
+        case Qt::Key_0: return 0x1d;
+        case Qt::Key_BracketRight: return 0x1e;
+        case Qt::Key_O: return 0x1f;
+        case Qt::Key_U: return 0x20;
+        case Qt::Key_BracketLeft: return 0x21;
+        case Qt::Key_I: return 0x22;
+        case Qt::Key_P: return 0x23;
+        case Qt::Key_Return: return 0x24;
+        case Qt::Key_L: return 0x25;
+        case Qt::Key_J: return 0x26;
+        case Qt::Key_Apostrophe: return 0x27;
+        case Qt::Key_K: return 0x28;
+        case Qt::Key_Semicolon: return 0x29;
+        case Qt::Key_Backslash: return 0x2a;
+        case Qt::Key_Comma: return 0x2b;
+        case Qt::Key_Slash: return 0x2c;
+        case Qt::Key_N: return 0x2d;
+        case Qt::Key_M: return 0x2e;
+        case Qt::Key_Period: return 0x2f;
+        case Qt::Key_Tab: return 0x30;
+        case Qt::Key_Space: return 0x31;
+        case Qt::Key_QuoteLeft: return 0x32;
+        case Qt::Key_Backspace: return 0x33;
+        case Qt::Key_Escape: return 0x35;
+        case Qt::Key_Control: return 0x36;
+        case Qt::Key_Shift: return 0x38;
+        case Qt::Key_CapsLock: return 0x39;
+        case Qt::Key_Alt: return 0x3a;
+        case Qt::Key_Meta: return 0x37;
+        case Qt::Key_Left: return 0x3b;
+        case Qt::Key_Right: return 0x3c;
+        case Qt::Key_Down: return 0x3d;
+        case Qt::Key_Up: return 0x3e;
+        default:
+            return -1;
+        }
+    }
+
     bool m_running = false;
     QImage m_image;
+    std::function<void(int, int, bool)> m_mouseCallback;
+    std::function<void(int, bool)> m_keyCallback;
 };
 
 class RuntimeSettingsDialog final : public QDialog {
@@ -155,6 +301,13 @@ public:
         resize(1120, 820);
 
         m_display = new DisplayWidget;
+        m_display->setMouseCallback([this](int x, int y, bool pressed) {
+            m_machine.setMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+            m_machine.setMouseButton(pressed);
+        });
+        m_display->setKeyCallback([this](int keyCode, bool pressed) {
+            m_machine.setKeyState(static_cast<std::uint8_t>(keyCode), pressed);
+        });
         setCentralWidget(m_display);
 
         buildMenus();
@@ -185,11 +338,15 @@ private:
                 QStringLiteral("Disk images (*.dsk *.img *.image);;All files (*)"));
             if (!path.isEmpty()) {
                 m_configuration.diskPath = path;
+                if (!m_machine.loadDiskImage(path)) {
+                    statusBar()->showMessage(QStringLiteral("Failed to load disk image"), 3000);
+                }
                 updateStatus();
             }
         });
         mediaMenu->addAction(QStringLiteral("Eject Disk Image"), this, [this]() {
             m_configuration.diskPath.clear();
+            m_machine.ejectDiskImage();
             updateStatus();
         });
 
@@ -209,6 +366,9 @@ private:
     {
         setPaused(true);
         m_romLoaded = !m_configuration.romPath.isEmpty() && m_machine.loadRomFile(m_configuration.romPath);
+        if (!m_configuration.diskPath.isEmpty()) {
+            (void)m_machine.loadDiskImage(m_configuration.diskPath);
+        }
         if (m_romLoaded) {
             m_machine.reset();
             m_display->setFramebuffer(m_machine.framebufferBytes());

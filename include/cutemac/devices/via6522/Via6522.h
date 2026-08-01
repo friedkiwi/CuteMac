@@ -19,6 +19,7 @@ public:
 
     [[nodiscard]] std::uint8_t portA() const;
     [[nodiscard]] std::uint8_t portB() const;
+    void setPortBInputBit(std::uint8_t bit, bool high);
     [[nodiscard]] bool overlayEnabled() const;
 
 private:

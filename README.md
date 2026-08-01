@@ -48,5 +48,5 @@ Debug console:
 ./build/CuteMacDebugSession --profile ~/.config/friedkiwi/CuteMac/profiles/Mac_Plus.toml
 ```
 
-Useful debug commands include `regs`, `disasm pc 8`, `mem <addr> <len>`, `step`, `run`, `screen export <file.png>`, `sound capture-export <file.wav>`, and `gdb start`.
+Useful debug commands include `regs`, `disasm pc 8`, `mem <addr> <len>`, `step`, `run`, `devices scsi`, `disk insert <path>`, `mouse status`, `key status`, `screen export <file.png>`, `sound capture-export <file.wav>`, and `gdb start`.
 For GDB, use `gdb-multiarch` with `set architecture m68k:68000`, `set endian big`, and `target remote localhost:1234`.

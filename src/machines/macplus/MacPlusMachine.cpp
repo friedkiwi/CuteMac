@@ -4,6 +4,7 @@
 #include <QString>
 
 #include <algorithm>
+#include <memory>
 
 namespace cutemac::machines::macplus {
 
@@ -20,7 +21,14 @@ constexpr std::uint32_t viaBase = 0xefe1fe;
 constexpr std::uint32_t ramConfigBase = 0xf00000;
 constexpr std::uint32_t diagnosticVectorBase = 0xf80000;
 constexpr std::uint32_t lowMemoryTicks = 0x00016a;
+constexpr std::uint32_t lowMemoryMbState = 0x000172;
+constexpr std::uint32_t lowMemoryKeyMap = 0x000174;
 constexpr std::uint32_t screenBase4MiB = 0x3fa700;
+constexpr std::uint32_t lowMemoryMTemp = 0x000828;
+constexpr std::uint32_t lowMemoryRawMouse = 0x00082c;
+constexpr std::uint32_t lowMemoryMouse = 0x000830;
+constexpr std::uint32_t lowMemoryCrsrNew = 0x0008ce;
+constexpr std::uint32_t lowMemoryCrsrCouple = 0x0008cf;
 constexpr std::uint32_t screenBytes = 512 * 342 / 8;
 constexpr std::uint32_t soundBase4MiB = 0x3ffd00;
 constexpr std::uint32_t soundBytes = 370;
@@ -93,6 +101,29 @@ bool MacPlusMachine::loadRomFile(const QString& path)
     return true;
 }
 
+bool MacPlusMachine::loadDiskImage(const QString& path)
+{
+    auto disk = std::make_shared<devices::scsi::ScsiBlockDevice>();
+    if (!disk->loadImage(path)) {
+        return false;
+    }
+
+    m_scsiDisk = std::move(disk);
+    m_diskImagePath = path;
+    m_scsi.attachTarget(0, m_scsiDisk);
+    return true;
+}
+
+void MacPlusMachine::ejectDiskImage()
+{
+    if (m_scsiDisk) {
+        m_scsiDisk->eject();
+    }
+    m_scsi.detachTarget(0);
+    m_scsiDisk.reset();
+    m_diskImagePath.clear();
+}
+
 void MacPlusMachine::reset()
 {
     m_accessSummary = {};
@@ -103,10 +134,14 @@ void MacPlusMachine::reset()
     m_scc.reset();
     m_iwm.reset();
     m_scsi.reset();
+    if (m_scsiDisk && m_scsiDisk->ready()) {
+        m_scsi.attachTarget(0, m_scsiDisk);
+    }
     m_via.reset();
     setOverlayEnabled(true);
 
     m_cpu.reset();
+    synchronizeMouseLowMemory();
     logEvent(QStringLiteral("reset pc=0x%1 overlay=%2")
                  .arg(programCounter(), 8, 16, QLatin1Char('0'))
                  .arg(overlayEnabled() ? QStringLiteral("on") : QStringLiteral("off")));
@@ -192,7 +227,10 @@ std::uint8_t MacPlusMachine::read8(std::uint32_t address)
     }
     if (region == Region::Rom) {
         ++m_accessSummary.romReads;
-        const auto value = m_rom[romOffset(address)];
+        const auto offset = (address - romBase) & offset4MiBMask;
+        const auto value = offset < m_rom.size()
+            ? m_rom[romOffset(address)]
+            : static_cast<std::uint8_t>(0x5a ^ (offset >> 9) ^ (offset >> 17));
         recordBusAccess("read", region, address, value, 1);
         return value;
     }
@@ -407,7 +445,11 @@ std::uint8_t MacPlusMachine::debugRead8(std::uint32_t address) const
         return m_ram[ramOffset(address)];
     }
     if (region == Region::Rom) {
-        return m_rom[romOffset(address)];
+        const auto offset = (address - romBase) & offset4MiBMask;
+        if (offset < m_rom.size()) {
+            return m_rom[romOffset(address)];
+        }
+        return static_cast<std::uint8_t>(0x5a ^ (offset >> 9) ^ (offset >> 17));
     }
     if (region == Region::Configuration) {
         return 0;
@@ -502,6 +544,81 @@ void MacPlusMachine::clearSoundCapture()
     m_soundCapture.clear();
 }
 
+QString MacPlusMachine::diskImagePath() const
+{
+    return m_diskImagePath;
+}
+
+devices::scsi::ncr5380::Ncr5380::DebugState MacPlusMachine::scsiDebugState() const
+{
+    return m_scsi.debugState();
+}
+
+void MacPlusMachine::setMousePosition(std::int16_t x, std::int16_t y)
+{
+    m_mouseX = std::clamp<std::int16_t>(x, 0, 511);
+    m_mouseY = std::clamp<std::int16_t>(y, 0, 341);
+    synchronizeMouseLowMemory();
+}
+
+void MacPlusMachine::moveMouse(std::int16_t dx, std::int16_t dy)
+{
+    setMousePosition(static_cast<std::int16_t>(m_mouseX + dx), static_cast<std::int16_t>(m_mouseY + dy));
+}
+
+void MacPlusMachine::setMouseButton(bool pressed)
+{
+    m_mouseButtonPressed = pressed;
+    m_via.setPortBInputBit(3, !pressed);
+    writeRam8Direct(lowMemoryMbState, pressed ? 0x00 : 0x80);
+}
+
+void MacPlusMachine::setKeyState(std::uint8_t macKeyCode, bool pressed)
+{
+    macKeyCode &= 0x7f;
+    const auto address = lowMemoryKeyMap + (macKeyCode / 8);
+    auto value = readRam8Direct(address);
+    const auto bit = static_cast<std::uint8_t>(1U << (macKeyCode & 0x07));
+    if (pressed) {
+        value |= bit;
+    } else {
+        value &= static_cast<std::uint8_t>(~bit);
+    }
+    writeRam8Direct(address, value);
+}
+
+void MacPlusMachine::resetKeyboard()
+{
+    for (std::uint32_t i = 0; i < 18; ++i) {
+        writeRam8Direct(lowMemoryKeyMap + i, 0);
+    }
+}
+
+std::int16_t MacPlusMachine::mouseX() const
+{
+    return m_mouseX;
+}
+
+std::int16_t MacPlusMachine::mouseY() const
+{
+    return m_mouseY;
+}
+
+bool MacPlusMachine::mouseButtonPressed() const
+{
+    return m_mouseButtonPressed;
+}
+
+QByteArray MacPlusMachine::keyMapBytes() const
+{
+    QByteArray bytes;
+    bytes.resize(18);
+    for (std::uint32_t i = 0; i < 18; ++i) {
+        bytes[static_cast<qsizetype>(i)] = static_cast<char>(readRam8Direct(lowMemoryKeyMap + i));
+    }
+    return bytes;
+}
+
 MacPlusMachine::RomInfo MacPlusMachine::romInfo() const
 {
     std::uint32_t checksum = 0;
@@ -535,6 +652,48 @@ std::uint32_t MacPlusMachine::readRam32Direct(std::uint32_t address) const
         | (static_cast<std::uint32_t>(m_ram[offset + 1]) << 16)
         | (static_cast<std::uint32_t>(m_ram[offset + 2]) << 8)
         | static_cast<std::uint32_t>(m_ram[offset + 3]);
+}
+
+std::uint16_t MacPlusMachine::readRam16Direct(std::uint32_t address) const
+{
+    const auto offset = ramOffset(address);
+    return static_cast<std::uint16_t>((m_ram[offset] << 8) | m_ram[offset + 1]);
+}
+
+std::uint8_t MacPlusMachine::readRam8Direct(std::uint32_t address) const
+{
+    return m_ram[ramOffset(address)];
+}
+
+void MacPlusMachine::writeRam8Direct(std::uint32_t address, std::uint8_t value)
+{
+    if (address < static_cast<std::uint32_t>(m_ram.size())) {
+        m_ram[ramOffset(address)] = value;
+    }
+}
+
+void MacPlusMachine::writeRam16Direct(std::uint32_t address, std::uint16_t value)
+{
+    writeRam8Direct(address, highByte(value));
+    writeRam8Direct(address + 1, lowByte(value));
+}
+
+void MacPlusMachine::writeRam32Direct(std::uint32_t address, std::uint32_t value)
+{
+    writeRam16Direct(address, static_cast<std::uint16_t>(value >> 16));
+    writeRam16Direct(address + 2, static_cast<std::uint16_t>(value));
+}
+
+void MacPlusMachine::synchronizeMouseLowMemory()
+{
+    const auto packed = (static_cast<std::uint32_t>(static_cast<std::uint16_t>(m_mouseY)) << 16)
+        | static_cast<std::uint16_t>(m_mouseX);
+    writeRam32Direct(lowMemoryMTemp, packed);
+    writeRam32Direct(lowMemoryRawMouse, packed);
+    writeRam32Direct(lowMemoryMouse, packed);
+    writeRam8Direct(lowMemoryCrsrCouple, 0xff);
+    writeRam8Direct(lowMemoryCrsrNew, 0xff);
+    setMouseButton(m_mouseButtonPressed);
 }
 
 void MacPlusMachine::setOverlayEnabled(bool enabled)

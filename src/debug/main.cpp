@@ -469,6 +469,10 @@ private:
             handleRom(parts);
         } else if (command == QStringLiteral("disk")) {
             handleDisk(parts);
+        } else if (command == QStringLiteral("mouse")) {
+            handleMouse(parts);
+        } else if (command == QStringLiteral("key")) {
+            handleKey(parts);
         } else if (command == QStringLiteral("trace")) {
             configureTrace(parts);
         } else if (command == QStringLiteral("log")) {
@@ -527,7 +531,9 @@ private:
         m_out << "  screen hash | screen export <file.png>\n";
         m_out << "  sound hash | sound export <file.wav> | sound capture-hash | sound capture-export <file.wav> | sound clear-capture\n";
         m_out << "  profile [set <key> <value>|save] | load <profile.toml>\n";
-        m_out << "  disk insert <path> | disk eject\n";
+        m_out << "  disk insert <path> | disk eject | disk status\n";
+        m_out << "  mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
+        m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
         m_out << "  trace [category on|off] | log save <file.jsonl>\n";
         m_out << "  gdb [enable|disable|port N|start|stop|status]\n";
         m_out << "  script <file> | paths | quit\n";
@@ -569,6 +575,15 @@ private:
             reloadMachine();
         } else if (key == QStringLiteral("disk_path")) {
             m_configuration.diskPath = value;
+            if (!value.isEmpty()) {
+                if (m_machine->loadDiskImage(value)) {
+                    m_out << "disk loaded: " << displayPath(value) << '\n';
+                } else {
+                    m_out << "disk failed: " << displayPath(value) << '\n';
+                }
+            } else {
+                m_machine->ejectDiskImage();
+            }
         } else if (key == QStringLiteral("cycles_per_frame")) {
             m_configuration.cyclesPerFrame = value.toInt();
         } else if (key == QStringLiteral("ram_size_mib")) {
@@ -619,6 +634,13 @@ private:
         m_gdbStub->setPort(m_gdbPort);
 
         m_romLoaded = !m_configuration.romPath.isEmpty() && m_machine->loadRomFile(m_configuration.romPath);
+        if (!m_configuration.diskPath.isEmpty()) {
+            if (m_machine->loadDiskImage(m_configuration.diskPath)) {
+                m_out << "disk loaded: " << displayPath(m_configuration.diskPath) << '\n';
+            } else {
+                m_out << "disk failed: " << displayPath(m_configuration.diskPath) << '\n';
+            }
+        }
         if (m_romLoaded) {
             m_machine->reset();
             m_out << "machine reset: pc=" << hexValue(m_machine->programCounter()) << '\n';
@@ -853,6 +875,23 @@ private:
         }
         if (device.isEmpty() || device == QStringLiteral("scsi")) {
             m_out << "scsi_reads=" << summary.scsiReads << " scsi_writes=" << summary.scsiWrites << '\n';
+            const auto scsi = m_machine->scsiDebugState();
+            m_out << "scsi_disk=" << displayPath(m_machine->diskImagePath()) << '\n';
+            m_out << "scsi_phase=" << scsi.phase
+                  << " target=" << (scsi.activeTargetId == 0xff ? QStringLiteral("none") : QString::number(scsi.activeTargetId))
+                  << " selected=" << (scsi.selected ? "yes" : "no")
+                  << " req=" << (scsi.request ? "yes" : "no")
+                  << " ack=" << (scsi.ack ? "yes" : "no")
+                  << " command_ready=" << (scsi.commandReady ? "yes" : "no") << '\n';
+            m_out << "scsi_data index=" << scsi.dataIndex << '/' << scsi.dataLength
+                  << " out=" << scsi.dataOutLength << '/' << scsi.expectedDataOutLength
+                  << " completed=" << scsi.completedCommands << '\n';
+            m_out << "scsi_status=" << hexValue(scsi.status, 2)
+                  << " message=" << hexValue(scsi.message, 2)
+                  << " tcmd=" << hexValue(scsi.targetCommand, 2)
+                  << " output=" << hexValue(scsi.outputData, 2) << '\n';
+            m_out << "scsi_active_cdb=" << scsi.activeCommand.toHex(' ') << '\n';
+            m_out << "scsi_last_cdb=" << scsi.lastCommand.toHex(' ') << '\n';
         }
         if (device.isEmpty()) {
             for (const auto& event : m_machine->eventLog()) {
@@ -989,13 +1028,78 @@ private:
     {
         if (parts.size() >= 3 && parts[1] == QStringLiteral("insert")) {
             m_configuration.diskPath = parts[2];
-            m_out << "disk inserted: " << displayPath(m_configuration.diskPath) << '\n';
+            if (m_machine->loadDiskImage(m_configuration.diskPath)) {
+                m_out << "disk inserted: " << displayPath(m_configuration.diskPath) << '\n';
+            } else {
+                m_out << "disk insert failed: " << displayPath(m_configuration.diskPath) << '\n';
+            }
         } else if (parts.size() >= 2 && parts[1] == QStringLiteral("eject")) {
             m_configuration.diskPath.clear();
+            m_machine->ejectDiskImage();
             m_out << "disk ejected\n";
+        } else if (parts.size() >= 2 && parts[1] == QStringLiteral("status")) {
+            m_out << "disk=" << displayPath(m_machine->diskImagePath()) << '\n';
         } else {
-            m_out << "usage: disk insert <path> | disk eject\n";
+            m_out << "usage: disk insert <path> | disk eject | disk status\n";
         }
+    }
+
+    void handleMouse(const QStringList& parts)
+    {
+        if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
+            m_out << "mouse x=" << m_machine->mouseX()
+                  << " y=" << m_machine->mouseY()
+                  << " button=" << (m_machine->mouseButtonPressed() ? "down" : "up") << '\n';
+            return;
+        }
+        if (parts.size() >= 4 && parts[1] == QStringLiteral("move")) {
+            const auto x = parseNumber(parts[2]);
+            const auto y = parseNumber(parts[3]);
+            if (!x || !y) {
+                m_out << "invalid mouse coordinates\n";
+                return;
+            }
+            m_machine->setMousePosition(static_cast<std::int16_t>(*x), static_cast<std::int16_t>(*y));
+            handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
+            return;
+        }
+        if (parts.size() >= 4 && parts[1] == QStringLiteral("delta")) {
+            const auto dx = parts[2].toInt();
+            const auto dy = parts[3].toInt();
+            m_machine->moveMouse(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
+            handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
+            return;
+        }
+        if (parts.size() >= 2 && (parts[1] == QStringLiteral("down") || parts[1] == QStringLiteral("up"))) {
+            m_machine->setMouseButton(parts[1] == QStringLiteral("down"));
+            handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
+            return;
+        }
+        m_out << "usage: mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
+    }
+
+    void handleKey(const QStringList& parts)
+    {
+        if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
+            m_out << "keymap=" << bytesToHex(m_machine->keyMapBytes()) << '\n';
+            return;
+        }
+        if (parts.size() >= 2 && parts[1] == QStringLiteral("reset")) {
+            m_machine->resetKeyboard();
+            m_out << "keyboard reset\n";
+            return;
+        }
+        if (parts.size() >= 3 && (parts[1] == QStringLiteral("down") || parts[1] == QStringLiteral("up"))) {
+            const auto code = parseNumber(parts[2]);
+            if (!code || *code > 0x7f) {
+                m_out << "invalid Mac key code\n";
+                return;
+            }
+            m_machine->setKeyState(static_cast<std::uint8_t>(*code), parts[1] == QStringLiteral("down"));
+            handleKey({ QStringLiteral("key"), QStringLiteral("status") });
+            return;
+        }
+        m_out << "usage: key status | key down <mac-code> | key up <mac-code> | key reset\n";
     }
 
     void configureTrace(const QStringList& parts)

@@ -27,6 +27,7 @@ add_library(CuteMacCore
     src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
     src/devices/iwm/IwmController.cpp
+    src/devices/scsi/ScsiBlockDevice.cpp
     src/devices/scsi/ScsiBus.cpp
     src/devices/scsi/ncr5380/Ncr5380.cpp
     src/devices/scc/Z8530Scc.cpp

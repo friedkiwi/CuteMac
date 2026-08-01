@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <QByteArray>
 #include <QString>
 #include <QVector>
@@ -11,6 +12,7 @@
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/iwm/IwmController.h"
 #include "cutemac/devices/scc/Z8530Scc.h"
+#include "cutemac/devices/scsi/ScsiBlockDevice.h"
 #include "cutemac/devices/scsi/ncr5380/Ncr5380.h"
 #include "cutemac/devices/via6522/Via6522.h"
 
@@ -56,6 +58,8 @@ public:
     explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024);
 
     [[nodiscard]] bool loadRomFile(const QString& path);
+    [[nodiscard]] bool loadDiskImage(const QString& path);
+    void ejectDiskImage();
     void reset();
 
     [[nodiscard]] int runCycles(int cycles);
@@ -87,6 +91,18 @@ public:
     [[nodiscard]] std::uint32_t soundCaptureHash() const;
     void clearSoundCapture();
     [[nodiscard]] RomInfo romInfo() const;
+    [[nodiscard]] QString diskImagePath() const;
+    [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const;
+
+    void setMousePosition(std::int16_t x, std::int16_t y);
+    void moveMouse(std::int16_t dx, std::int16_t dy);
+    void setMouseButton(bool pressed);
+    void setKeyState(std::uint8_t macKeyCode, bool pressed);
+    void resetKeyboard();
+    [[nodiscard]] std::int16_t mouseX() const;
+    [[nodiscard]] std::int16_t mouseY() const;
+    [[nodiscard]] bool mouseButtonPressed() const;
+    [[nodiscard]] QByteArray keyMapBytes() const;
 
     [[nodiscard]] std::uint8_t read8(std::uint32_t address) override;
     [[nodiscard]] std::uint16_t read16(std::uint32_t address) override;
@@ -117,6 +133,12 @@ private:
 
     void incrementLowMemoryTicks();
     [[nodiscard]] std::uint32_t readRam32Direct(std::uint32_t address) const;
+    [[nodiscard]] std::uint8_t readRam8Direct(std::uint32_t address) const;
+    [[nodiscard]] std::uint16_t readRam16Direct(std::uint32_t address) const;
+    void writeRam8Direct(std::uint32_t address, std::uint8_t value);
+    void writeRam16Direct(std::uint32_t address, std::uint16_t value);
+    void writeRam32Direct(std::uint32_t address, std::uint32_t value);
+    void synchronizeMouseLowMemory();
 
     void setOverlayEnabled(bool enabled);
     void logEvent(const QString& message);
@@ -134,9 +156,14 @@ private:
     devices::scc::Z8530Scc m_scc;
     devices::iwm::IwmController m_iwm;
     devices::scsi::ncr5380::Ncr5380 m_scsi;
+    std::shared_ptr<devices::scsi::ScsiBlockDevice> m_scsiDisk;
 
     bool m_romLoaded = false;
     QString m_romPath;
+    QString m_diskImagePath;
+    std::int16_t m_mouseX = 15;
+    std::int16_t m_mouseY = 15;
+    bool m_mouseButtonPressed = false;
     bool m_overlayEnabled = true;
     AccessSummary m_accessSummary;
     QVector<QString> m_eventLog;

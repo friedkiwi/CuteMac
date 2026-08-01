@@ -12,7 +12,7 @@ constexpr std::uint8_t interruptEnable = 14;
 constexpr std::uint8_t registerA = 15;
 
 constexpr std::uint8_t initialPortA = 0x7b;
-constexpr std::uint8_t initialPortB = 0x87;
+constexpr std::uint8_t initialPortB = 0x8f;
 constexpr std::uint8_t initialDdrA = 0x7f;
 constexpr std::uint8_t initialDdrB = 0x87;
 constexpr std::uint8_t overlayBit = 0x10;
@@ -79,6 +79,20 @@ std::uint8_t Via6522::portA() const
 std::uint8_t Via6522::portB() const
 {
     return m_registers[registerB];
+}
+
+void Via6522::setPortBInputBit(std::uint8_t bit, bool high)
+{
+    if (bit >= 8) {
+        return;
+    }
+
+    const auto mask = static_cast<std::uint8_t>(1U << bit);
+    if (high) {
+        m_registers[registerB] |= mask;
+    } else {
+        m_registers[registerB] &= static_cast<std::uint8_t>(~mask);
+    }
 }
 
 bool Via6522::overlayEnabled() const
