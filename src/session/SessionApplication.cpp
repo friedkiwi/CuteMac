@@ -6,6 +6,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QFocusEvent>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QKeyEvent>
@@ -24,11 +25,13 @@
 #include <QToolButton>
 #include <QMessageBox>
 #include <QStyle>
+#include <QSet>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <functional>
 #include <algorithm>
+#include <utility>
 
 #include "cutemac/config/Configuration.h"
 #include "cutemac/core/EmulationSession.h"
@@ -124,6 +127,8 @@ public:
             m_keyCallback(0x36, false);
             m_keyCallback(0x3a, false);
         }
+        m_pressedMacKeys.remove(0x36);
+        m_pressedMacKeys.remove(0x3a);
         update();
     }
 
@@ -180,6 +185,15 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override
     {
         sendKeyEvent(event, false);
+    }
+
+    void focusOutEvent(QFocusEvent* event) override
+    {
+        if (m_keyCallback) {
+            for (const auto keyCode : std::as_const(m_pressedMacKeys)) m_keyCallback(keyCode, false);
+        }
+        m_pressedMacKeys.clear();
+        QWidget::focusOutEvent(event);
     }
 
 private:
@@ -276,6 +290,11 @@ private:
         }
         const auto code = cutemac::session::HostInputMapper::macKeyCode(*event);
         if (code >= 0) {
+            if (pressed == m_pressedMacKeys.contains(code)) {
+                event->accept();
+                return;
+            }
+            if (pressed) m_pressedMacKeys.insert(code); else m_pressedMacKeys.remove(code);
             m_keyCallback(code, pressed);
             event->accept();
         }
@@ -358,6 +377,7 @@ private:
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
     std::function<void(int, bool)> m_keyCallback;
+    QSet<int> m_pressedMacKeys;
 };
 
 class EmulatorWindow final : public QMainWindow {

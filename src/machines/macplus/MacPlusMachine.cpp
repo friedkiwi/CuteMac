@@ -33,7 +33,7 @@ constexpr std::uint32_t lowMemoryCrsrCouple = 0x0008cf;
 constexpr std::uint32_t screenBytes = 512 * 342 / 8;
 constexpr std::uint32_t soundBase4MiB = 0x3ffd00;
 constexpr std::uint32_t soundBytes = 370;
-constexpr std::uint64_t inputDebounceCycles = 4 * 130560;
+constexpr std::uint64_t inputDebounceCycles = 130560;
 constexpr qsizetype maxBusTraceEntries = 4096;
 constexpr qsizetype maxSoundCaptureBytes = 22255 * 30;
 
