@@ -42,7 +42,7 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
                 (void)machine->installNuBusCard(device.slot, card);
             } else {
                 (void)machine->installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
-                    device.width, device.height, device.depth, device.vramMiB, device.acceleration));
+                    device.width, device.height, device.depth, device.vramMiB, device.acceleration, device.absolutePointer));
             }
         }
         return machine;

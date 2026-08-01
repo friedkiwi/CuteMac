@@ -202,6 +202,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                         static_cast<int>((*device)["depth"].value_or<std::int64_t>(8)),
                         static_cast<int>((*device)["vram_mib"].value_or<std::int64_t>(4)),
                         (*device)["acceleration"].value_or(true),
+                        (*device)["absolute_pointer"].value_or(true),
                     });
                 }
             }
@@ -268,6 +269,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             { "depth", device.depth },
             { "vram_mib", device.vramMiB },
             { "acceleration", device.acceleration },
+            { "absolute_pointer", device.absolutePointer },
         });
     }
 

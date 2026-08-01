@@ -78,6 +78,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     QComboBox* depth = nullptr;
     QSpinBox* vram = nullptr;
     QCheckBox* acceleration = nullptr;
+    QCheckBox* absolutePointer = nullptr;
 
     if (device.type == config::NuBusDeviceType::CuteMacVideo) {
         width = new QSpinBox;
@@ -100,6 +101,9 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         acceleration = new QCheckBox;
         acceleration->setChecked(device.acceleration);
         form->addRow(QStringLiteral("Acceleration"), acceleration);
+        absolutePointer = new QCheckBox;
+        absolutePointer->setChecked(device.absolutePointer);
+        form->addRow(QStringLiteral("Absolute pointer integration"), absolutePointer);
     }
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -116,6 +120,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         device.vramMiB = vram->value();
         device.acceleration = acceleration->isChecked();
         device.declarationRomPath.clear();
+        device.absolutePointer = absolutePointer->isChecked();
     }
     return true;
 }

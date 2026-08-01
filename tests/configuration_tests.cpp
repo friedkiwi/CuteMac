@@ -33,7 +33,7 @@ int main()
     configuration.runtimeSpeed = cutemac::config::RuntimeSpeed::Unlimited;
     configuration.iwmDevices.append({ QStringLiteral("/tmp/system.dsk"), true });
     configuration.scsiDevices.append({ 4, cutemac::config::ScsiDeviceType::HardDisk, QStringLiteral("/tmp/disk.hda"), false });
-    configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4, true });
+    configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4, true, false });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 1, false });
     configuration.skipRamPatternTest = true;
 
@@ -50,6 +50,7 @@ int main()
         ok &= expect(loaded->iwmDevices.size() == 1 && loaded->iwmDevices.first().readOnly, "IWM device did not round-trip");
         ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
         ok &= expect(loaded->nubusDevices.size() == 2 && loaded->nubusDevices.first().width == 832
+                && !loaded->nubusDevices.first().absolutePointer
                 && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
             "NuBus devices did not round-trip");
         ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("macplus.skip_ram_pattern_test") },
