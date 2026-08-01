@@ -24,7 +24,7 @@ int main(int argc, char* argv[])
     }
 
     const auto romPath = QString::fromLocal8Bit(argv[1]);
-    const auto cycles = argc >= 3 ? QString::fromLocal8Bit(argv[2]).toInt() : 200000;
+    const auto cycles = argc >= 3 ? QString::fromLocal8Bit(argv[2]).toInt() : 130560;
 
     cutemac::machines::macplus::MacPlusMachine machine;
     if (!machine.loadRomFile(romPath)) {

@@ -15,7 +15,7 @@ public:
     QString diskPath;
     QString floppyPath;
     int ramSizeMiB = 4;
-    int cyclesPerFrame = 200000;
+    int cyclesPerFrame = 130560;
 };
 
 class ConfigurationManager {

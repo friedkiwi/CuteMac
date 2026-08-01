@@ -89,7 +89,7 @@ Configuration ConfigurationManager::defaultMacPlusConfiguration()
     configuration.profileName = QStringLiteral("Mac Plus");
     configuration.machineId = QStringLiteral("mac-plus");
     configuration.ramSizeMiB = 4;
-    configuration.cyclesPerFrame = 200000;
+    configuration.cyclesPerFrame = 130560;
     return configuration;
 }
 

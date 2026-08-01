@@ -21,6 +21,7 @@
 #include <QWidget>
 
 #include <functional>
+#include <algorithm>
 
 #include "cutemac/config/Configuration.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
@@ -38,6 +39,7 @@ public:
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
+        setAttribute(Qt::WA_OpaquePaintEvent, true);
     }
 
     void setRunning(bool running)
@@ -52,12 +54,24 @@ public:
             return;
         }
 
+        constexpr QRgb black = 0xff000000;
+        constexpr QRgb white = 0xffffffff;
+        const auto bytesPerRow = m_image.width() / 8;
+
         for (int y = 0; y < m_image.height(); ++y) {
-            for (int x = 0; x < m_image.width(); ++x) {
-                const auto byte = static_cast<std::uint8_t>(bytes[(y * m_image.width() + x) / 8]);
-                const auto bit = 7 - (x & 7);
-                const auto on = ((byte >> bit) & 1) != 0;
-                m_image.setPixelColor(x, y, on ? Qt::black : Qt::white);
+            auto* line = reinterpret_cast<QRgb*>(m_image.scanLine(y));
+            const auto rowOffset = y * bytesPerRow;
+            for (int byteIndex = 0; byteIndex < bytesPerRow; ++byteIndex) {
+                const auto byte = static_cast<std::uint8_t>(bytes[rowOffset + byteIndex]);
+                const auto pixelOffset = byteIndex * 8;
+                line[pixelOffset + 0] = ((byte & 0x80) != 0) ? black : white;
+                line[pixelOffset + 1] = ((byte & 0x40) != 0) ? black : white;
+                line[pixelOffset + 2] = ((byte & 0x20) != 0) ? black : white;
+                line[pixelOffset + 3] = ((byte & 0x10) != 0) ? black : white;
+                line[pixelOffset + 4] = ((byte & 0x08) != 0) ? black : white;
+                line[pixelOffset + 5] = ((byte & 0x04) != 0) ? black : white;
+                line[pixelOffset + 6] = ((byte & 0x02) != 0) ? black : white;
+                line[pixelOffset + 7] = ((byte & 0x01) != 0) ? black : white;
             }
         }
         update();
@@ -313,6 +327,7 @@ public:
         buildMenus();
         buildStatusBar();
 
+        m_frameTimer.setTimerType(Qt::PreciseTimer);
         m_frameTimer.setInterval(16);
         connect(&m_frameTimer, &QTimer::timeout, this, [this]() { runFrame(); });
 
