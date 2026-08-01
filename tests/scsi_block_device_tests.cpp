@@ -23,16 +23,18 @@ public:
     {
         lastCdb = cdb;
         lastDataOut = dataOut;
-        return {};
+        return { responseData };
     }
 
     QByteArray lastCdb;
     QByteArray lastDataOut;
+    QByteArray responseData;
 };
 
 void sendByte(cutemac::devices::scsi::ncr5380::Ncr5380& controller, std::uint8_t value, bool dataOut)
 {
     controller.writeRegister(0, dataOut, value);
+    if (dataOut) return;
     controller.writeRegister(1, false, 0x11);
     controller.writeRegister(1, false, 0x01);
 }
@@ -147,5 +149,22 @@ int main()
     for (const auto byte : QByteArray::fromHex("1234")) sendByte(controller, static_cast<std::uint8_t>(byte), true);
     ok &= expect(controller.debugState().phase == QStringLiteral("status"), "FORMAT UNIT did not finish after its defect list");
     ok &= expect(target->lastDataOut == QByteArray::fromHex("000000021234"), "FORMAT UNIT parameter data was not delivered");
+
+    target->responseData = QByteArray(36, static_cast<char>(0x5a));
+    controller.reset();
+    controller.writeRegister(0, false, 0x01);
+    controller.writeRegister(1, false, 0x04);
+    controller.writeRegister(1, false, 0x00);
+    for (const auto byte : QByteArray::fromHex("120000002400")) sendByte(controller, static_cast<std::uint8_t>(byte), false);
+    QByteArray pseudoDmaInquiry;
+    pseudoDmaInquiry.append(static_cast<char>(controller.readRegister(6, true)));
+    ok &= expect(!controller.debugState().request && (controller.readRegister(4, false) & 0x20) == 0
+            && controller.debugState().request,
+        "pseudo-DMA DATA IN must expose a REQ release before the next byte");
+    for (int byte = 1; byte < 36; ++byte) pseudoDmaInquiry.append(static_cast<char>(controller.readRegister(6, true)));
+    ok &= expect(pseudoDmaInquiry == target->responseData,
+        "pseudo-DMA DATA IN must transfer every INQUIRY byte");
+    ok &= expect(controller.debugState().phase == QStringLiteral("status"),
+        "pseudo-DMA DATA IN must complete its handshake and enter STATUS");
     return ok ? 0 : 1;
 }

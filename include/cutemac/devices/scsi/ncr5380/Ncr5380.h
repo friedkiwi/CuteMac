@@ -58,8 +58,8 @@ private:
     void finishDataPhaseIfDone();
     [[nodiscard]] std::uint8_t readDataByte();
     void writeDataByte(std::uint8_t value);
-    [[nodiscard]] std::uint8_t currentBusStatus() const;
-    [[nodiscard]] std::uint8_t busAndStatus() const;
+    [[nodiscard]] std::uint8_t currentBusStatus();
+    [[nodiscard]] std::uint8_t busAndStatus();
     [[nodiscard]] std::uint8_t phaseBits() const;
     [[nodiscard]] bool phaseMatchesTargetCommand() const;
     [[nodiscard]] qsizetype expectedCommandLength(std::uint8_t opcode) const;
@@ -83,6 +83,7 @@ private:
     std::uint64_t m_completedCommands = 0;
     bool m_selected = false;
     bool m_request = false;
+    bool m_requestReassertPending = false;
     bool m_previousAck = false;
     bool m_commandReady = false;
     QByteArray m_lastCommand;

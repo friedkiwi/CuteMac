@@ -52,6 +52,7 @@ void Ncr5380::reset()
     m_completedCommands = 0;
     m_selected = false;
     m_request = false;
+    m_requestReassertPending = false;
     m_previousAck = false;
     m_commandReady = false;
     m_lastCommand.clear();
@@ -82,7 +83,17 @@ std::uint8_t Ncr5380::readRegister(std::uint8_t registerIndex, bool dack)
 {
     registerIndex &= 0x07;
     if (dack) {
-        return readDataByte();
+        if (m_requestReassertPending) {
+            m_request = true;
+            m_requestReassertPending = false;
+        }
+        const auto value = readDataByte();
+        if (m_phase == Phase::DataIn && m_request) {
+            m_request = false;
+            if (m_dataIndex >= m_dataBuffer.size()) setPhase(Phase::Status);
+            else m_requestReassertPending = true;
+        }
+        return value;
     }
 
     switch (registerIndex) {
@@ -110,7 +121,16 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
 {
     registerIndex &= 0x07;
     if (dack) {
+        if (m_requestReassertPending) {
+            m_request = true;
+            m_requestReassertPending = false;
+        }
         writeDataByte(value);
+        if (m_phase == Phase::DataOut && m_request) {
+            m_request = false;
+            finishDataPhaseIfDone();
+            if (m_phase == Phase::DataOut) m_requestReassertPending = true;
+        }
         return;
     }
 
@@ -207,6 +227,7 @@ void Ncr5380::setPhase(Phase phase, bool request)
 {
     m_phase = phase;
     m_request = request;
+    m_requestReassertPending = false;
     if (phase == Phase::BusFree) {
         m_selected = false;
         m_activeTarget.reset();
@@ -341,7 +362,7 @@ void Ncr5380::writeDataByte(std::uint8_t value)
     m_dataOut.append(static_cast<char>(value));
 }
 
-std::uint8_t Ncr5380::currentBusStatus() const
+std::uint8_t Ncr5380::currentBusStatus()
 {
     std::uint8_t status = phaseBits();
     if (m_selected) {
@@ -350,10 +371,14 @@ std::uint8_t Ncr5380::currentBusStatus() const
     if (m_request) {
         status |= csrReq;
     }
+    if (m_requestReassertPending) {
+        m_request = true;
+        m_requestReassertPending = false;
+    }
     return status;
 }
 
-std::uint8_t Ncr5380::busAndStatus() const
+std::uint8_t Ncr5380::busAndStatus()
 {
     std::uint8_t status = phaseMatchesTargetCommand() ? bsrPhaseMatch : 0;
     if (m_request) {
@@ -364,6 +389,10 @@ std::uint8_t Ncr5380::busAndStatus() const
     }
     if (m_previousAck) {
         status |= bsrAck;
+    }
+    if (m_requestReassertPending) {
+        m_request = true;
+        m_requestReassertPending = false;
     }
     return status;
 }

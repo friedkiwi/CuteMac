@@ -19,6 +19,12 @@ constexpr int viaVblPeriod = 13030;
 
 std::uint8_t highByte(std::uint16_t value) { return static_cast<std::uint8_t>(value >> 8); }
 std::uint8_t lowByte(std::uint16_t value) { return static_cast<std::uint8_t>(value); }
+bool isScsiDma(std::uint32_t address)
+{
+    if ((address & ~ioMirrorMask & 0xfff00000U) != ioBase) return false;
+    const auto offset = address & ioOffsetMask;
+    return (offset >= 0x6000 && offset < 0x8000) || (offset >= 0x12000 && offset < 0x14000);
+}
 
 } // namespace
 
@@ -239,6 +245,9 @@ std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
 
 std::uint16_t MacIIcxMachine::read16(std::uint32_t address)
 {
+    if (isScsiDma(address)) {
+        return static_cast<std::uint16_t>((readIo8(address) << 8) | readIo8(address + 1));
+    }
     if (isIo(address)) {
         const auto value = readIo8(address);
         return static_cast<std::uint16_t>((value << 8) | value);
@@ -336,6 +345,11 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
 
 void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
 {
+    if (isScsiDma(address)) {
+        writeIo8(address, highByte(value));
+        writeIo8(address + 1, lowByte(value));
+        return;
+    }
     if (isIo(address)) {
         writeIo8(address, highByte(value));
         return;
