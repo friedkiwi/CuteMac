@@ -26,6 +26,8 @@ int main()
     CuteMacVideoCard virtualCard(832, 624, 8, 4, true);
     ok &= expect(virtualCard.declarationRom().size() == 4096, "CuteMac declaration ROM size");
     ok &= expect(virtualCard.declarationRom().mid(4090, 4).toHex() == QByteArray("5a932bc7"), "CuteMac declaration ROM test pattern");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc00800002")),
+        "CuteMac declaration ROM driver must expose palette operations");
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
         "CuteMac video must reset to one-bit indexed mode");
     ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
@@ -33,6 +35,19 @@ int main()
     virtualCard.write8(0x00800000, 3);
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must select eight-bit indexed mode");
+    virtualCard.write8(0x00800000, 4);
+    ok &= expect(virtualCard.videoFrame().bitsPerPixel == 8,
+        "CuteMac mode register must reject depths above the configured maximum");
+    virtualCard.write8(0x00800002, 0x2a);
+    virtualCard.write8(0x00800003, 0x12);
+    virtualCard.write8(0x00800004, 0x34);
+    virtualCard.write8(0x00800005, 0x56);
+    ok &= expect(virtualCard.videoFrame().colorTable[0x2a] == 0xff123456U,
+        "CuteMac RAMDAC must publish guest-programmed indexed color");
+    virtualCard.write8(0x00800002, 0x2a);
+    ok &= expect(virtualCard.read8(0x00800003) == 0x12 && virtualCard.read8(0x00800004) == 0x34
+            && virtualCard.read8(0x00800005) == 0x56,
+        "CuteMac RAMDAC palette entries must be readable by GetEntries");
 
     QTemporaryDir directory;
     const auto romPath = directory.filePath(QStringLiteral("342-0008-a.bin"));

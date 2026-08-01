@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 
 #include <QByteArray>
 
@@ -21,7 +22,7 @@ public:
     [[nodiscard]] const QByteArray& declarationRom() const { return m_declarationRom; }
 
 private:
-    [[nodiscard]] static QByteArray buildDeclarationRom(int width, int height, int vramBytes);
+    [[nodiscard]] static QByteArray buildDeclarationRom(int width, int height, int vramBytes, int maximumDepth);
     [[nodiscard]] int strideBytes() const;
     [[nodiscard]] ChannelLayout channelLayout() const;
     void initializePalette();
@@ -29,10 +30,13 @@ private:
     int m_width;
     int m_height;
     int m_depth;
+    int m_maximumDepth;
     bool m_acceleration;
     QByteArray m_vram;
     QByteArray m_declarationRom;
     QVector<std::uint32_t> m_palette;
+    int m_paletteAddress = 0;
+    std::array<std::uint8_t, 3> m_paletteLatch {};
     bool m_vblEnabled = false;
     std::uint64_t m_vblCycles = 0;
 };
