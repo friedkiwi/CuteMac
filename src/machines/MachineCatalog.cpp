@@ -13,8 +13,8 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
             { QStringLiteral("device.video") },
         },
         {
-            QStringLiteral("mac-se30"),
-            QStringLiteral("Macintosh SE/30"),
+            QStringLiteral("mac-iicx"),
+            QStringLiteral("Macintosh IIcx"),
             CpuFamily::M68k,
             QStringLiteral("68030"),
             {

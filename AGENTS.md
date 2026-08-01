@@ -5,7 +5,7 @@
 - Build CuteMac as a modular classic Macintosh emulator using Qt 6 and CMake.
 - Keep WebAssembly support in mind for all design choices; avoid platform-specific assumptions unless isolated behind small adapters.
 - Primary development happens on WSL2, with intended targets of Windows, macOS on Intel/aarch64, Linux, and wasm.
-- Target machines are 68000-era Macs, Macintosh SE/30, Macintosh Quadra 800, and Power Macintosh 6100.
+- Target machines are 68000-era Macs, Macintosh IIcx, Macintosh Quadra 800, and Power Macintosh 6100.
 - Support original, unmodified ROM files supplied by users. Do not embed copyrighted ROM content.
 - Configuration files should use TOML syntax and should evolve toward a WinUAE/VMware Workstation style configuration workflow.
 
