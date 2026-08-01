@@ -65,6 +65,21 @@ set_target_properties(CuteMac PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
+add_executable(CuteMacSession
+    src/session/main.cpp
+)
+
+target_link_libraries(CuteMacSession
+    PRIVATE
+        CuteMacCore
+        Qt6::Widgets
+)
+
+set_target_properties(CuteMacSession PROPERTIES
+    WIN32_EXECUTABLE TRUE
+    MACOSX_BUNDLE TRUE
+)
+
 add_executable(CuteMacMacPlusSmoke
     tools/macplus_smoke.cpp
 )

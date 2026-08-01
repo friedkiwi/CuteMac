@@ -25,7 +25,15 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-The current executable is only a Qt 6 stub used to verify project structure and toolchain setup.
+The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, and `CuteMacMacPlusSmoke` for headless ROM verification.
+
+## Run
+
+```sh
+./build/CuteMac
+```
+
+`CuteMac` opens the profile manager. It stores TOML profiles in Qt's per-user app config location and uses Qt's per-user app data location for default ROM and disk-image folders. Starting a profile launches `CuteMacSession`, the individual emulator window.
 
 Mac Plus ROM smoke test:
 
