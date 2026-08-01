@@ -7,6 +7,7 @@
 - Primary development happens on WSL2, with intended targets of Windows, macOS on Intel/aarch64, Linux, and wasm.
 - Target machines are 68000-era Macs, Macintosh IIcx, Macintosh Quadra 800, and Power Macintosh 8100/80.
 - The Power Macintosh target is the launch-model 8100/80. It shares the 4 MiB `9FEB69B3` ROM with the 6100/60 and 7100/66, but must model the 8100's own memory topology, three native NuBus slots, BART controller configuration, PDS/video configuration, interrupts, and 80 MHz PowerPC 601 with a 40 MHz bus.
+- Implement the PowerPC 601 core as a single portable interpreter. Do not add a backend abstraction, JIT interface, optimized-backend hooks, or speculative dual-engine design; improve the interpreter itself in response to profiling, and revisit the architecture only if measured performance requires it.
 - Support original, unmodified ROM files supplied by users. Do not embed copyrighted ROM content.
 - Configuration files should use TOML syntax and should evolve toward a WinUAE/VMware Workstation style configuration workflow.
 - Parse and serialize profiles with toml++; do not add ad hoc TOML parsing.
