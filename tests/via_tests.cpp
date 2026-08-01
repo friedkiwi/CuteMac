@@ -69,5 +69,25 @@ int main()
     via.tick(80);
     ok &= expect(via.readRegister(10) == 0x80, "A key-up must set the transition bit");
 
+    via.writeRegister(14, 0xc0); // Enable Timer 1 interrupts.
+    via.writeRegister(4, 0x02);
+    via.writeRegister(5, 0x00);
+    via.tick(2);
+    ok &= expect((via.readRegister(13) & 0x40) != 0, "Timer 1 expiry must set IFR6");
+    ok &= expect(via.interruptActive(), "an enabled Timer 1 flag must assert IRQ");
+    (void)via.readRegister(4);
+    ok &= expect((via.readRegister(13) & 0x40) == 0, "reading T1C-L must acknowledge Timer 1");
+    ok &= expect(!via.interruptActive(), "acknowledging Timer 1 must release IRQ");
+
+    via.writeRegister(14, 0xa0); // Enable Timer 2 interrupts.
+    via.writeRegister(8, 0x02);
+    via.writeRegister(9, 0x00);
+    via.tick(2);
+    ok &= expect((via.readRegister(13) & 0x20) != 0, "Timer 2 expiry must set IFR5");
+    ok &= expect(via.interruptActive(), "an enabled Timer 2 flag must assert IRQ");
+    (void)via.readRegister(8);
+    ok &= expect((via.readRegister(13) & 0x20) == 0, "reading T2C-L must acknowledge Timer 2");
+    ok &= expect(!via.interruptActive(), "acknowledging Timer 2 must release IRQ");
+
     return ok ? 0 : 1;
 }

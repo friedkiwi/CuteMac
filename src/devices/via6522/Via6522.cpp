@@ -75,6 +75,14 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
         }
         return value;
     }
+    if (index == timer1CounterLow) {
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer1InterruptBit);
+        return m_registers[index];
+    }
+    if (index == timer2CounterLow) {
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer2InterruptBit);
+        return m_registers[index];
+    }
     if (index == interruptFlag) {
         return interruptFlagRegister();
     }
