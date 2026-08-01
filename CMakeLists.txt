@@ -262,4 +262,8 @@ if(BUILD_TESTING)
     )
     target_link_libraries(CuteMacFramebufferRendererTests PRIVATE CuteMacCore Qt6::Gui)
     add_test(NAME framebuffer-renderer COMMAND CuteMacFramebufferRendererTests)
+
+    add_executable(CuteMacPpc601Tests tests/ppc601_tests.cpp)
+    target_link_libraries(CuteMacPpc601Tests PRIVATE CuteMacCore)
+    add_test(NAME ppc601-core COMMAND CuteMacPpc601Tests)
 endif()
