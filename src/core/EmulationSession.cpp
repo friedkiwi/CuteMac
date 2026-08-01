@@ -4,6 +4,7 @@
 
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
@@ -45,6 +46,10 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
             }
         }
         return machine;
+    }
+    if (configuration.machineId == QStringLiteral("powermac-8100")) {
+        return std::make_unique<machines::powermac8100::PowerMac8100Machine>(
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024U);
     }
     return {};
 }

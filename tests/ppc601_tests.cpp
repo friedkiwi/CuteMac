@@ -209,9 +209,16 @@ void testPrivilegedStateAndPreciseFaults()
 
     Fixture fault;
     s = fault.cpu.registers(); s.gpr[3] = 0x101; fault.cpu.setRegisters(s);
-    fault.instruction(0x100, d(32, 4, 3, 0));       // misaligned lwz
+    fault.instruction(0x100, x(4, 3, 0, 20));       // misaligned lwarx
     (void)fault.cpu.stepInstruction(); s = fault.cpu.registers();
     require(s.pc == 0x600 && s.srr0 == 0x100 && s.dar == 0x101, "precise alignment exception");
+
+    Fixture unaligned;
+    s = unaligned.cpu.registers(); s.gpr[3] = 0x401; s.gpr[4] = 0x11223344U; unaligned.cpu.setRegisters(s);
+    unaligned.instruction(0x100, d(36, 4, 3, 0));
+    unaligned.instruction(0x104, d(32, 5, 3, 0));
+    (void)unaligned.cpu.stepInstruction(); (void)unaligned.cpu.stepInstruction();
+    require(unaligned.cpu.registers().gpr[5] == 0x11223344U, "big-endian unaligned integer access");
 }
 
 std::uint64_t doubleBits(double value)

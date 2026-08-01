@@ -16,7 +16,8 @@ std::uint8_t Z8530Scc::readControl(Channel channel)
     const auto selectedRegister = channelState.selectedRegister;
     channelState.selectedRegister = 0;
 
-    if (selectedRegister == 0) return channelState.transmitCycles == 0 ? 0x04 : 0x00;
+    if (selectedRegister == 0) return static_cast<std::uint8_t>((channelState.transmitCycles == 0 ? 0x04 : 0x00)
+        | (channelState.receiveDataAvailable ? 0x01 : 0x00));
     if (selectedRegister == 3 && channel == Channel::A) {
         return static_cast<std::uint8_t>((m_channelA.transmitInterruptPending ? 0x10 : 0)
             | (m_channelB.transmitInterruptPending ? 0x02 : 0));
@@ -25,9 +26,11 @@ std::uint8_t Z8530Scc::readControl(Channel channel)
     return 0;
 }
 
-std::uint8_t Z8530Scc::readData(Channel channel) const
+std::uint8_t Z8530Scc::readData(Channel channel)
 {
-    return state(channel).data;
+    auto& channelState = state(channel);
+    channelState.receiveDataAvailable = false;
+    return channelState.data;
 }
 
 void Z8530Scc::writeControl(Channel channel, std::uint8_t value)
@@ -52,6 +55,7 @@ void Z8530Scc::writeData(Channel channel, std::uint8_t value)
     channelState.data = value;
     channelState.transmitCycles = 16;
     channelState.transmitInterruptPending = false;
+    if (channelState.writeRegisters[14] & 0x10U) channelState.receiveDataAvailable = true;
 }
 
 void Z8530Scc::tick(int cycles)

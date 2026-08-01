@@ -342,7 +342,7 @@ std::optional<std::uint32_t> PowerPc601Core::translateForDebug(
 
 std::optional<std::uint32_t> PowerPc601Core::read(std::uint32_t address, unsigned size, AccessType access)
 {
-    if ((address & (size - 1U)) != 0) {
+    if (access == AccessType::Instruction && (address & (size - 1U)) != 0) {
         m_state.dar = address;
         m_state.dsisr = 0;
         enterException(Exception::Alignment, access == AccessType::Instruction ? address : m_instructionPc);
@@ -360,12 +360,6 @@ std::optional<std::uint32_t> PowerPc601Core::read(std::uint32_t address, unsigne
 
 bool PowerPc601Core::write(std::uint32_t address, std::uint32_t value, unsigned size)
 {
-    if ((address & (size - 1U)) != 0) {
-        m_state.dar = address;
-        m_state.dsisr = 0x02000000U;
-        enterException(Exception::Alignment, m_instructionPc);
-        return false;
-    }
     const auto translated = translate(address, AccessType::Write, true);
     if (!translated)
         return false;
@@ -705,7 +699,9 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     case 11: finish(rt(op), static_cast<std::uint32_t>((static_cast<std::uint64_t>(a) * b) >> 32)); return 3; // mulhwu
     case 19: finish(rt(op), m_state.cr); return 1; // mfcr
     case 20: { // lwarx
-        const auto ea = eaX(); const auto value = read(ea, 4, AccessType::Read);
+        const auto ea = eaX();
+        if (ea & 3U) { m_state.dar = ea; m_state.dsisr = 0; enterException(Exception::Alignment, instructionPc); return 1; }
+        const auto value = read(ea, 4, AccessType::Read);
         if (value) { m_state.gpr[rt(op)] = *value; m_state.reservationAddress = ea & ~31U; m_state.reservationValid = true; }
         return 2;
     }
@@ -723,6 +719,8 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     case 26: finish(ra(op), a == 0 ? 32U : static_cast<std::uint32_t>(__builtin_clz(a))); return 1;
     case 28: finish(ra(op), m_state.gpr[rt(op)] & b); return 1;
     case 29: finish(ra(op), mask32(m_state.gpr[rt(op)] & 31U, b & 31U)); return 1; // maskg
+    case 54: case 86: case 246: case 278: case 982:
+        return 1; // dcbst/dcbf/dcbtst/dcbt/icbi: coherent portable interpreter
     case 40: case 552: { const auto result = b - a; setOverflow(((a ^ b) & (b ^ result) & 0x80000000U) != 0); finish(rt(op), result); return 1; }
     case 60: finish(ra(op), m_state.gpr[rt(op)] & ~b); return 1;
     case 75: finish(rt(op), static_cast<std::uint32_t>((static_cast<std::int64_t>(static_cast<std::int32_t>(a)) * static_cast<std::int32_t>(b)) >> 32)); return 3;
@@ -749,6 +747,7 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     case 150: { // stwcx.
         const auto ea = eaX(); const bool valid = m_state.reservationValid && m_state.reservationAddress == (ea & ~31U);
         m_state.reservationValid = false;
+        if (ea & 3U) { m_state.dar = ea; m_state.dsisr = 0x02000000U; enterException(Exception::Alignment, instructionPc); return 1; }
         const bool stored = valid && write(ea, m_state.gpr[rt(op)], 4);
         updateCrField(0, static_cast<std::uint8_t>((stored ? 2 : 0) | ((m_state.xer & xerSo) ? 1 : 0)));
         return 2;
@@ -775,6 +774,9 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     case 264: case 776: { const auto difference = static_cast<std::int64_t>(static_cast<std::int32_t>(b)) - static_cast<std::int32_t>(a); const auto result = difference > 0 ? static_cast<std::uint32_t>(difference) : 0U; setOverflow(difference > INT32_MAX); finish(rt(op), result); return 1; }
     case 266: case 778: { const auto result = a + b; setOverflow(signedOverflowAdd(a, b, result)); finish(rt(op), result); return 1; }
     case 284: finish(ra(op), ~(m_state.gpr[rt(op)] ^ b)); return 1;
+    case 306: // 601 tlbi: interpreter has no cached TLB entries
+        if (m_state.msr & msrPr) programException(instructionPc, programPrivileged);
+        return 1;
     case 316: finish(ra(op), m_state.gpr[rt(op)] ^ b); return 1;
     case 339: { // mfspr
         const auto spr = decodedSpr(op);
@@ -787,6 +789,9 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     }
     case 412: finish(ra(op), m_state.gpr[rt(op)] | ~b); return 1;
     case 444: finish(ra(op), m_state.gpr[rt(op)] | b); return 1;
+    case 470: // dcbi
+        if (m_state.msr & msrPr) programException(instructionPc, programPrivileged);
+        return 1;
     case 459: case 971: { const bool invalid = b == 0; const auto result = invalid ? 0U : a / b; setOverflow(invalid); finish(rt(op), result); return 20; }
     case 467: { // mtspr
         if (m_state.msr & msrPr) { programException(instructionPc, programPrivileged); return 1; }

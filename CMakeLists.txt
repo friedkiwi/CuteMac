@@ -50,6 +50,7 @@ add_library(CuteMacCore
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
     src/machines/maciicx/MacIIcxMachine.cpp
+    src/machines/powermac8100/PowerMac8100Machine.cpp
     src/rom/RomPatcher.cpp
     src/rom/RomCatalog.cpp
     src/storage/DiskImageManager.cpp
@@ -174,6 +175,12 @@ target_link_libraries(CuteMacIIcxSmoke
         CuteMacCore
 )
 
+add_executable(CuteMacPowerMac8100Smoke
+    tools/powermac8100_smoke.cpp
+)
+
+target_link_libraries(CuteMacPowerMac8100Smoke PRIVATE CuteMacCore)
+
 if(Readline_FOUND AND NOT EMSCRIPTEN)
     add_executable(CuteMacDebugSession
         src/debug/main.cpp
@@ -268,6 +275,10 @@ if(BUILD_TESTING)
     add_executable(CuteMacPpc601Tests tests/ppc601_tests.cpp)
     target_link_libraries(CuteMacPpc601Tests PRIVATE CuteMacCore)
     add_test(NAME ppc601-core COMMAND CuteMacPpc601Tests)
+
+    add_executable(CuteMacPowerMac8100Tests tests/powermac8100_tests.cpp)
+    target_link_libraries(CuteMacPowerMac8100Tests PRIVATE CuteMacCore)
+    add_test(NAME powermac-8100-machine COMMAND CuteMacPowerMac8100Tests)
 
     add_executable(CuteMacDebugCpuAccessTests tests/debug_cpu_access_tests.cpp)
     target_link_libraries(CuteMacDebugCpuAccessTests PRIVATE CuteMacCore)

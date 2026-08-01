@@ -15,7 +15,7 @@ public:
     void reset();
 
     [[nodiscard]] std::uint8_t readControl(Channel channel);
-    [[nodiscard]] std::uint8_t readData(Channel channel) const;
+    [[nodiscard]] std::uint8_t readData(Channel channel);
 
     void writeControl(Channel channel, std::uint8_t value);
     void writeData(Channel channel, std::uint8_t value);
@@ -30,6 +30,7 @@ private:
         std::uint8_t data = 0;
         int transmitCycles = 0;
         bool transmitInterruptPending = false;
+        bool receiveDataAvailable = false;
     };
 
     [[nodiscard]] ChannelState& state(Channel channel);
