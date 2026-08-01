@@ -220,6 +220,14 @@ void MacPlusMachine::clearBusTrace()
     m_busTrace.clear();
 }
 
+void MacPlusMachine::setBusTraceEnabled(bool enabled)
+{
+    m_busTraceEnabled = enabled;
+    if (!enabled) {
+        m_busTrace.clear();
+    }
+}
+
 std::uint8_t MacPlusMachine::read8(std::uint32_t address)
 {
     address &= 0x00ffffff;
@@ -549,6 +557,14 @@ void MacPlusMachine::clearSoundCapture()
     m_soundCapture.clear();
 }
 
+void MacPlusMachine::setSoundCaptureEnabled(bool enabled)
+{
+    m_soundCaptureEnabled = enabled;
+    if (!enabled) {
+        m_soundCapture.clear();
+    }
+}
+
 QString MacPlusMachine::diskImagePath() const
 {
     return m_diskImagePath;
@@ -775,6 +791,9 @@ void MacPlusMachine::logAccess(const char* operation, std::uint32_t address, std
 
 void MacPlusMachine::recordBusAccess(const char* operation, Region region, std::uint32_t address, std::uint32_t value, std::uint8_t size)
 {
+    if (!m_busTraceEnabled) {
+        return;
+    }
     if (m_busTrace.size() == maxBusTraceEntries) {
         m_busTrace.removeFirst();
     }
@@ -790,6 +809,9 @@ void MacPlusMachine::recordBusAccess(const char* operation, Region region, std::
 
 void MacPlusMachine::recordSoundBufferWrite(std::uint32_t address, std::uint8_t value)
 {
+    if (!m_soundCaptureEnabled) {
+        return;
+    }
     if (address < soundBase4MiB || address >= soundBase4MiB + soundBytes) {
         return;
     }

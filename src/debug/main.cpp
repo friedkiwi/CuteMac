@@ -675,7 +675,7 @@ private:
         m_out << "  write8|write16|write32 <addr> <value>\n";
         m_out << "  break <addr> | delete <addr|all> | breaks\n";
         m_out << "  watch read|write|rw <addr> [size]\n";
-        m_out << "  bus [last [count]|clear|filter <region>]\n";
+        m_out << "  bus [on|off|last [count]|clear|filter <region>]\n";
         m_out << "  vectors | globals | lowmem [watch|unwatch|status] [name]\n";
         m_out << "  rom info | rom-symbols [load <file>|list]\n";
         m_out << "  screen hash | screen probe | screen export <file.png>\n";
@@ -793,6 +793,8 @@ private:
     {
         m_machine = std::make_unique<cutemac::machines::macplus::MacPlusMachine>(
             static_cast<std::size_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024);
+        m_machine->setBusTraceEnabled(true);
+        m_machine->setSoundCaptureEnabled(true);
         m_gdbStub = std::make_unique<GdbStub>(*m_machine, m_breakpoints);
         m_gdbStub->setEnabled(m_gdbEnabled);
         m_gdbStub->setPort(m_gdbPort);
@@ -1090,6 +1092,12 @@ private:
 
     void handleBus(const QStringList& parts)
     {
+        if (parts.size() >= 2 && (parts[1] == QStringLiteral("on") || parts[1] == QStringLiteral("off"))) {
+            const auto enabled = parts[1] == QStringLiteral("on");
+            m_machine->setBusTraceEnabled(enabled);
+            m_out << "bus trace=" << (enabled ? "on" : "off") << '\n';
+            return;
+        }
         if (parts.size() >= 2 && parts[1] == QStringLiteral("clear")) {
             m_machine->clearBusTrace();
             m_out << "bus trace cleared\n";

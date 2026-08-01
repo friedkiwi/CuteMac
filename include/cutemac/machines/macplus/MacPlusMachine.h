@@ -77,6 +77,7 @@ public:
     [[nodiscard]] const QVector<QString>& eventLog() const;
     [[nodiscard]] QVector<BusAccess> busTrace() const;
     void clearBusTrace();
+    void setBusTraceEnabled(bool enabled);
 
     [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const;
     [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const;
@@ -92,6 +93,7 @@ public:
     [[nodiscard]] QByteArray soundCaptureBytes() const;
     [[nodiscard]] std::uint32_t soundCaptureHash() const;
     void clearSoundCapture();
+    void setSoundCaptureEnabled(bool enabled);
     [[nodiscard]] RomInfo romInfo() const;
     [[nodiscard]] QString diskImagePath() const;
     [[nodiscard]] QString floppyImagePath() const;
@@ -180,6 +182,8 @@ private:
     QVector<QString> m_eventLog;
     QVector<BusAccess> m_busTrace;
     QByteArray m_soundCapture;
+    bool m_busTraceEnabled = false;
+    bool m_soundCaptureEnabled = false;
 };
 
 } // namespace cutemac::machines::macplus
