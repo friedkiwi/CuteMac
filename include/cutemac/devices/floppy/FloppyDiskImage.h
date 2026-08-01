@@ -10,6 +10,19 @@ namespace cutemac::devices::floppy {
 
 class FloppyDiskImage {
 public:
+    struct DebugState {
+        QString imagePath;
+        QString imageFormat;
+        bool inserted = false;
+        bool writable = false;
+        bool doubleSided = false;
+        bool motorOn = false;
+        int track = 0;
+        int side = 0;
+        qsizetype trackBytes = 0;
+        qsizetype trackCursor = 0;
+    };
+
     enum class Kind {
         Empty,
         Raw400K,
@@ -40,6 +53,8 @@ public:
 
     [[nodiscard]] std::uint8_t nextNibble();
     void invalidateTrackCache();
+    [[nodiscard]] DebugState debugState() const;
+    [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
 
 private:
     struct TrackCache {
@@ -52,6 +67,7 @@ private:
     [[nodiscard]] bool loadRaw(const QString& path, const QByteArray& bytes, Kind kind);
     [[nodiscard]] bool loadDiskCopy42(const QString& path, const QByteArray& bytes);
     void rebuildTrackCache();
+    [[nodiscard]] QByteArray buildTrackBytes(int physicalTrack, int side) const;
     void appendSector(QByteArray& trackBytes, int physicalTrack, int side, int logicalSector) const;
     [[nodiscard]] QByteArray sectorPayload(int physicalTrack, int side, int logicalSector) const;
 

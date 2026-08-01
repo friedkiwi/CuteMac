@@ -16,6 +16,7 @@ void IwmController::reset()
     m_handshakeReads = 0;
     m_dataWrites = 0;
     m_internalDrive.setMotorOn(false);
+    m_externalDrive.setMotorOn(false);
 }
 
 std::uint8_t IwmController::access(std::uint8_t registerIndex)
@@ -67,25 +68,38 @@ bool IwmController::floppyInserted() const
 
 IwmController::DebugState IwmController::debugState() const
 {
+    const auto floppy = selectedDrive().debugState();
     return {
         lineMask(),
         m_mode,
         m_status,
         m_selectedDriveRegister,
-        m_internalDrive.motorOn(),
+        floppy.motorOn,
         !m_lines[SelectDrive],
-        m_internalDrive.inserted(),
-        m_internalDrive.doubleSided(),
-        m_internalDrive.writable(),
-        m_internalDrive.currentTrack(),
-        m_internalDrive.currentSide(),
+        floppy.inserted,
+        floppy.doubleSided,
+        floppy.writable,
+        floppy.track,
+        floppy.side,
         m_dataReads,
         m_statusReads,
         m_handshakeReads,
         m_dataWrites,
-        m_internalDrive.path(),
-        m_internalDrive.formatName(),
+        floppy.imagePath,
+        floppy.imageFormat,
+        floppy.trackBytes,
+        floppy.trackCursor,
     };
+}
+
+QByteArray IwmController::currentTrackBytesForDebug() const
+{
+    return selectedDrive().trackBytesForDebug(selectedDrive().currentTrack(), selectedDrive().currentSide());
+}
+
+QByteArray IwmController::trackBytesForDebug(int track, int side) const
+{
+    return selectedDrive().trackBytesForDebug(track, side);
 }
 
 bool IwmController::q6() const
@@ -104,7 +118,7 @@ std::uint8_t IwmController::readRegister()
     switch (selector) {
     case 0x00:
         ++m_dataReads;
-        return m_internalDrive.nextNibble();
+        return selectedDrive().nextNibble();
     case 0x02: {
         ++m_statusReads;
         const auto modeBits = static_cast<std::uint8_t>(m_mode & 0x3f);
@@ -139,7 +153,7 @@ void IwmController::setLine(std::uint8_t line, bool on)
     m_lines[line] = on;
 
     if (line == Motor) {
-        m_internalDrive.setMotorOn(on);
+        selectedDrive().setMotorOn(on);
     } else if (line == Ca0 || line == Ca1 || line == Ca2 || line == SelectDrive) {
         updateSelectedDriveRegister();
     } else if (line == Lstrb && wasOn && !on) {
@@ -150,7 +164,8 @@ void IwmController::setLine(std::uint8_t line, bool on)
 void IwmController::updateSelectedDriveRegister()
 {
     m_selectedDriveRegister = selectedDriveRegister();
-    m_internalDrive.setCurrentSide(m_sideSelect ? 1 : 0);
+    selectedDrive().setMotorOn(m_lines[Motor]);
+    selectedDrive().setCurrentSide(m_sideSelect ? 1 : 0);
 }
 
 void IwmController::applyDriveStrobe()
@@ -163,16 +178,16 @@ void IwmController::applyDriveStrobe()
         m_stepTowardTrackZero = true;
         break;
     case 0x04:
-        m_internalDrive.step(m_stepTowardTrackZero);
+        selectedDrive().step(m_stepTowardTrackZero);
         break;
     case 0x08:
-        m_internalDrive.setMotorOn(true);
+        selectedDrive().setMotorOn(true);
         break;
     case 0x09:
-        m_internalDrive.setMotorOn(false);
+        selectedDrive().setMotorOn(false);
         break;
     case 0x0d:
-        m_internalDrive.eject();
+        selectedDrive().eject();
         break;
     default:
         break;
@@ -189,29 +204,40 @@ std::uint8_t IwmController::selectedDriveRegister() const
 
 bool IwmController::driveSenseHigh()
 {
+    const auto& drive = selectedDrive();
     switch (m_selectedDriveRegister & 0x0f) {
     case 0x02:
-        return !m_internalDrive.inserted();
+        return !drive.inserted();
     case 0x04:
         return true;
     case 0x06:
-        return !m_internalDrive.writable();
+        return !drive.writable();
     case 0x08:
-        return !m_internalDrive.motorOn();
+        return !drive.motorOn();
     case 0x0a:
-        return !m_internalDrive.trackZero();
+        return !drive.trackZero();
     case 0x0b:
         return false;
     case 0x0c:
-        return !m_internalDrive.doubleSided();
+        return !drive.doubleSided();
     case 0x0d:
-        return false;
+        return m_lines[SelectDrive];
     case 0x0e:
         m_tach = !m_tach;
         return m_tach;
     default:
         return true;
     }
+}
+
+floppy::FloppyDiskImage& IwmController::selectedDrive()
+{
+    return m_lines[SelectDrive] ? m_externalDrive : m_internalDrive;
+}
+
+const floppy::FloppyDiskImage& IwmController::selectedDrive() const
+{
+    return m_lines[SelectDrive] ? m_externalDrive : m_internalDrive;
 }
 
 std::uint8_t IwmController::lineMask() const

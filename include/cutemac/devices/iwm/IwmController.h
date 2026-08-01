@@ -29,6 +29,8 @@ public:
         std::uint64_t dataWrites = 0;
         QString imagePath;
         QString imageFormat;
+        qsizetype trackBytes = 0;
+        qsizetype trackCursor = 0;
     };
 
     void reset();
@@ -42,6 +44,8 @@ public:
     [[nodiscard]] QString floppyImagePath() const;
     [[nodiscard]] bool floppyInserted() const;
     [[nodiscard]] DebugState debugState() const;
+    [[nodiscard]] QByteArray currentTrackBytesForDebug() const;
+    [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
 
     [[nodiscard]] bool q6() const;
     [[nodiscard]] bool q7() const;
@@ -66,9 +70,12 @@ private:
     [[nodiscard]] std::uint8_t selectedDriveRegister() const;
     [[nodiscard]] bool driveSenseHigh();
     [[nodiscard]] std::uint8_t lineMask() const;
+    [[nodiscard]] floppy::FloppyDiskImage& selectedDrive();
+    [[nodiscard]] const floppy::FloppyDiskImage& selectedDrive() const;
 
     std::array<bool, 8> m_lines {};
     floppy::FloppyDiskImage m_internalDrive;
+    floppy::FloppyDiskImage m_externalDrive;
     std::uint8_t m_mode = 0;
     std::uint8_t m_status = 0;
     std::uint8_t m_selectedDriveRegister = 0;

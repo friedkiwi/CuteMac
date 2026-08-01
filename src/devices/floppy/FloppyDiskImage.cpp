@@ -56,13 +56,28 @@ constexpr std::array<std::uint8_t, 64> gcrEncodeTable {
     return 8;
 }
 
-[[nodiscard]] qsizetype firstBlockForTrack(int track, int side)
+[[nodiscard]] qsizetype firstBlockForTrack(int track, int side, bool doubleSided)
 {
-    qsizetype block = side == 0 ? 0 : 800;
+    qsizetype block = 0;
+    const auto heads = doubleSided ? 2 : 1;
     for (int t = 0; t < track; ++t) {
-        block += sectorsForTrack(t);
+        block += sectorsForTrack(t) * heads;
     }
-    return block;
+    return block + (doubleSided ? side * sectorsForTrack(track) : 0);
+}
+
+[[nodiscard]] QVector<int> interleavedSectorOrder(int sectorsOnTrack)
+{
+    QVector<int> order(sectorsOnTrack, 0);
+    auto slot = 0;
+    for (int logicalSector = 0; logicalSector < sectorsOnTrack; ++logicalSector) {
+        order[slot] = logicalSector;
+        slot = (slot + 2) % sectorsOnTrack;
+        if (slot == 0) {
+            ++slot;
+        }
+    }
+    return order;
 }
 
 void appendRepeated(QByteArray& bytes, std::uint8_t value, int count)
@@ -87,53 +102,37 @@ void appendEncodedPayload(QByteArray& output, const QByteArray& payload)
     std::uint8_t checksumA = 0;
     std::uint8_t checksumB = 0;
     std::uint8_t checksumC = 0;
-    std::uint8_t carry = 0;
 
-    qsizetype i = 0;
-    for (; i + 2 < payload.size(); i += 3) {
-        const auto plainA = static_cast<std::uint8_t>(payload[i]);
-        const auto plainB = static_cast<std::uint8_t>(payload[i + 1]);
-        const auto plainC = static_cast<std::uint8_t>(payload[i + 2]);
+    for (qsizetype i = 0; i < 175; ++i) {
+        const auto offset = i * 3;
+        const auto plainA = static_cast<std::uint8_t>(payload[offset]);
+        const auto plainB = static_cast<std::uint8_t>(payload[offset + 1]);
+        const auto plainC = i != 174 ? static_cast<std::uint8_t>(payload[offset + 2]) : std::uint8_t { 0 };
 
-        const auto sumA = static_cast<unsigned>(checksumA) + plainA + carry;
+        checksumC = rol1(checksumC);
+
+        const auto sumA = static_cast<unsigned>(checksumA) + plainA + (checksumC & 0x01);
         checksumA = static_cast<std::uint8_t>(sumA);
-        const auto encodedA = static_cast<std::uint8_t>(plainA ^ rol1(checksumC));
+        const auto encodedA = static_cast<std::uint8_t>(plainA ^ checksumC);
 
         const auto sumB = static_cast<unsigned>(checksumB) + plainB + (sumA > 0xff ? 1U : 0U);
         checksumB = static_cast<std::uint8_t>(sumB);
         const auto encodedB = static_cast<std::uint8_t>(plainB ^ checksumA);
 
-        const auto sumC = static_cast<unsigned>(checksumC) + plainC + (sumB > 0xff ? 1U : 0U);
-        checksumC = static_cast<std::uint8_t>(sumC);
+        if (i != 174) {
+            const auto sumC = static_cast<unsigned>(checksumC) + plainC + (sumB > 0xff ? 1U : 0U);
+            checksumC = static_cast<std::uint8_t>(sumC);
+        }
         const auto encodedC = static_cast<std::uint8_t>(plainC ^ checksumB);
-
-        carry = (checksumC & 0x80) != 0 ? 1 : 0;
-        checksumC = rol1(checksumC);
 
         appendGcr(output, static_cast<std::uint8_t>((encodedA >> 2) & 0x30)
                 | static_cast<std::uint8_t>((encodedB >> 4) & 0x0c)
                 | static_cast<std::uint8_t>((encodedC >> 6) & 0x03));
         appendGcr(output, encodedA);
         appendGcr(output, encodedB);
-        appendGcr(output, encodedC);
-    }
-
-    if (i + 1 < payload.size()) {
-        const auto plainA = static_cast<std::uint8_t>(payload[i]);
-        const auto plainB = static_cast<std::uint8_t>(payload[i + 1]);
-
-        const auto sumA = static_cast<unsigned>(checksumA) + plainA + carry;
-        checksumA = static_cast<std::uint8_t>(sumA);
-        const auto encodedA = static_cast<std::uint8_t>(plainA ^ rol1(checksumC));
-
-        const auto sumB = static_cast<unsigned>(checksumB) + plainB + (sumA > 0xff ? 1U : 0U);
-        checksumB = static_cast<std::uint8_t>(sumB);
-        const auto encodedB = static_cast<std::uint8_t>(plainB ^ checksumA);
-
-        appendGcr(output, static_cast<std::uint8_t>((encodedA >> 2) & 0x30)
-                | static_cast<std::uint8_t>((encodedB >> 4) & 0x0c));
-        appendGcr(output, encodedA);
-        appendGcr(output, encodedB);
+        if (i != 174) {
+            appendGcr(output, encodedC);
+        }
     }
 
     appendGcr(output, static_cast<std::uint8_t>((checksumA >> 2) & 0x30)
@@ -258,6 +257,27 @@ void FloppyDiskImage::invalidateTrackCache()
     m_trackCache = {};
 }
 
+FloppyDiskImage::DebugState FloppyDiskImage::debugState() const
+{
+    return {
+        m_path,
+        formatName(),
+        inserted(),
+        m_writable,
+        m_doubleSided,
+        m_motorOn,
+        m_currentTrack,
+        m_currentSide,
+        m_trackCache.bytes.size(),
+        m_trackCache.cursor,
+    };
+}
+
+QByteArray FloppyDiskImage::trackBytesForDebug(int track, int side) const
+{
+    return buildTrackBytes(std::clamp(track, 0, tracksPerSide - 1), m_doubleSided ? std::clamp(side, 0, 1) : 0);
+}
+
 bool FloppyDiskImage::loadRaw(const QString& path, const QByteArray& bytes, Kind kind)
 {
     m_path = path;
@@ -308,19 +328,23 @@ void FloppyDiskImage::rebuildTrackCache()
     m_trackCache.track = m_currentTrack;
     m_trackCache.side = m_currentSide;
     m_trackCache.cursor = 0;
-    m_trackCache.bytes.clear();
+    m_trackCache.bytes = buildTrackBytes(m_currentTrack, m_currentSide);
+}
 
+QByteArray FloppyDiskImage::buildTrackBytes(int physicalTrack, int side) const
+{
+    QByteArray bytes;
     if (!inserted()) {
-        return;
+        return bytes;
     }
 
-    const auto sectorsOnTrack = sectorsForTrack(m_currentTrack);
-    appendRepeated(m_trackCache.bytes, 0xff, 48);
-    for (int i = 0; i < sectorsOnTrack; ++i) {
-        const auto logicalSector = (i * ((sectorsOnTrack + 1) / 2)) % sectorsOnTrack;
-        appendSector(m_trackCache.bytes, m_currentTrack, m_currentSide, logicalSector);
+    const auto sectorsOnTrack = sectorsForTrack(physicalTrack);
+    appendRepeated(bytes, 0xff, 48);
+    for (const auto logicalSector : interleavedSectorOrder(sectorsOnTrack)) {
+        appendSector(bytes, physicalTrack, side, logicalSector);
     }
-    appendRepeated(m_trackCache.bytes, 0xff, 128);
+    appendRepeated(bytes, 0xff, 128);
+    return bytes;
 }
 
 void FloppyDiskImage::appendSector(QByteArray& trackBytes, int physicalTrack, int side, int logicalSector) const
@@ -357,7 +381,7 @@ void FloppyDiskImage::appendSector(QByteArray& trackBytes, int physicalTrack, in
 
 QByteArray FloppyDiskImage::sectorPayload(int physicalTrack, int side, int logicalSector) const
 {
-    const auto block = firstBlockForTrack(physicalTrack, side) + logicalSector;
+    const auto block = firstBlockForTrack(physicalTrack, side, m_doubleSided) + logicalSector;
     QByteArray payload;
     payload.resize(encodedPayloadBytes);
     payload.fill(0);

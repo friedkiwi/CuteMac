@@ -569,6 +569,11 @@ devices::iwm::IwmController::DebugState MacPlusMachine::iwmDebugState() const
     return m_iwm.debugState();
 }
 
+QByteArray MacPlusMachine::floppyTrackBytesForDebug(int track, int side) const
+{
+    return m_iwm.trackBytesForDebug(track, side);
+}
+
 devices::via6522::Via6522::DebugState MacPlusMachine::viaDebugState() const
 {
     return m_via.debugState();

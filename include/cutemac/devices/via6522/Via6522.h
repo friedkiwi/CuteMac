@@ -11,6 +11,8 @@ public:
     struct DebugState {
         std::uint8_t interruptFlags = 0;
         std::uint8_t interruptEnable = 0;
+        int timer1Counter = 0;
+        bool timer1Running = false;
         int timer2Counter = 0;
         bool timer2Running = false;
         bool interruptActive = false;
@@ -39,6 +41,9 @@ private:
 
     std::array<std::uint8_t, 16> m_registers {};
     std::uint8_t m_interruptEnable = 0;
+    int m_timer1Counter = 0;
+    int m_timer1Latch = 0;
+    bool m_timer1Running = false;
     int m_timer2Counter = 0;
     bool m_timer2Running = false;
     PortAChangedCallback m_portAChanged;

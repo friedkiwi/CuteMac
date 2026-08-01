@@ -63,6 +63,21 @@ QString bytesToHex(const QByteArray& bytes)
     return result;
 }
 
+int countPattern(const QByteArray& bytes, const QByteArray& pattern)
+{
+    if (bytes.isEmpty() || pattern.isEmpty() || pattern.size() > bytes.size()) {
+        return 0;
+    }
+
+    int count = 0;
+    for (qsizetype i = 0; i <= bytes.size() - pattern.size(); ++i) {
+        if (bytes.mid(i, pattern.size()) == pattern) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 QByteArray hexToBytes(const QString& hex)
 {
     QByteArray bytes;
@@ -534,7 +549,7 @@ private:
         m_out << "  sound hash | sound export <file.wav> | sound capture-hash | sound capture-export <file.wav> | sound clear-capture\n";
         m_out << "  profile [set <key> <value>|save] | load <profile.toml>\n";
         m_out << "  disk insert <path> | disk eject | disk status\n";
-        m_out << "  floppy insert <path> | floppy eject | floppy status\n";
+        m_out << "  floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side]\n";
         m_out << "  mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
         m_out << "  trace [category on|off] | log save <file.jsonl>\n";
@@ -892,6 +907,8 @@ private:
             m_out << "via_ifr=" << hexValue(via.interruptFlags, 2)
                   << " ier=" << hexValue(via.interruptEnable, 2)
                   << " irq=" << (via.interruptActive ? "yes" : "no")
+                  << " t1=" << via.timer1Counter
+                  << " t1_running=" << (via.timer1Running ? "yes" : "no")
                   << " t2=" << via.timer2Counter
                   << " t2_running=" << (via.timer2Running ? "yes" : "no") << '\n';
         }
@@ -1110,9 +1127,38 @@ private:
                   << " inserted=" << (iwm.diskInserted ? "yes" : "no")
                   << " track=" << iwm.track
                   << " side=" << iwm.side
+                  << " track_bytes=" << iwm.trackBytes
+                  << " cursor=" << iwm.trackCursor
                   << " motor=" << (iwm.motorOn ? "on" : "off") << '\n';
+        } else if (parts.size() >= 2 && parts[1] == QStringLiteral("scan")) {
+            const auto iwm = m_machine->iwmDebugState();
+            const auto track = parts.size() >= 3 ? parseNumber(parts[2]).value_or(static_cast<std::uint32_t>(iwm.track)) : static_cast<std::uint32_t>(iwm.track);
+            const auto side = parts.size() >= 4 ? parseNumber(parts[3]).value_or(static_cast<std::uint32_t>(iwm.side)) : static_cast<std::uint32_t>(iwm.side);
+            const auto bytes = m_machine->floppyTrackBytesForDebug(static_cast<int>(track), static_cast<int>(side));
+            m_out << "track=" << track
+                  << " side=" << side
+                  << " bytes=" << bytes.size()
+                  << " addr_marks=" << countPattern(bytes, QByteArray::fromHex("d5aa96"))
+                  << " data_marks=" << countPattern(bytes, QByteArray::fromHex("d5aaad"))
+                  << " trailers=" << countPattern(bytes, QByteArray::fromHex("deaa")) << '\n';
+        } else if (parts.size() >= 3 && parts[1] == QStringLiteral("export-track")) {
+            const auto iwm = m_machine->iwmDebugState();
+            const auto track = parts.size() >= 4 ? parseNumber(parts[3]).value_or(static_cast<std::uint32_t>(iwm.track)) : static_cast<std::uint32_t>(iwm.track);
+            const auto side = parts.size() >= 5 ? parseNumber(parts[4]).value_or(static_cast<std::uint32_t>(iwm.side)) : static_cast<std::uint32_t>(iwm.side);
+            const auto bytes = m_machine->floppyTrackBytesForDebug(static_cast<int>(track), static_cast<int>(side));
+            QSaveFile file(parts[2]);
+            if (!file.open(QIODevice::WriteOnly)) {
+                m_out << "floppy export failed: " << parts[2] << '\n';
+                return;
+            }
+            file.write(bytes);
+            if (!file.commit()) {
+                m_out << "floppy export failed: " << parts[2] << '\n';
+                return;
+            }
+            m_out << "floppy track exported: " << parts[2] << " bytes=" << bytes.size() << '\n';
         } else {
-            m_out << "usage: floppy insert <path> | floppy eject | floppy status\n";
+            m_out << "usage: floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side]\n";
         }
     }
 
