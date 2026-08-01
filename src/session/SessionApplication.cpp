@@ -96,7 +96,7 @@ public:
         , m_image(512, 342, QImage::Format_RGB32)
     {
         m_image.fill(Qt::white);
-        setMinimumSize(512, 342);
+        setMinimumSize(160, 120);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
@@ -115,6 +115,8 @@ public:
         if (!image.isNull()) m_image = image;
         update();
     }
+
+    [[nodiscard]] QSize framebufferSize() const { return m_image.size(); }
 
     void setMouseCallback(std::function<void(int, int, bool)> callback)
     {
@@ -237,8 +239,10 @@ private:
     [[nodiscard]] QRect displayRect() const
     {
         const QSize baseSize = m_image.size().isEmpty() ? QSize(512, 342) : m_image.size();
-        const auto scale = std::max(1, std::min(width() / baseSize.width(), height() / baseSize.height()));
-        const QSize scaled(baseSize.width() * scale, baseSize.height() * scale);
+        const auto scale = std::min(static_cast<double>(width()) / baseSize.width(),
+            static_cast<double>(height()) / baseSize.height());
+        const QSize scaled(std::max(1, static_cast<int>(baseSize.width() * scale)),
+            std::max(1, static_cast<int>(baseSize.height() * scale)));
         return QRect(QPoint((width() - scaled.width()) / 2, (height() - scaled.height()) / 2), scaled);
     }
 
@@ -370,8 +374,6 @@ public:
         , m_controlServer(m_session, m_runner, this)
     {
         setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
-        resize(1120, 820);
-
         m_display = new DisplayWidget;
         m_display->setMouseCallback([this](int x, int y, bool pressed) {
             if (pressed && !m_mouseInputPressed) {
@@ -407,6 +409,13 @@ public:
         connect(&m_frameTimer, &QTimer::timeout, this, [this]() { runFrame(); });
 
         loadAndReset();
+        const auto framebufferSize = m_display->framebufferSize();
+        const auto initialScale = framebufferSize.width() == 512 ? 2 : 1;
+        const QSize desiredDisplaySize(framebufferSize.width() * initialScale, framebufferSize.height() * initialScale);
+        resize(desiredDisplaySize);
+        QTimer::singleShot(0, this, [this, desiredDisplaySize]() {
+            resize(size() + desiredDisplaySize - m_display->size());
+        });
         m_runner.start();
         if (m_controlServer.listen()) {
             qInfo("CuteMac session control listening on 127.0.0.1:%u", m_controlServer.port());
@@ -466,9 +475,6 @@ private:
             updateStatus();
         });
 
-        auto* viewMenu = menuBar()->addMenu(QStringLiteral("View"));
-        viewMenu->addAction(QStringLiteral("Actual Size"), this, [this]() { resize(620, 480); });
-        viewMenu->addAction(QStringLiteral("Double Size"), this, [this]() { resize(1120, 820); });
     }
 
     void buildToolbar()
