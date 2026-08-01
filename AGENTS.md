@@ -35,6 +35,7 @@
 - `CuteMacDebugSession` owns bringup tooling: register/memory/disassembly commands, framebuffer export/probing, Mac Plus sound-buffer capture export, bus logs, trace rings, and the current minimal GDB remote stub. It uses libreadline for history and tab completion.
 - Prefer the debug trace framework over ad hoc prints. Useful probes include `trace pc|irq|trap|driver|lowmem|iwm|floppy|timeline on`, `pc-trace`, `irq-trace`, `trap-trace`, `driver-trace`, `timeline`, `lowmem watch <name>`, `mem-find`, `mem-snapshot`, `memory-diff`, `bootblock verify`, `floppy last-window`, and `floppy export-window`.
 - Debug execution helpers must advance devices and interrupts through the same timing path as normal execution. Do not step only the CPU in `run-until` or breakpoint handling.
+- Until the machine has a cycle-callback/event scheduler, `MacPlusMachine::runCycles` must advance VIA timing after every instruction. Coarse CPU-only slices let ROM polling observe frozen devices and can strand `.Sony` timer waits.
 - Keep high-volume capture off the normal session hot path. `MacPlusMachine` bus trace and sound capture default to disabled and should be enabled only by debug tooling or explicit tests.
 - The GDB stub is intentionally minimal: it supports m68k register reads, memory read/write, single-step, continue, and software breakpoints. Full register writes and PC mutation are still future work.
 - Use `QStandardPaths` for cross-platform profile, ROM, and disk-image defaults.

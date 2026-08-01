@@ -157,12 +157,7 @@ int MacPlusMachine::runCycles(int cycles)
 {
     int cyclesRun = 0;
     while (cyclesRun < cycles) {
-        updateInterrupts();
-        const auto slice = std::min(20000, cycles - cyclesRun);
-        const auto used = std::max(1, m_cpu.execute(slice));
-        cyclesRun += used;
-        m_via.tick(used);
-        updateInterrupts();
+        cyclesRun += std::max(1, stepInstruction());
     }
     return cyclesRun;
 }
