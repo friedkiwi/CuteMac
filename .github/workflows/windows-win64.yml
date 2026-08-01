@@ -34,8 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT "scripts/buildsystems/vcpkg.cmake"
-          cmake -S . -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release `
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
             "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
             -DVCPKG_TARGET_TRIPLET=x64-windows `
             -DBUILD_TESTING=ON
@@ -66,9 +65,9 @@ jobs:
           $package = Join-Path $env:GITHUB_WORKSPACE "package/CuteMac-win64"
           New-Item -ItemType Directory -Force -Path $package | Out-Null
 
-          Copy-Item "build/CuteMac.exe" $package
-          Copy-Item "build/CuteMacSession.exe" $package
-          Copy-Item "build/CuteMacMacPlusSmoke.exe" $package
+          Copy-Item "build/Release/CuteMac.exe" $package
+          Copy-Item "build/Release/CuteMacSession.exe" $package
+          Copy-Item "build/Release/CuteMacMacPlusSmoke.exe" $package
           Copy-Item "README.md" $package
           Copy-Item "licenses" $package -Recurse
 
