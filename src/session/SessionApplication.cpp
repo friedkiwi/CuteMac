@@ -174,6 +174,14 @@ protected:
         sendMouseEvent(event);
     }
 
+    void mouseDoubleClickEvent(QMouseEvent* event) override
+    {
+        // Qt sends the second press of a double-click as MouseButtonDblClick
+        // instead of calling mousePressEvent(). Forward it so the guest sees
+        // both complete clicks and can perform Finder's double-click action.
+        sendMouseEvent(event);
+    }
+
     void keyPressEvent(QKeyEvent* event) override
     {
         if (isReleaseChord(event)) {
