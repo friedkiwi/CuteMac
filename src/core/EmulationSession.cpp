@@ -154,6 +154,12 @@ devices::video::VideoFrame EmulationSession::videoFrame() const
     return m_machine ? m_machine->videoFrame() : devices::video::VideoFrame {};
 }
 
+devices::audio::AudioFrame EmulationSession::takeAudioFrame()
+{
+    std::lock_guard lock(m_mutex);
+    return m_machine ? m_machine->takeAudioFrame() : devices::audio::AudioFrame {};
+}
+
 config::Configuration EmulationSession::configuration() const
 {
     std::lock_guard lock(m_mutex);

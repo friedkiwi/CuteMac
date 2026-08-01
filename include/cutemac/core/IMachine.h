@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include "cutemac/core/GuestInput.h"
+#include "cutemac/devices/audio/AudioFrame.h"
 #include "cutemac/devices/video/VideoFrame.h"
 
 namespace cutemac::core {
@@ -30,6 +31,7 @@ public:
     [[nodiscard]] virtual bool overlayEnabled() const = 0;
     [[nodiscard]] virtual QByteArray framebufferBytes() const = 0;
     [[nodiscard]] virtual devices::video::VideoFrame videoFrame() const = 0;
+    [[nodiscard]] virtual devices::audio::AudioFrame takeAudioFrame() { return {}; }
     virtual void queueInput(const GuestInputEvent& event, std::uint64_t cycle) = 0;
 };
 

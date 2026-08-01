@@ -37,6 +37,7 @@
 #include "cutemac/core/SessionRunner.h"
 #include "cutemac/session/SessionApplication.h"
 #include "cutemac/session/SessionControlServer.h"
+#include "cutemac/session/AudioOutput.h"
 #include "cutemac/session/FramebufferRenderer.h"
 #include "cutemac/session/HostInputMapper.h"
 #include "cutemac/ui/ConfigurationDialog.h"
@@ -372,6 +373,7 @@ public:
         , m_session(m_configuration)
         , m_runner(m_session, m_configuration.cyclesPerFrame, m_configuration.runtimeSpeed)
         , m_controlServer(m_session, m_runner, this)
+        , m_audioOutput(this)
     {
         setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
         m_display = new DisplayWidget;
@@ -656,6 +658,7 @@ private:
         m_runner.setPaused(m_paused || !m_romLoaded);
         if (m_paused || !m_romLoaded) m_frameTimer.stop(); else m_frameTimer.start();
         m_display->setRunning(!m_paused && m_romLoaded);
+        m_audioOutput.setPaused(m_paused || !m_romLoaded);
         if (m_pauseAction != nullptr) {
             m_pauseAction->setIcon(style()->standardIcon(m_paused ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause));
             m_pauseAction->setText(m_paused ? QStringLiteral("Resume") : QStringLiteral("Pause"));
@@ -672,6 +675,7 @@ private:
 
         m_runner.runHostFrame();
         m_display->setFramebuffer(m_session.videoFrame());
+        m_audioOutput.enqueue(m_session.takeAudioFrame());
         ++m_frames;
         if ((m_frames % 15) == 0) {
             updateStatus();
@@ -704,6 +708,7 @@ private:
     cutemac::core::EmulationSession m_session;
     cutemac::core::SessionRunner m_runner;
     cutemac::session::SessionControlServer m_controlServer;
+    cutemac::session::AudioOutput m_audioOutput;
     DisplayWidget* m_display = nullptr;
     QLabel* m_status = nullptr;
     QAction* m_realtimeSpeedAction = nullptr;

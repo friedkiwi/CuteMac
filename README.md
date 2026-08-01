@@ -20,7 +20,7 @@ The M68k CPU core starts from Musashi-derived source maintained directly in the 
 Ubuntu/WSL2 prerequisites:
 
 ```sh
-sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev
+sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev qt6-multimedia-dev
 sudo apt-get install libreadline-dev libtomlplusplus-dev
 ```
 

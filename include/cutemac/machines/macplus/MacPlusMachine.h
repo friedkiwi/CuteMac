@@ -99,6 +99,7 @@ public:
 
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;
+    [[nodiscard]] devices::audio::AudioFrame takeAudioFrame() override;
     [[nodiscard]] std::uint32_t framebufferHash() const;
     [[nodiscard]] QByteArray soundBufferBytes() const;
     [[nodiscard]] std::uint32_t soundBufferHash() const;
@@ -170,6 +171,8 @@ private:
     void logAccess(const char* operation, std::uint32_t address, std::uint32_t value);
     void recordBusAccess(const char* operation, Region region, std::uint32_t address, std::uint32_t value, std::uint8_t size);
     void recordSoundBufferWrite(std::uint32_t address, std::uint8_t value);
+    void advanceAudio(int cycles);
+    [[nodiscard]] std::uint32_t soundBufferBase(bool mainPage) const;
     [[nodiscard]] QString regionName(Region region) const;
     [[nodiscard]] std::uint32_t readRom32Direct(std::uint32_t offset) const;
 
@@ -198,6 +201,12 @@ private:
     QVector<QString> m_eventLog;
     QVector<BusAccess> m_busTrace;
     QByteArray m_soundCapture;
+    QByteArray m_pendingAudio;
+    std::uint64_t m_audioCyclePhase = 0;
+    std::uint32_t m_audioBufferIndex = 0;
+    std::uint8_t m_viaPortA = 0x7b;
+    std::uint8_t m_soundVolume = 3;
+    bool m_soundEnabled = false;
     bool m_busTraceEnabled = false;
     bool m_soundCaptureEnabled = false;
     core::MachineScheduler m_scheduler;

@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets)
 find_package(tomlplusplus REQUIRED CONFIG)
 find_package(Readline)
 
@@ -107,6 +107,7 @@ add_executable(CuteMacSession
     src/session/SessionApplication.cpp
     src/session/SessionControlServer.cpp
     src/session/FramebufferRenderer.cpp
+    src/session/AudioOutput.cpp
     src/session/HostInputMapper.cpp
 )
 
@@ -115,6 +116,7 @@ target_link_libraries(CuteMacSession
         CuteMacCore
         CuteMacWidgets
         Qt6::Network
+        Qt6::Multimedia
         Qt6::Widgets
 )
 
