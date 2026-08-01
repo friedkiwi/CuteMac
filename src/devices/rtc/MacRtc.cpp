@@ -17,14 +17,11 @@ constexpr int group2Base = 0x08;
 
 MacRtc::MacRtc()
 {
+    // Model a dead/blank PRAM battery on first use. The original Macintosh
+    // ROM recognizes the missing validity signature and writes the defaults
+    // appropriate for that machine. Date/time reads are provided separately
+    // by currentSeconds() and do not depend on these parameter bytes.
     m_parameterRam.fill(0);
-    m_parameterRam[group1Base] = 0xa8;
-    m_parameterRam[group1Base + 3] = 0x22;
-    m_parameterRam[group1Base + 4] = 0xcc;
-    m_parameterRam[group1Base + 5] = 0x0a;
-    m_parameterRam[group1Base + 6] = 0xcc;
-    m_parameterRam[group1Base + 7] = 0x0a;
-    m_parameterRam[group2Base + 2] = 4;
     resetSerial();
 }
 

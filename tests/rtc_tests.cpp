@@ -80,11 +80,14 @@ int main()
     writeRegister(rtc, 0x09, 0);
     writeRegister(rtc, 0x0d, 0);
     require(readTime() >= expected, "writes to RTC time registers should be discarded");
-    require(readRegister(rtc, 0xc1) == 0xa8, "RTC PRAM should contain the valid signature");
+    require(readRegister(rtc, 0xc1) == 0x00,
+        "blank RTC PRAM should remain invalid so the original ROM installs machine defaults");
 
     QTemporaryDir directory;
     const auto nvramPath = directory.filePath(QStringLiteral("mac-plus.nvram"));
     require(rtc.setNvramImagePath(nvramPath), "a new NVRAM image should be created");
+    require(readRegister(rtc, 0xc1) == 0x00,
+        "creating an NVRAM image should preserve the blank power-on state");
     writeRegister(rtc, 0x41, 0x5a);
     require(QFileInfo(nvramPath).size() == 256, "NVRAM image should contain all 256 PRAM bytes");
     cutemac::devices::rtc::MacRtc restored;
