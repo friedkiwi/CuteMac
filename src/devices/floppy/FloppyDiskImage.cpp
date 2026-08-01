@@ -147,8 +147,9 @@ void appendEncodedPayload(QByteArray& output, const QByteArray& payload)
 
 } // namespace
 
-bool FloppyDiskImage::load(const QString& path)
+bool FloppyDiskImage::load(const QString& path, bool readOnly)
 {
+    m_forceReadOnly = readOnly;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         return false;
@@ -328,7 +329,7 @@ bool FloppyDiskImage::loadRaw(const QString& path, const QByteArray& bytes, Kind
     m_kind = kind;
     m_data = bytes;
     m_tags.clear();
-    m_writable = QFileInfo(path).isWritable();
+    m_writable = !m_forceReadOnly && QFileInfo(path).isWritable();
     m_doubleSided = kind == Kind::Raw800K;
     m_currentTrack = 0;
     m_currentSide = 0;
@@ -359,7 +360,7 @@ bool FloppyDiskImage::loadDiskCopy42(const QString& path, const QByteArray& byte
             m_tags.append(tagBytes.mid(block * tagBytesPerSector, tagBytesPerSector));
         }
     }
-    m_writable = QFileInfo(path).isWritable();
+    m_writable = !m_forceReadOnly && QFileInfo(path).isWritable();
     m_doubleSided = dataSize == raw800KBytes;
     m_currentTrack = 0;
     m_currentSide = 0;

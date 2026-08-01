@@ -18,7 +18,9 @@ public:
     [[nodiscard]] virtual bool loadRomFile(const QString& path, const QStringList& patches) = 0;
     [[nodiscard]] virtual bool loadDiskImage(const QString& path) = 0;
     virtual void ejectDiskImage() = 0;
-    [[nodiscard]] virtual bool loadFloppyImage(const QString& path) = 0;
+    [[nodiscard]] virtual bool loadScsiDisk(int id, const QString& path, bool readOnly) = 0;
+    virtual void ejectScsiDevice(int id) = 0;
+    [[nodiscard]] virtual bool loadFloppyImage(const QString& path, bool readOnly = false) = 0;
     virtual void ejectFloppyImage() = 0;
     virtual void reset() = 0;
     [[nodiscard]] virtual int runCycles(int cycles) = 0;

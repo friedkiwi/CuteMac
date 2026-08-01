@@ -102,7 +102,11 @@ void SessionRunner::workerLoop()
         (void)m_session.runCycles(m_cyclesPerFrame.load());
         if (currentSpeed == config::RuntimeSpeed::Unlimited) {
             deadline = clock::now();
-            std::this_thread::yield();
+            // Give the frontend a deterministic lock-acquisition window for input and display work.
+            std::unique_lock lock(m_waitMutex);
+            m_wake.wait_for(lock, std::chrono::microseconds(50), [this, currentSpeed]() {
+                return !m_running || m_paused || m_speed.load() != currentSpeed;
+            });
             continue;
         }
         deadline += std::chrono::microseconds(16625);

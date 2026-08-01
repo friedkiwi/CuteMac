@@ -43,9 +43,9 @@ std::uint8_t IwmController::access(std::uint8_t registerIndex, std::uint8_t valu
     return readRegister();
 }
 
-bool IwmController::loadFloppyImage(const QString& path)
+bool IwmController::loadFloppyImage(const QString& path, bool readOnly)
 {
-    return m_internalDrive.load(path);
+    return m_internalDrive.load(path, readOnly);
 }
 
 void IwmController::ejectFloppyImage()

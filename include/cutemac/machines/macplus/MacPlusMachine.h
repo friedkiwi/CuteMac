@@ -66,7 +66,9 @@ public:
     [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {}) override;
     [[nodiscard]] bool loadDiskImage(const QString& path) override;
     void ejectDiskImage() override;
-    [[nodiscard]] bool loadFloppyImage(const QString& path) override;
+    [[nodiscard]] bool loadScsiDisk(int id, const QString& path, bool readOnly) override;
+    void ejectScsiDevice(int id) override;
+    [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly = false) override;
     void ejectFloppyImage() override;
     void reset() override;
 
@@ -177,7 +179,7 @@ private:
     devices::scc::Z8530Scc m_scc;
     devices::iwm::IwmController m_iwm;
     devices::scsi::ncr5380::Ncr5380 m_scsi;
-    std::shared_ptr<devices::scsi::ScsiBlockDevice> m_scsiDisk;
+    std::array<std::shared_ptr<devices::scsi::ScsiBlockDevice>, 7> m_scsiDisks;
 
     bool m_romLoaded = false;
     QString m_romPath;

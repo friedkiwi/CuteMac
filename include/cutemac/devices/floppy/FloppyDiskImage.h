@@ -31,7 +31,7 @@ public:
         DiskCopy42,
     };
 
-    [[nodiscard]] bool load(const QString& path);
+    [[nodiscard]] bool load(const QString& path, bool readOnly = false);
     void eject();
 
     [[nodiscard]] bool inserted() const;
@@ -81,6 +81,7 @@ private:
     QByteArray m_data;
     QVector<QByteArray> m_tags;
     bool m_writable = false;
+    bool m_forceReadOnly = false;
     bool m_doubleSided = false;
     bool m_motorOn = false;
     int m_currentTrack = 0;

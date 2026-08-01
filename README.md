@@ -53,6 +53,8 @@ Runtime speed can be changed live from the session's Machine menu and persisted 
 speed = "realtime" # or "unlimited"
 ```
 
+New profiles default to unlimited speed. The shared machine configuration window organizes general, IWM/floppy, and addressed SCSI-device settings into capability-dependent tabs and can create blank raw floppy and hard-disk images.
+
 Mac Plus ROM smoke test:
 
 ```sh

@@ -95,6 +95,7 @@ Configuration ConfigurationManager::defaultMacPlusConfiguration()
     configuration.machineId = QStringLiteral("mac-plus");
     configuration.ramSizeMiB = 4;
     configuration.cyclesPerFrame = 130560;
+    configuration.iwmDevices.append(IwmDeviceConfiguration {});
     return configuration;
 }
 
@@ -132,6 +133,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     }
 
     auto configuration = defaultMacPlusConfiguration();
+    configuration.iwmDevices.clear();
     try {
         const auto contents = file.readAll();
         const auto document = toml::parse(std::string_view(contents.constData(), static_cast<std::size_t>(contents.size())));
@@ -142,8 +144,32 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         configuration.floppyPath = fromTomlString(document["storage"]["floppy_path"].value_or<std::string>(""));
         configuration.ramSizeMiB = static_cast<int>(document["machine"]["ram_size_mib"].value_or<std::int64_t>(configuration.ramSizeMiB));
         configuration.cyclesPerFrame = static_cast<int>(document["machine"]["cycles_per_frame"].value_or<std::int64_t>(configuration.cyclesPerFrame));
-        configuration.runtimeSpeed = runtimeSpeedFromName(fromTomlString(document["runtime"]["speed"].value_or<std::string>("realtime")));
+        configuration.runtimeSpeed = runtimeSpeedFromName(fromTomlString(document["runtime"]["speed"].value_or<std::string>("unlimited")));
         configuration.skipRamPatternTest = document["rom_patches"]["skip_ram_pattern_test"].value_or(false);
+
+        if (const auto* devices = document["iwm"]["drives"].as_array()) {
+            for (const auto& node : *devices) {
+                if (const auto* drive = node.as_table()) {
+                    configuration.iwmDevices.append({
+                        fromTomlString((*drive)["image_path"].value_or<std::string>("")),
+                        (*drive)["read_only"].value_or(false),
+                    });
+                }
+            }
+        }
+        if (const auto* devices = document["scsi"]["devices"].as_array()) {
+            for (const auto& node : *devices) {
+                if (const auto* device = node.as_table()) {
+                    const auto type = fromTomlString((*device)["type"].value_or<std::string>("hard_disk"));
+                    configuration.scsiDevices.append({
+                        static_cast<int>((*device)["id"].value_or<std::int64_t>(0)),
+                        type == QStringLiteral("cd_rom") ? ScsiDeviceType::CdRom : ScsiDeviceType::HardDisk,
+                        fromTomlString((*device)["image_path"].value_or<std::string>("")),
+                        (*device)["read_only"].value_or(false),
+                    });
+                }
+            }
+        }
     } catch (const toml::parse_error&) {
         return std::nullopt;
     }
@@ -153,6 +179,16 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     }
     if (configuration.machineId.isEmpty()) {
         configuration.machineId = QStringLiteral("mac-plus");
+    }
+    if (configuration.iwmDevices.isEmpty()) {
+        configuration.iwmDevices.append({ configuration.floppyPath, false });
+    } else {
+        configuration.floppyPath = configuration.iwmDevices.first().imagePath;
+    }
+    if (configuration.scsiDevices.isEmpty() && !configuration.diskPath.isEmpty()) {
+        configuration.scsiDevices.append({ 0, ScsiDeviceType::HardDisk, configuration.diskPath, false });
+    } else if (!configuration.scsiDevices.isEmpty()) {
+        configuration.diskPath = configuration.scsiDevices.first().imagePath;
     }
 
     return configuration;
@@ -165,6 +201,23 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
         return false;
+    }
+
+    toml::array iwmDevices;
+    for (const auto& drive : configuration.iwmDevices) {
+        iwmDevices.push_back(toml::table {
+            { "image_path", toTomlString(drive.imagePath) },
+            { "read_only", drive.readOnly },
+        });
+    }
+    toml::array scsiDevices;
+    for (const auto& device : configuration.scsiDevices) {
+        scsiDevices.push_back(toml::table {
+            { "id", device.id },
+            { "type", device.type == ScsiDeviceType::CdRom ? "cd_rom" : "hard_disk" },
+            { "image_path", toTomlString(device.imagePath) },
+            { "read_only", device.readOnly },
+        });
     }
 
     toml::table document {
@@ -183,6 +236,8 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
         { "runtime", toml::table {
                          { "speed", toTomlString(runtimeSpeedName(configuration.runtimeSpeed)) },
                      } },
+        { "iwm", toml::table { { "drives", std::move(iwmDevices) } } },
+        { "scsi", toml::table { { "devices", std::move(scsiDevices) } } },
         { "rom_patches", toml::table {
                              { "skip_ram_pattern_test", configuration.skipRamPatternTest },
                          } },

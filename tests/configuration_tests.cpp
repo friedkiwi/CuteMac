@@ -30,6 +30,8 @@ int main()
     configuration.ramSizeMiB = 4;
     configuration.cyclesPerFrame = 130560;
     configuration.runtimeSpeed = cutemac::config::RuntimeSpeed::Unlimited;
+    configuration.iwmDevices.append({ QStringLiteral("/tmp/system.dsk"), true });
+    configuration.scsiDevices.append({ 4, cutemac::config::ScsiDeviceType::HardDisk, QStringLiteral("/tmp/disk.hda"), false });
     configuration.skipRamPatternTest = true;
 
     cutemac::config::ConfigurationManager manager;
@@ -41,8 +43,22 @@ int main()
         ok &= expect(loaded->romPath == configuration.romPath, "escaped path did not round-trip");
         ok &= expect(loaded->skipRamPatternTest, "ROM patch setting did not round-trip");
         ok &= expect(loaded->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "runtime speed did not round-trip");
+        ok &= expect(loaded->iwmDevices.size() == 1 && loaded->iwmDevices.first().readOnly, "IWM device did not round-trip");
+        ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
         ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("macplus.skip_ram_pattern_test") },
             "enabled ROM patch ID is incorrect");
+    }
+
+    QFile legacy(path);
+    ok &= expect(legacy.open(QIODevice::WriteOnly | QIODevice::Truncate), "legacy fixture open failed");
+    legacy.write("name = \"Legacy\"\n[machine]\nid = \"mac-plus\"\n[storage]\ndisk_path = \"old.hda\"\nfloppy_path = \"old.dsk\"\n");
+    legacy.close();
+    const auto migrated = manager.loadTomlFile(path);
+    ok &= expect(migrated.has_value(), "legacy profile must parse");
+    if (migrated) {
+        ok &= expect(migrated->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "legacy profile must default to unlimited");
+        ok &= expect(migrated->iwmDevices.size() == 1 && migrated->iwmDevices.first().imagePath == QStringLiteral("old.dsk"), "legacy floppy was not migrated");
+        ok &= expect(migrated->scsiDevices.size() == 1 && migrated->scsiDevices.first().imagePath == QStringLiteral("old.hda"), "legacy disk was not migrated");
     }
 
     QFile malformed(path);

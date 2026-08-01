@@ -102,30 +102,44 @@ bool MacPlusMachine::loadRomFile(const QString& path, const QStringList& enabled
 
 bool MacPlusMachine::loadDiskImage(const QString& path)
 {
+    return loadScsiDisk(0, path, false);
+}
+
+bool MacPlusMachine::loadScsiDisk(int id, const QString& path, bool readOnly)
+{
+    if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) {
+        return false;
+    }
     auto disk = std::make_shared<devices::scsi::ScsiBlockDevice>();
-    if (!disk->loadImage(path)) {
+    if (!disk->loadImage(path, readOnly)) {
         return false;
     }
 
-    m_scsiDisk = std::move(disk);
-    m_diskImagePath = path;
-    m_scsi.attachTarget(0, m_scsiDisk);
+    m_scsiDisks[static_cast<std::size_t>(id)] = std::move(disk);
+    if (id == 0) m_diskImagePath = path;
+    m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[static_cast<std::size_t>(id)]);
     return true;
 }
 
 void MacPlusMachine::ejectDiskImage()
 {
-    if (m_scsiDisk) {
-        m_scsiDisk->eject();
-    }
-    m_scsi.detachTarget(0);
-    m_scsiDisk.reset();
+    ejectScsiDevice(0);
     m_diskImagePath.clear();
 }
 
-bool MacPlusMachine::loadFloppyImage(const QString& path)
+void MacPlusMachine::ejectScsiDevice(int id)
 {
-    return m_iwm.loadFloppyImage(path);
+    if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return;
+    auto& disk = m_scsiDisks[static_cast<std::size_t>(id)];
+    if (disk) disk->eject();
+    m_scsi.detachTarget(static_cast<std::uint8_t>(id));
+    disk.reset();
+    if (id == 0) m_diskImagePath.clear();
+}
+
+bool MacPlusMachine::loadFloppyImage(const QString& path, bool readOnly)
+{
+    return m_iwm.loadFloppyImage(path, readOnly);
 }
 
 void MacPlusMachine::ejectFloppyImage()
@@ -143,8 +157,10 @@ void MacPlusMachine::reset()
     m_scc.reset();
     m_iwm.reset();
     m_scsi.reset();
-    if (m_scsiDisk && m_scsiDisk->ready()) {
-        m_scsi.attachTarget(0, m_scsiDisk);
+    for (std::size_t id = 0; id < m_scsiDisks.size(); ++id) {
+        if (m_scsiDisks[id] && m_scsiDisks[id]->ready()) {
+            m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
+        }
     }
     m_via.reset();
     m_scheduler.reset();

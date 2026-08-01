@@ -13,6 +13,23 @@ enum class RuntimeSpeed {
     Unlimited,
 };
 
+enum class ScsiDeviceType {
+    HardDisk,
+    CdRom,
+};
+
+struct IwmDeviceConfiguration {
+    QString imagePath;
+    bool readOnly = false;
+};
+
+struct ScsiDeviceConfiguration {
+    int id = 0;
+    ScsiDeviceType type = ScsiDeviceType::HardDisk;
+    QString imagePath;
+    bool readOnly = false;
+};
+
 [[nodiscard]] QString runtimeSpeedName(RuntimeSpeed speed);
 [[nodiscard]] RuntimeSpeed runtimeSpeedFromName(const QString& name);
 
@@ -23,9 +40,11 @@ public:
     QString romPath;
     QString diskPath;
     QString floppyPath;
+    QVector<IwmDeviceConfiguration> iwmDevices;
+    QVector<ScsiDeviceConfiguration> scsiDevices;
     int ramSizeMiB = 4;
     int cyclesPerFrame = 130560;
-    RuntimeSpeed runtimeSpeed = RuntimeSpeed::Realtime;
+    RuntimeSpeed runtimeSpeed = RuntimeSpeed::Unlimited;
     bool skipRamPatternTest = false;
 
     [[nodiscard]] QStringList enabledRomPatches() const;

@@ -40,7 +40,7 @@ public:
     [[nodiscard]] std::uint8_t access(std::uint8_t registerIndex);
     [[nodiscard]] std::uint8_t access(std::uint8_t registerIndex, std::uint8_t value, bool write);
 
-    [[nodiscard]] bool loadFloppyImage(const QString& path);
+    [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly = false);
     void ejectFloppyImage();
     void setSideSelect(bool sideSelect);
     [[nodiscard]] QString floppyImagePath() const;

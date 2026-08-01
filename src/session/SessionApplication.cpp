@@ -21,6 +21,10 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTimer>
+#include <QToolBar>
+#include <QToolButton>
+#include <QMessageBox>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -353,6 +357,7 @@ public:
         setCentralWidget(m_display);
 
         buildMenus();
+        buildToolbar();
         buildStatusBar();
 
         m_frameTimer.setTimerType(Qt::PreciseTimer);
@@ -392,25 +397,6 @@ private:
         machineMenu->addAction(QStringLiteral("Close"), this, &QWidget::close);
 
         auto* mediaMenu = menuBar()->addMenu(QStringLiteral("Media"));
-        mediaMenu->addAction(QStringLiteral("Insert Disk Image"), this, [this]() {
-            const auto path = QFileDialog::getOpenFileName(this,
-                QStringLiteral("Insert Disk Image"),
-                cutemac::config::ConfigurationManager::diskImageDirectoryPath(),
-                QStringLiteral("Disk images (*.dsk *.img *.image);;All files (*)"));
-            if (!path.isEmpty()) {
-                m_configuration.diskPath = path;
-                if (!m_session.insertDisk(path)) {
-                    statusBar()->showMessage(QStringLiteral("Failed to load disk image"), 3000);
-                }
-                updateStatus();
-            }
-        });
-        mediaMenu->addAction(QStringLiteral("Eject Disk Image"), this, [this]() {
-            m_configuration.diskPath.clear();
-            m_session.ejectDisk();
-            updateStatus();
-        });
-        mediaMenu->addSeparator();
         mediaMenu->addAction(QStringLiteral("Insert Floppy Image"), this, [this]() {
             const auto path = QFileDialog::getOpenFileName(this,
                 QStringLiteral("Insert Floppy Image"),
@@ -438,6 +424,96 @@ private:
         viewMenu->addAction(QStringLiteral("Double Size"), this, [this]() { resize(1120, 820); });
     }
 
+    void buildToolbar()
+    {
+        if (m_toolbar == nullptr) {
+            m_toolbar = addToolBar(QStringLiteral("Machine"));
+            m_toolbar->setMovable(false);
+        }
+        m_toolbar->clear();
+
+        m_pauseAction = m_toolbar->addAction(style()->standardIcon(m_paused ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause),
+            m_paused ? QStringLiteral("Resume") : QStringLiteral("Pause"));
+        m_pauseAction->setToolTip(m_paused ? QStringLiteral("Resume emulation") : QStringLiteral("Pause emulation"));
+        connect(m_pauseAction, &QAction::triggered, this, [this]() { setPaused(!m_paused); });
+        auto* reset = m_toolbar->addAction(style()->standardIcon(QStyle::SP_BrowserReload), QStringLiteral("Reset"));
+        reset->setToolTip(QStringLiteral("Reset the emulated machine"));
+        connect(reset, &QAction::triggered, this, [this]() { loadAndReset(); });
+        m_toolbar->addSeparator();
+
+        if (!m_configuration.iwmDevices.isEmpty()) {
+            auto* floppy = new QToolButton(m_toolbar);
+            floppy->setIcon(style()->standardIcon(QStyle::SP_DriveFDIcon));
+            floppy->setToolTip(QStringLiteral("Internal floppy drive"));
+            floppy->setPopupMode(QToolButton::InstantPopup);
+            auto* menu = new QMenu(floppy);
+            menu->addAction(QStringLiteral("Insert..."), this, [this]() { insertFloppyFromToolbar(); });
+            menu->addAction(QStringLiteral("Eject"), this, [this]() {
+                m_configuration.floppyPath.clear();
+                m_configuration.iwmDevices[0].imagePath.clear();
+                m_session.ejectFloppy();
+                updateStatus();
+            });
+            menu->addAction(QStringLiteral("New 800K Image..."), this, [this]() { createFloppyFromToolbar(); });
+            menu->addSeparator();
+            auto* readOnly = menu->addAction(QStringLiteral("Read-only"));
+            readOnly->setCheckable(true);
+            readOnly->setChecked(m_configuration.iwmDevices.first().readOnly);
+            connect(readOnly, &QAction::toggled, this, [this](bool enabled) {
+                m_configuration.iwmDevices[0].readOnly = enabled;
+                statusBar()->showMessage(QStringLiteral("Floppy access mode will apply when the media is next inserted"), 3000);
+            });
+            floppy->setMenu(menu);
+            m_toolbar->addWidget(floppy);
+        }
+
+        for (const auto& device : m_configuration.scsiDevices) {
+            auto* disk = new QToolButton(m_toolbar);
+            disk->setIcon(style()->standardIcon(QStyle::SP_DriveHDIcon));
+            disk->setToolTip(QStringLiteral("SCSI ID %1 hard disk").arg(device.id));
+            connect(disk, &QToolButton::clicked, this, [this, device]() {
+                QMessageBox::information(this, QStringLiteral("SCSI Hard Disk"),
+                    QStringLiteral("SCSI ID: %1\nImage: %2\nAccess: %3")
+                        .arg(device.id)
+                        .arg(device.imagePath.isEmpty() ? QStringLiteral("No image") : device.imagePath)
+                        .arg(device.readOnly ? QStringLiteral("Read-only") : QStringLiteral("Read/write")));
+            });
+            m_toolbar->addWidget(disk);
+        }
+    }
+
+    void insertFloppyFromToolbar()
+    {
+        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Insert Floppy Image"),
+            cutemac::config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
+        if (path.isEmpty()) return;
+        m_configuration.floppyPath = path;
+        m_configuration.iwmDevices[0].imagePath = path;
+        if (!m_session.insertFloppy(path, m_configuration.iwmDevices.first().readOnly)) statusBar()->showMessage(QStringLiteral("Failed to load floppy image"), 3000);
+        updateStatus();
+    }
+
+    void createFloppyFromToolbar()
+    {
+        const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Create Blank Floppy Image"),
+            cutemac::config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("Raw 800K floppy (*.dsk)"));
+        if (path.isEmpty()) return;
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || !file.resize(800 * 1024)) {
+            QMessageBox::critical(this, QStringLiteral("Create Floppy Image"), QStringLiteral("Could not create the floppy image."));
+            return;
+        }
+        insertCreatedFloppy(path);
+    }
+
+    void insertCreatedFloppy(const QString& path)
+    {
+        m_configuration.floppyPath = path;
+        m_configuration.iwmDevices[0].imagePath = path;
+        if (!m_session.insertFloppy(path, m_configuration.iwmDevices.first().readOnly)) statusBar()->showMessage(QStringLiteral("Failed to load new floppy image"), 3000);
+        updateStatus();
+    }
+
     void buildStatusBar()
     {
         m_status = new QLabel;
@@ -452,6 +528,7 @@ private:
         m_runner.setSpeed(m_configuration.runtimeSpeed);
         updateSpeedActions();
         m_romLoaded = m_session.reconfigure(m_configuration);
+        buildToolbar();
         if (m_romLoaded) {
             m_display->setFramebuffer(m_session.framebufferBytes());
             statusBar()->showMessage(QStringLiteral("ROM loaded"), 2000);
@@ -500,6 +577,11 @@ private:
         m_runner.setPaused(m_paused || !m_romLoaded);
         if (m_paused || !m_romLoaded) m_frameTimer.stop(); else m_frameTimer.start();
         m_display->setRunning(!m_paused && m_romLoaded);
+        if (m_pauseAction != nullptr) {
+            m_pauseAction->setIcon(style()->standardIcon(m_paused ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause));
+            m_pauseAction->setText(m_paused ? QStringLiteral("Resume") : QStringLiteral("Pause"));
+            m_pauseAction->setToolTip(m_paused ? QStringLiteral("Resume emulation") : QStringLiteral("Pause emulation"));
+        }
         updateStatus();
     }
 
@@ -547,6 +629,8 @@ private:
     QAction* m_realtimeSpeedAction = nullptr;
     QAction* m_unlimitedSpeedAction = nullptr;
     QTimer m_frameTimer;
+    QToolBar* m_toolbar = nullptr;
+    QAction* m_pauseAction = nullptr;
     bool m_romLoaded = false;
     bool m_paused = true;
     quint64 m_frames = 0;

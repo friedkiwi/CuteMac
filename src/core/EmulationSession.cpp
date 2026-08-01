@@ -31,11 +31,17 @@ bool EmulationSession::initialize()
     }
     m_romLoaded = !m_configuration.romPath.isEmpty()
         && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
-    if (!m_configuration.diskPath.isEmpty()) {
+    for (const auto& device : m_configuration.scsiDevices) {
+        if (device.type == config::ScsiDeviceType::HardDisk && !device.imagePath.isEmpty()) {
+            (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
+        }
+    }
+    if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
         (void)m_machine->loadDiskImage(m_configuration.diskPath);
     }
     if (!m_configuration.floppyPath.isEmpty()) {
-        (void)m_machine->loadFloppyImage(m_configuration.floppyPath);
+        const bool readOnly = !m_configuration.iwmDevices.isEmpty() && m_configuration.iwmDevices.first().readOnly;
+        (void)m_machine->loadFloppyImage(m_configuration.floppyPath, readOnly);
     }
     if (m_romLoaded) {
         m_machine->reset();
@@ -56,11 +62,17 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     }
     m_romLoaded = !m_configuration.romPath.isEmpty()
         && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
-    if (!m_configuration.diskPath.isEmpty()) {
+    for (const auto& device : m_configuration.scsiDevices) {
+        if (device.type == config::ScsiDeviceType::HardDisk && !device.imagePath.isEmpty()) {
+            (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
+        }
+    }
+    if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
         (void)m_machine->loadDiskImage(m_configuration.diskPath);
     }
     if (!m_configuration.floppyPath.isEmpty()) {
-        (void)m_machine->loadFloppyImage(m_configuration.floppyPath);
+        const bool readOnly = !m_configuration.iwmDevices.isEmpty() && m_configuration.iwmDevices.first().readOnly;
+        (void)m_machine->loadFloppyImage(m_configuration.floppyPath, readOnly);
     }
     if (m_romLoaded) {
         m_machine->reset();
@@ -169,13 +181,16 @@ void EmulationSession::ejectDisk()
     m_configuration.diskPath.clear();
 }
 
-bool EmulationSession::insertFloppy(const QString& path)
+bool EmulationSession::insertFloppy(const QString& path, bool readOnly)
 {
     std::lock_guard lock(m_mutex);
-    if (!m_machine || !m_machine->loadFloppyImage(path)) {
+    if (!m_machine || !m_machine->loadFloppyImage(path, readOnly)) {
         return false;
     }
     m_configuration.floppyPath = path;
+    if (!m_configuration.iwmDevices.isEmpty()) {
+        m_configuration.iwmDevices[0] = { path, readOnly };
+    }
     return true;
 }
 

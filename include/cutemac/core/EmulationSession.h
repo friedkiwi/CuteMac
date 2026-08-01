@@ -48,7 +48,7 @@ public:
 
     [[nodiscard]] bool insertDisk(const QString& path);
     void ejectDisk();
-    [[nodiscard]] bool insertFloppy(const QString& path);
+    [[nodiscard]] bool insertFloppy(const QString& path, bool readOnly = false);
     void ejectFloppy();
 
     [[nodiscard]] void* debugMachine(const QString& machineId) override;
