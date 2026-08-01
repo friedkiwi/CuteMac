@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Widgets)
 find_package(Readline)
 
 qt_standard_project_setup()
@@ -21,6 +21,7 @@ add_library(CuteMacCore
     src/core/Emulator.cpp
     src/cpu/m68k/M68kCpuCore.cpp
     src/cpu/m68k/engine/m68kcpu.c
+    src/cpu/m68k/engine/m68kdasm.c
     src/cpu/m68k/engine/m68kops.c
     src/cpu/m68k/engine/softfloat/softfloat.c
     src/cpu/ppc/PpcCpuCore.cpp
@@ -99,6 +100,8 @@ if(Readline_FOUND AND NOT EMSCRIPTEN)
     target_link_libraries(CuteMacDebugSession
         PRIVATE
             CuteMacCore
+            Qt6::Gui
+            Qt6::Network
             Readline::Readline
     )
 endif()

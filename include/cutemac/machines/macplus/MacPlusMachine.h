@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <QByteArray>
 #include <QString>
 #include <QVector>
 
@@ -17,6 +18,14 @@ namespace cutemac::machines::macplus {
 
 class MacPlusMachine final : public cpu::m68k::M68kBus {
 public:
+    struct BusAccess {
+        QString operation;
+        QString region;
+        std::uint32_t address = 0;
+        std::uint32_t value = 0;
+        std::uint8_t size = 0;
+    };
+
     struct AccessSummary {
         std::uint64_t ramReads = 0;
         std::uint64_t ramWrites = 0;
@@ -35,17 +44,49 @@ public:
         std::uint64_t unmappedWrites = 0;
     };
 
+    struct RomInfo {
+        QString path;
+        std::uint32_t size = 0;
+        std::uint32_t checksum = 0;
+        std::uint32_t resetStackPointer = 0;
+        std::uint32_t resetProgramCounter = 0;
+        bool loaded = false;
+    };
+
     explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024);
 
     [[nodiscard]] bool loadRomFile(const QString& path);
     void reset();
 
     [[nodiscard]] int runCycles(int cycles);
+    [[nodiscard]] int stepInstruction();
+    [[nodiscard]] bool runUntilPc(std::uint32_t address, int maxCycles);
 
     [[nodiscard]] std::uint32_t programCounter() const;
+    [[nodiscard]] cpu::m68k::M68kCpuCore::RegisterSnapshot cpuRegisters() const;
+    [[nodiscard]] QString disassemble(std::uint32_t address) const;
+    [[nodiscard]] int disassembleBytes(std::uint32_t address) const;
     [[nodiscard]] bool overlayEnabled() const;
     [[nodiscard]] const AccessSummary& accessSummary() const;
     [[nodiscard]] const QVector<QString>& eventLog() const;
+    [[nodiscard]] QVector<BusAccess> busTrace() const;
+    void clearBusTrace();
+
+    [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const;
+    [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const;
+    [[nodiscard]] std::uint32_t debugRead32(std::uint32_t address) const;
+    void debugWrite8(std::uint32_t address, std::uint8_t value);
+    void debugWrite16(std::uint32_t address, std::uint16_t value);
+    void debugWrite32(std::uint32_t address, std::uint32_t value);
+
+    [[nodiscard]] QByteArray framebufferBytes() const;
+    [[nodiscard]] std::uint32_t framebufferHash() const;
+    [[nodiscard]] QByteArray soundBufferBytes() const;
+    [[nodiscard]] std::uint32_t soundBufferHash() const;
+    [[nodiscard]] QByteArray soundCaptureBytes() const;
+    [[nodiscard]] std::uint32_t soundCaptureHash() const;
+    void clearSoundCapture();
+    [[nodiscard]] RomInfo romInfo() const;
 
     [[nodiscard]] std::uint8_t read8(std::uint32_t address) override;
     [[nodiscard]] std::uint16_t read16(std::uint32_t address) override;
@@ -80,6 +121,10 @@ private:
     void setOverlayEnabled(bool enabled);
     void logEvent(const QString& message);
     void logAccess(const char* operation, std::uint32_t address, std::uint32_t value);
+    void recordBusAccess(const char* operation, Region region, std::uint32_t address, std::uint32_t value, std::uint8_t size);
+    void recordSoundBufferWrite(std::uint32_t address, std::uint8_t value);
+    [[nodiscard]] QString regionName(Region region) const;
+    [[nodiscard]] std::uint32_t readRom32Direct(std::uint32_t offset) const;
 
     cpu::m68k::M68kCpuCore m_cpu;
     QVector<std::uint8_t> m_ram;
@@ -91,9 +136,12 @@ private:
     devices::scsi::ncr5380::Ncr5380 m_scsi;
 
     bool m_romLoaded = false;
+    QString m_romPath;
     bool m_overlayEnabled = true;
     AccessSummary m_accessSummary;
     QVector<QString> m_eventLog;
+    QVector<BusAccess> m_busTrace;
+    QByteArray m_soundCapture;
 };
 
 } // namespace cutemac::machines::macplus

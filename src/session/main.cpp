@@ -5,6 +5,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -26,7 +27,9 @@ class DisplayWidget final : public QWidget {
 public:
     explicit DisplayWidget(QWidget* parent = nullptr)
         : QWidget(parent)
+        , m_image(512, 342, QImage::Format_RGB32)
     {
+        m_image.fill(Qt::white);
         setMinimumSize(512, 342);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     }
@@ -37,26 +40,40 @@ public:
         update();
     }
 
+    void setFramebuffer(const QByteArray& bytes)
+    {
+        if (bytes.size() < (m_image.width() * m_image.height()) / 8) {
+            return;
+        }
+
+        for (int y = 0; y < m_image.height(); ++y) {
+            for (int x = 0; x < m_image.width(); ++x) {
+                const auto byte = static_cast<std::uint8_t>(bytes[(y * m_image.width() + x) / 8]);
+                const auto bit = 7 - (x & 7);
+                const auto on = ((byte >> bit) & 1) != 0;
+                m_image.setPixelColor(x, y, on ? Qt::black : Qt::white);
+            }
+        }
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent*) override
     {
         QPainter painter(this);
         painter.fillRect(rect(), QColor(24, 24, 24));
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
         const auto target = displayRect();
         painter.fillRect(target.adjusted(-18, -18, 18, 18), QColor(44, 47, 49));
-        painter.fillRect(target, QColor(204, 208, 197));
-
-        painter.setPen(QColor(48, 48, 48, 28));
-        for (int y = target.top(); y < target.bottom(); y += 6) {
-            painter.drawLine(target.left(), y, target.right(), y);
-        }
+        painter.drawImage(target, m_image);
 
         painter.setPen(QColor(20, 20, 20));
         painter.drawRect(target.adjusted(0, 0, -1, -1));
 
-        painter.setPen(QColor(25, 25, 25));
-        painter.drawText(target, Qt::AlignCenter, m_running ? QStringLiteral("Macintosh Plus") : QStringLiteral("Paused"));
+        if (!m_running) {
+            painter.fillRect(target, QColor(255, 255, 255, 72));
+        }
     }
 
 private:
@@ -69,6 +86,7 @@ private:
     }
 
     bool m_running = false;
+    QImage m_image;
 };
 
 class RuntimeSettingsDialog final : public QDialog {
@@ -193,6 +211,7 @@ private:
         m_romLoaded = !m_configuration.romPath.isEmpty() && m_machine.loadRomFile(m_configuration.romPath);
         if (m_romLoaded) {
             m_machine.reset();
+            m_display->setFramebuffer(m_machine.framebufferBytes());
             statusBar()->showMessage(QStringLiteral("ROM loaded"), 2000);
         } else {
             statusBar()->showMessage(QStringLiteral("ROM not loaded"));
@@ -236,6 +255,7 @@ private:
         }
 
         (void)m_machine.runCycles(m_configuration.cyclesPerFrame);
+        m_display->setFramebuffer(m_machine.framebufferBytes());
         ++m_frames;
         if ((m_frames % 15) == 0) {
             updateStatus();

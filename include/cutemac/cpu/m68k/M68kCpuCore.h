@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include <array>
 #include "cutemac/core/CpuCore.h"
 #include "cutemac/cpu/m68k/M68kBus.h"
 
@@ -9,6 +10,17 @@ namespace cutemac::cpu::m68k {
 
 class M68kCpuCore final : public core::CpuCore {
 public:
+    struct RegisterSnapshot {
+        std::array<std::uint32_t, 8> d {};
+        std::array<std::uint32_t, 8> a {};
+        std::uint32_t pc = 0;
+        std::uint16_t sr = 0;
+        std::uint32_t usp = 0;
+        std::uint32_t isp = 0;
+        std::uint32_t msp = 0;
+        std::uint32_t vbr = 0;
+    };
+
     enum class Model {
         M68000,
         M68010,
@@ -35,7 +47,11 @@ public:
     void setIrqLevel(unsigned int level);
 
     [[nodiscard]] int execute(int cycles);
+    [[nodiscard]] int stepInstruction();
     [[nodiscard]] std::uint32_t programCounter() const;
+    [[nodiscard]] RegisterSnapshot registers() const;
+    [[nodiscard]] QString disassemble(std::uint32_t address) const;
+    [[nodiscard]] int disassembleBytes(std::uint32_t address) const;
 
     void setProgramCounter(std::uint32_t address);
 

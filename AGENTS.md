@@ -28,8 +28,11 @@
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.
 - Keep debug-only interactive tools in `CuteMacDebugSession` so normal emulator sessions stay lean.
+- `CuteMacDebugSession` owns bringup tooling: register/memory/disassembly commands, framebuffer export, Mac Plus sound-buffer capture export, bus logs, and the current minimal GDB remote stub.
+- The GDB stub is intentionally minimal: it supports m68k register reads, memory read/write, single-step, continue, and software breakpoints. Full register writes and PC mutation are still future work.
 - Use `QStandardPaths` for cross-platform profile, ROM, and disk-image defaults.
-- Avoid starting emulator implementation before the scaffold, build system, and source organization are in place.
+- Mac Plus bringup currently reaches the missing-floppy screen with the included user-supplied ROM profile. The startup sound can be exported from captured writes to the ROM sound buffer; live audio hardware emulation is still not complete.
+- The annotated ROM reference may be cloned into ignored `work/mac_rom`; do not commit it.
 
 ## Build And Portability
 
