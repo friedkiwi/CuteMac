@@ -17,7 +17,6 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
-#include <QCursor>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTimer>
@@ -127,27 +126,16 @@ public:
         m_keyCallback = std::move(callback);
     }
 
-    [[nodiscard]] bool mouseCaptured() const { return m_mouseCaptured; }
-    [[nodiscard]] bool relativeMouseCapture() const { return m_mouseCaptured && m_relativeCapture; }
-
-    void releaseMouseCapture()
+    void releasePointerInput()
     {
-        if (!m_mouseCaptured) {
-            return;
-        }
-        m_mouseCaptured = false;
-        if (mouseGrabber() == this) {
-            releaseMouse();
-        }
-        unsetCursor();
-        if (m_keyCallback) {
-            for (const auto keyCode : { 0x36, 0x3a }) {
-                if (m_pressedMacKeys.contains(keyCode)) m_keyCallback(keyCode, false);
+        if (m_leftButtonPressed) {
+            m_leftButtonPressed = false;
+            if (m_mouseCallback) {
+                m_mouseCallback(m_lastGuestPoint.x(), m_lastGuestPoint.y(), false);
             }
         }
-        m_pressedMacKeys.remove(0x36);
-        m_pressedMacKeys.remove(0x3a);
-        update();
+        m_pointerInsideDisplay = false;
+        unsetCursor();
     }
 
 protected:
@@ -167,18 +155,16 @@ protected:
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
+        updatePointerPresence(event->pos());
+        if (!m_pointerInsideDisplay) return;
         sendMouseEvent(event);
     }
 
     void mousePressEvent(QMouseEvent* event) override
     {
         setFocus(Qt::MouseFocusReason);
-        if (!m_mouseCaptured && displayRect().contains(event->pos())) {
-            captureMouse();
-            if (!m_relativeCapture && m_mouseCallback) {
-                const auto point = macPointFor(event->pos());
-                m_mouseCallback(point.x(), point.y(), false);
-            }
+        updatePointerPresence(event->pos());
+        if (!m_pointerInsideDisplay) {
             event->accept();
             return;
         }
@@ -190,10 +176,11 @@ protected:
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
+        updatePointerPresence(event->pos());
         if (event->button() == Qt::LeftButton) {
             m_leftButtonPressed = false;
         }
-        sendMouseEvent(event);
+        if (m_pointerInsideDisplay) sendMouseEvent(event);
     }
 
     void mouseDoubleClickEvent(QMouseEvent* event) override
@@ -201,19 +188,15 @@ protected:
         // Qt sends the second press of a double-click as MouseButtonDblClick
         // instead of calling mousePressEvent(). Forward it so the guest sees
         // both complete clicks and can perform Finder's double-click action.
-        if (event->button() == Qt::LeftButton) {
+        updatePointerPresence(event->pos());
+        if (m_pointerInsideDisplay && event->button() == Qt::LeftButton) {
             m_leftButtonPressed = true;
         }
-        sendMouseEvent(event);
+        if (m_pointerInsideDisplay) sendMouseEvent(event);
     }
 
     void keyPressEvent(QKeyEvent* event) override
     {
-        if (isReleaseChord(event)) {
-            releaseMouseCapture();
-            event->accept();
-            return;
-        }
         sendKeyEvent(event, true);
     }
 
@@ -224,6 +207,7 @@ protected:
 
     void focusOutEvent(QFocusEvent* event) override
     {
+        releasePointerInput();
         if (m_keyCallback) {
             for (const auto keyCode : std::as_const(m_pressedMacKeys)) m_keyCallback(keyCode, false);
         }
@@ -231,43 +215,23 @@ protected:
         QWidget::focusOutEvent(event);
     }
 
+    void leaveEvent(QEvent* event) override
+    {
+        releasePointerInput();
+        QWidget::leaveEvent(event);
+    }
+
 private:
-    void captureMouse()
+    void updatePointerPresence(const QPoint& widgetPoint)
     {
-        m_mouseCaptured = true;
+        const bool inside = displayRect().contains(widgetPoint);
+        if (inside == m_pointerInsideDisplay) return;
+        if (!inside) {
+            releasePointerInput();
+            return;
+        }
+        m_pointerInsideDisplay = true;
         setCursor(Qt::BlankCursor);
-        m_relativeCapture = supportsRelativeCapture();
-        if (m_relativeCapture) {
-            grabMouse();
-            m_relativeCapture = mouseGrabber() == this;
-        }
-        if (m_relativeCapture) {
-            recenterMouse();
-        }
-    }
-
-    [[nodiscard]] bool supportsRelativeCapture() const
-    {
-#if defined(Q_OS_WASM)
-        return false;
-#else
-        return cutemac::session::HostInputMapper::supportsRelativeCapture(QGuiApplication::platformName());
-#endif
-    }
-
-    void recenterMouse()
-    {
-        m_mouseCenter = displayRect().center();
-        m_warpPending = true;
-        QCursor::setPos(mapToGlobal(m_mouseCenter));
-    }
-
-    [[nodiscard]] bool isReleaseChord(const QKeyEvent* event) const
-    {
-        if (!m_mouseCaptured) {
-            return false;
-        }
-        return cutemac::session::HostInputMapper::isReleaseChord(*event);
     }
 
     [[nodiscard]] QRect displayRect() const
@@ -296,27 +260,8 @@ private:
         if (!m_mouseCallback) {
             return;
         }
-        if (m_mouseCaptured) {
-            if (!m_relativeCapture) {
-                const auto point = macPointFor(event->pos());
-                m_mouseCallback(point.x(), point.y(), m_leftButtonPressed);
-                return;
-            }
-            if (event->type() == QEvent::MouseMove && m_warpPending && event->pos() == m_mouseCenter) {
-                m_warpPending = false;
-                return;
-            }
-            const auto delta = event->pos() - m_mouseCenter;
-            if (!delta.isNull()) {
-                m_mouseCallback(delta.x(), delta.y(), m_leftButtonPressed);
-                recenterMouse();
-            } else {
-                m_mouseCallback(0, 0, m_leftButtonPressed);
-            }
-            return;
-        }
-        const auto point = macPointFor(event->pos());
-        m_mouseCallback(point.x(), point.y(), m_leftButtonPressed);
+        m_lastGuestPoint = macPointFor(event->pos());
+        m_mouseCallback(m_lastGuestPoint.x(), m_lastGuestPoint.y(), m_leftButtonPressed);
     }
 
     void sendKeyEvent(QKeyEvent* event, bool pressed)
@@ -406,11 +351,9 @@ private:
     }
 
     bool m_running = false;
-    bool m_mouseCaptured = false;
-    bool m_relativeCapture = false;
-    bool m_warpPending = false;
+    bool m_pointerInsideDisplay = false;
     bool m_leftButtonPressed = false;
-    QPoint m_mouseCenter;
+    QPoint m_lastGuestPoint;
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
     std::function<void(int, bool)> m_keyCallback;
@@ -435,11 +378,7 @@ public:
                 m_mouseInputPressed = true;
                 updateInteractiveInputState();
             }
-            if (m_display->relativeMouseCapture()) {
-                m_session.queueMouseDelta(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
-            } else {
-                m_session.queueMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
-            }
+            m_session.queueMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
             m_session.queueMouseButton(pressed);
             if (!pressed && m_mouseInputPressed) {
                 m_mouseInputPressed = false;
@@ -528,9 +467,6 @@ private:
         });
 
         auto* viewMenu = menuBar()->addMenu(QStringLiteral("View"));
-        const auto releaseInputText = QStringLiteral("Release Input\t") + cutemac::session::HostInputMapper::releaseChordLabel();
-        viewMenu->addAction(releaseInputText, this, [this]() { m_display->releaseMouseCapture(); });
-        viewMenu->addSeparator();
         viewMenu->addAction(QStringLiteral("Actual Size"), this, [this]() { resize(620, 480); });
         viewMenu->addAction(QStringLiteral("Double Size"), this, [this]() { resize(1120, 820); });
     }
@@ -671,7 +607,7 @@ private:
     void configureMachine()
     {
         const auto wasPaused = m_paused;
-        m_display->releaseMouseCapture();
+        m_display->releasePointerInput();
         setPaused(true);
 
         cutemac::ui::ConfigurationDialog dialog(m_configuration, this);

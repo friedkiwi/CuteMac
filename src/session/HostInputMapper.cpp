@@ -1,33 +1,8 @@
 #include "cutemac/session/HostInputMapper.h"
 
 #include <QKeyEvent>
-#include <QtGlobal>
 
 namespace cutemac::session {
-
-bool HostInputMapper::supportsRelativeCapture(const QString& platformName)
-{
-#if defined(Q_OS_WASM)
-    Q_UNUSED(platformName);
-    return false;
-#else
-    return !platformName.startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
-#endif
-}
-
-QString HostInputMapper::releaseChordLabel()
-{
-#if defined(Q_OS_MACOS)
-    return QStringLiteral("Control+Option");
-#else
-    return QStringLiteral("Ctrl+Alt");
-#endif
-}
-
-bool HostInputMapper::isReleaseChord(const QKeyEvent& event)
-{
-    return (event.modifiers() & Qt::ControlModifier) != 0 && (event.modifiers() & Qt::AltModifier) != 0;
-}
 
 int HostInputMapper::macKeyCode(const QKeyEvent& event)
 {
