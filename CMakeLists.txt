@@ -147,6 +147,10 @@ install(DIRECTORY licenses
     COMPONENT Runtime
 )
 
+# When a platform package is introduced through CPack, keep the same product
+# boundary unless that packaging definition deliberately opts into more.
+set(CPACK_COMPONENTS_ALL Runtime)
+
 add_executable(CuteMacMacPlusSmoke
     tools/macplus_smoke.cpp
 )

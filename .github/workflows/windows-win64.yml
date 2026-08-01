@@ -63,13 +63,14 @@ jobs:
         shell: pwsh
         run: |
           $package = Join-Path $env:GITHUB_WORKSPACE "package/CuteMac-win64"
-          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          cmake --install build --config Release --prefix $package --component Runtime
 
-          Copy-Item "build/Release/CuteMac.exe" $package
-          Copy-Item "build/Release/CuteMacSession.exe" $package
-          Copy-Item "build/Release/CuteMacMacPlusSmoke.exe" $package
-          Copy-Item "README.md" $package
-          Copy-Item "licenses" $package -Recurse
+          $productExecutables = @("CuteMac.exe", "CuteMacSession.exe")
+          $unexpectedExecutables = Get-ChildItem $package -Filter *.exe -File -Recurse |
+            Where-Object { $_.Name -notin $productExecutables }
+          if ($unexpectedExecutables) {
+            throw "Runtime install contains non-product executables: $($unexpectedExecutables.Name -join ', ')"
+          }
 
           windeployqt --release --no-translations --compiler-runtime --dir $package "$package/CuteMac.exe"
           windeployqt --release --no-translations --compiler-runtime --dir $package "$package/CuteMacSession.exe"
