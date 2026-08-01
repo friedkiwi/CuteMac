@@ -161,7 +161,7 @@ std::uint8_t IwmController::readRegister()
         return selectedDrive().nextNibble();
     case 0x02: {
         ++m_statusReads;
-        const auto modeBits = static_cast<std::uint8_t>(m_mode & 0x3f);
+        const auto modeBits = static_cast<std::uint8_t>((m_mode & 0x1f) | (m_status & 0x20));
         const auto sense = driveSenseHigh() ? 0x80 : 0x00;
         m_status = static_cast<std::uint8_t>(sense | modeBits);
         if (m_traceEnabled) {
@@ -199,8 +199,15 @@ void IwmController::setLine(std::uint8_t line, bool on)
     m_lines[line] = on;
 
     if (line == Motor) {
-        selectedDrive().setMotorOn(on);
-        appendTraceEvent(QStringLiteral("iwm motor=%1 drive=%2").arg(on ? QStringLiteral("on") : QStringLiteral("off"), m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal")));
+        if (on) {
+            m_status = static_cast<std::uint8_t>(m_status | 0x20);
+        } else {
+            m_status = static_cast<std::uint8_t>(m_status & ~0x20);
+        }
+        appendTraceEvent(QStringLiteral("iwm enable=%1 drive=%2 motor=%3")
+                             .arg(on ? QStringLiteral("on") : QStringLiteral("off"),
+                                 m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal"),
+                                 selectedDrive().motorOn() ? QStringLiteral("on") : QStringLiteral("off")));
     } else if (line == Ca0 || line == Ca1 || line == Ca2 || line == SelectDrive) {
         updateSelectedDriveRegister();
     } else if (line == Lstrb && wasOn && !on) {
@@ -211,7 +218,6 @@ void IwmController::setLine(std::uint8_t line, bool on)
 void IwmController::updateSelectedDriveRegister()
 {
     m_selectedDriveRegister = selectedDriveRegister();
-    selectedDrive().setMotorOn(m_lines[Motor]);
     selectedDrive().setCurrentSide(m_sideSelect ? 1 : 0);
     appendTraceEvent(QStringLiteral("iwm select reg=0x%1 drive=%2 side=%3")
                          .arg(m_selectedDriveRegister, 2, 16, QLatin1Char('0'))
@@ -265,9 +271,11 @@ bool IwmController::driveSenseHigh()
     case 0x04:
         return true;
     case 0x06:
-        return !drive.writable();
+        return drive.writable();
     case 0x08:
         return !drive.motorOn();
+    case 0x09:
+        return drive.doubleSided();
     case 0x0a:
         return !drive.trackZero();
     case 0x0b:

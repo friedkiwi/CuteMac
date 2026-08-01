@@ -6,6 +6,8 @@ project(CuteMac
     LANGUAGES C CXX
 )
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -106,4 +108,17 @@ if(Readline_FOUND AND NOT EMSCRIPTEN)
             Qt6::Network
             Readline::Readline
     )
+endif()
+
+if(BUILD_TESTING)
+    add_executable(CuteMacIwmTests
+        tests/iwm_tests.cpp
+    )
+
+    target_link_libraries(CuteMacIwmTests
+        PRIVATE
+            CuteMacCore
+    )
+
+    add_test(NAME iwm-register-protocol COMMAND CuteMacIwmTests)
 endif()
