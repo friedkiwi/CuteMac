@@ -125,8 +125,9 @@ public:
         }
         unsetCursor();
         if (m_keyCallback) {
-            m_keyCallback(0x36, false);
-            m_keyCallback(0x3a, false);
+            for (const auto keyCode : { 0x36, 0x3a }) {
+                if (m_pressedMacKeys.contains(keyCode)) m_keyCallback(keyCode, false);
+            }
         }
         m_pressedMacKeys.remove(0x36);
         m_pressedMacKeys.remove(0x3a);
@@ -395,15 +396,31 @@ public:
 
         m_display = new DisplayWidget;
         m_display->setMouseCallback([this](int x, int y, bool pressed) {
+            if (pressed && !m_mouseInputPressed) {
+                m_mouseInputPressed = true;
+                updateInteractiveInputState();
+            }
             if (m_display->relativeMouseCapture()) {
                 m_session.queueMouseDelta(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
             } else {
                 m_session.queueMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
             }
             m_session.queueMouseButton(pressed);
+            if (!pressed && m_mouseInputPressed) {
+                m_mouseInputPressed = false;
+                updateInteractiveInputState();
+            }
         });
         m_display->setKeyCallback([this](int keyCode, bool pressed) {
+            if (pressed) {
+                m_pressedInputKeys.insert(keyCode);
+                updateInteractiveInputState();
+            }
             m_session.queueKey(static_cast<std::uint8_t>(keyCode), pressed);
+            if (!pressed) {
+                m_pressedInputKeys.remove(keyCode);
+                updateInteractiveInputState();
+            }
         });
         setCentralWidget(m_display);
 
@@ -426,6 +443,11 @@ public:
     ~EmulatorWindow() override { m_runner.stop(); }
 
 private:
+    void updateInteractiveInputState()
+    {
+        m_runner.setInteractiveInputActive(m_mouseInputPressed || !m_pressedInputKeys.isEmpty());
+    }
+
     void buildMenus()
     {
         auto* machineMenu = menuBar()->addMenu(QStringLiteral("Machine"));
@@ -709,6 +731,8 @@ private:
     QLabel* m_status = nullptr;
     QAction* m_realtimeSpeedAction = nullptr;
     QAction* m_unlimitedSpeedAction = nullptr;
+    QSet<int> m_pressedInputKeys;
+    bool m_mouseInputPressed = false;
     QTimer m_frameTimer;
     QToolBar* m_toolbar = nullptr;
     QAction* m_pauseAction = nullptr;
