@@ -176,6 +176,7 @@ target_link_libraries(CuteMacIIcxSmoke
 if(Readline_FOUND AND NOT EMSCRIPTEN)
     add_executable(CuteMacDebugSession
         src/debug/main.cpp
+        src/session/FramebufferRenderer.cpp
     )
 
     target_link_libraries(CuteMacDebugSession
@@ -266,4 +267,8 @@ if(BUILD_TESTING)
     add_executable(CuteMacPpc601Tests tests/ppc601_tests.cpp)
     target_link_libraries(CuteMacPpc601Tests PRIVATE CuteMacCore)
     add_test(NAME ppc601-core COMMAND CuteMacPpc601Tests)
+
+    add_executable(CuteMacDebugCpuAccessTests tests/debug_cpu_access_tests.cpp)
+    target_link_libraries(CuteMacDebugCpuAccessTests PRIVATE CuteMacCore)
+    add_test(NAME debug-cpu-access COMMAND CuteMacDebugCpuAccessTests)
 endif()

@@ -55,6 +55,7 @@ public:
     void ejectFloppy();
 
     [[nodiscard]] void* debugMachine(const QString& machineId) override;
+    [[nodiscard]] IDebugCpuAccess* debugCpuAccess() override;
 
 private:
     [[nodiscard]] static std::unique_ptr<IMachine> createMachine(const config::Configuration& configuration);

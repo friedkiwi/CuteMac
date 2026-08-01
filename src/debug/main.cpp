@@ -25,7 +25,10 @@
 
 #include "cutemac/config/Configuration.h"
 #include "cutemac/core/EmulationSession.h"
+#include "cutemac/core/IDebugCpuAccess.h"
+#include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
+#include "cutemac/session/FramebufferRenderer.h"
 
 namespace {
 
@@ -546,6 +549,17 @@ private:
         if (command == QStringLiteral("quit") || command == QStringLiteral("exit")) {
             return false;
         }
+        const QSet<QString> machineNeutralCommands {
+            QStringLiteral("help"), QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("reset"),
+            QStringLiteral("run"), QStringLiteral("step"), QStringLiteral("run-until"), QStringLiteral("state"),
+            QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("screen"), QStringLiteral("devices"),
+            QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
+        };
+        if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
+            m_out << command << " is not yet available for mac-iicx; common run/register/memory/video commands are available\n";
+            m_out.flush();
+            return true;
+        }
         if (command == QStringLiteral("help")) {
             printHelp();
         } else if (command == QStringLiteral("profile")) {
@@ -671,7 +685,7 @@ private:
     void printHelp()
     {
         m_out << "commands:\n";
-        m_out << "  regs | state | devices [via|iwm|scc|scsi]\n";
+        m_out << "  regs | state | devices [via|iwm|swim|scc|scsi|nubus]\n";
         m_out << "  step [count] | run [cycles] | run-until <addr> [max-cycles] | run-until-event floppy-eject [max-cycles]\n";
         m_out << "  disasm [addr|pc] [count] | mem <addr> [len]\n";
         m_out << "  mem-find <hex> [start len] | mem-snapshot <name> <addr> <len> | memory-diff <name>\n";
@@ -800,25 +814,32 @@ private:
     void reloadMachine()
     {
         m_session = std::make_unique<cutemac::core::EmulationSession>(m_configuration);
+        m_cpuDebug = m_session->debugCpuAccess();
         m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(m_session->debugMachine(QStringLiteral("mac-plus")));
-        if (m_machine == nullptr) {
+        m_iicxMachine = static_cast<cutemac::machines::maciicx::MacIIcxMachine*>(m_session->debugMachine(QStringLiteral("mac-iicx")));
+        if (m_cpuDebug == nullptr && m_machine == nullptr && m_iicxMachine == nullptr) {
             m_out << "debug support is unavailable for machine " << m_configuration.machineId << '\n';
             m_romLoaded = false;
             return;
         }
-        m_machine->setBusTraceEnabled(true);
-        m_machine->setSoundCaptureEnabled(true);
-        m_gdbStub = std::make_unique<GdbStub>(*m_machine, m_breakpoints);
-        m_gdbStub->setEnabled(m_gdbEnabled);
-        m_gdbStub->setPort(m_gdbPort);
+        if (m_machine != nullptr) {
+            m_machine->setBusTraceEnabled(true);
+            m_machine->setSoundCaptureEnabled(true);
+            m_gdbStub = std::make_unique<GdbStub>(*m_machine, m_breakpoints);
+            m_gdbStub->setEnabled(m_gdbEnabled);
+            m_gdbStub->setPort(m_gdbPort);
+        } else {
+            m_gdbStub.reset();
+        }
 
         m_romLoaded = m_session->initialize();
         if (!m_configuration.diskPath.isEmpty()) m_out << "disk loaded: " << displayPath(m_configuration.diskPath) << '\n';
         if (!m_configuration.floppyPath.isEmpty()) m_out << "floppy loaded: " << displayPath(m_configuration.floppyPath) << '\n';
         if (m_romLoaded) {
-            m_out << "machine reset: pc=" << hexValue(m_machine->programCounter()) << '\n';
+            m_out << "machine reset: cpu=" << (m_cpuDebug ? m_cpuDebug->debugCpuArchitecture() : QStringLiteral("m68k"))
+                  << " pc=" << hexValue(debugProgramCounter()) << '\n';
         } else {
-            const auto patchError = m_machine->romInfo().patchError;
+            const auto patchError = m_machine != nullptr ? m_machine->romInfo().patchError : QString {};
             if (!patchError.isEmpty()) {
                 m_out << "ROM patch failed: " << patchError << '\n';
             } else {
@@ -827,14 +848,50 @@ private:
         }
     }
 
+    [[nodiscard]] std::uint32_t debugProgramCounter() const
+    {
+        if (m_cpuDebug) return m_cpuDebug->programCounter();
+        return m_machine != nullptr ? m_machine->programCounter() : m_iicxMachine->programCounter();
+    }
+
+    [[nodiscard]] int debugRunCycles(int cycles)
+    {
+        if (m_cpuDebug) return m_cpuDebug->runCycles(cycles);
+        return m_machine != nullptr ? m_machine->runCycles(cycles) : m_iicxMachine->runCycles(cycles);
+    }
+
+    [[nodiscard]] int debugStepInstruction()
+    {
+        if (m_cpuDebug) return m_cpuDebug->stepInstruction();
+        return m_machine != nullptr ? m_machine->stepInstruction() : m_iicxMachine->runCycles(1);
+    }
+
+    [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const
+    {
+        if (m_cpuDebug) return m_cpuDebug->debugRead8(address);
+        return m_machine != nullptr ? m_machine->debugRead8(address) : m_iicxMachine->read8(address);
+    }
+
+    [[nodiscard]] QString debugDisassemble(std::uint32_t address) const
+    {
+        if (m_cpuDebug) return m_cpuDebug->disassemble(address);
+        return m_machine != nullptr ? m_machine->disassemble(address) : m_iicxMachine->disassemble(address);
+    }
+
+    [[nodiscard]] int debugDisassembleBytes(std::uint32_t address) const
+    {
+        if (m_cpuDebug) return m_cpuDebug->disassembleBytes(address);
+        return m_machine != nullptr ? m_machine->disassembleBytes(address) : m_iicxMachine->disassembleBytes(address);
+    }
+
     void runCycles(const QStringList& parts)
     {
         if (!requireRom()) {
             return;
         }
         const auto cycles = parts.size() >= 2 ? parts[1].toInt() : m_configuration.cyclesPerFrame;
-        const auto cyclesRun = tracingRequiresStepping() ? runCyclesWithTracing(cycles) : m_machine->runCycles(cycles);
-        m_out << "cycles_run=" << cyclesRun << " pc=" << hexValue(m_machine->programCounter()) << '\n';
+        const auto cyclesRun = m_machine != nullptr && tracingRequiresStepping() ? runCyclesWithTracing(cycles) : debugRunCycles(cycles);
+        m_out << "cycles_run=" << cyclesRun << " pc=" << hexValue(debugProgramCounter()) << '\n';
     }
 
     void stepInstructions(const QStringList& parts)
@@ -844,14 +901,14 @@ private:
         }
         const auto count = parts.size() >= 2 ? std::max(1, parts[1].toInt()) : 1;
         for (int i = 0; i < count; ++i) {
-            if (m_breakpoints.count(m_machine->programCounter()) != 0 && i != 0) {
+            if (m_breakpoints.count(debugProgramCounter()) != 0 && i != 0) {
                 break;
             }
-            sampleBeforeStep();
-            (void)m_machine->stepInstruction();
-            sampleAfterStep();
+            if (m_machine != nullptr) sampleBeforeStep();
+            (void)debugStepInstruction();
+            if (m_machine != nullptr) sampleAfterStep();
         }
-        m_out << "pc=" << hexValue(m_machine->programCounter()) << ' ' << m_machine->disassemble(m_machine->programCounter()) << '\n';
+        m_out << "pc=" << hexValue(debugProgramCounter()) << ' ' << debugDisassemble(debugProgramCounter()) << '\n';
     }
 
     void runUntil(const QStringList& parts)
@@ -869,8 +926,11 @@ private:
             return;
         }
         const auto maxCycles = parts.size() >= 3 ? parts[2].toInt() : 10000000;
-        const auto hit = m_machine->runUntilPc(*address, maxCycles);
-        m_out << (hit ? "hit " : "timeout ") << hexValue(m_machine->programCounter()) << '\n';
+        int cyclesUsed = 0;
+        while (debugProgramCounter() != *address && cyclesUsed < maxCycles) {
+            cyclesUsed += std::max(1, debugStepInstruction());
+        }
+        m_out << (debugProgramCounter() == *address ? "hit " : "timeout ") << hexValue(debugProgramCounter()) << '\n';
     }
 
     void runUntilEvent(const QStringList& parts)
@@ -901,6 +961,16 @@ private:
 
     void printState()
     {
+        if (m_iicxMachine != nullptr) {
+            const auto state = m_session->status();
+            const auto io = m_iicxMachine->ioStatistics();
+            m_out << "pc=" << hexValue(state.programCounter) << '\n';
+            m_out << "overlay=" << (state.overlayEnabled ? "on" : "off") << '\n';
+            m_out << "cycles=" << state.cycles << '\n';
+            m_out << "nubus_reads=" << io.nubusReads << " nubus_writes=" << io.nubusWrites << '\n';
+            m_out << "scsi_reads=" << io.scsiReads << " scsi_writes=" << io.scsiWrites << '\n';
+            return;
+        }
         const auto& summary = m_machine->accessSummary();
         m_out << "pc=" << hexValue(m_machine->programCounter()) << '\n';
         m_out << "overlay=" << (m_machine->overlayEnabled() ? "on" : "off") << '\n';
@@ -912,7 +982,12 @@ private:
 
     void printRegisters()
     {
-        const auto regs = m_machine->cpuRegisters();
+        if (m_cpuDebug) {
+            m_out << "architecture=" << m_cpuDebug->debugCpuArchitecture() << '\n';
+            for (const auto& line : m_cpuDebug->debugRegisterLines()) m_out << line << '\n';
+            return;
+        }
+        const auto regs = m_machine != nullptr ? m_machine->cpuRegisters() : m_iicxMachine->cpuRegisters();
         for (int i = 0; i < 8; ++i) {
             m_out << "D" << i << '=' << hexValue(regs.d[i]) << ((i == 3 || i == 7) ? '\n' : ' ');
         }
@@ -926,7 +1001,7 @@ private:
 
     void disassemble(const QStringList& parts)
     {
-        auto address = m_machine->programCounter();
+        auto address = debugProgramCounter();
         int count = 8;
         if (parts.size() >= 2 && parts[1] != QStringLiteral("pc")) {
             const auto parsed = parseNumber(parts[1]);
@@ -940,9 +1015,9 @@ private:
             count = std::max(1, parts[2].toInt());
         }
         for (int i = 0; i < count; ++i) {
-            const auto text = m_machine->disassemble(address);
+            const auto text = debugDisassemble(address);
             m_out << hexValue(address) << "  " << text << '\n';
-            address += static_cast<std::uint32_t>(std::max(2, m_machine->disassembleBytes(address)));
+            address += static_cast<std::uint32_t>(std::max(2, debugDisassembleBytes(address)));
         }
     }
 
@@ -961,7 +1036,7 @@ private:
         for (std::uint32_t offset = 0; offset < length; offset += 16) {
             m_out << hexValue(*address + offset) << " ";
             for (std::uint32_t i = 0; i < 16 && offset + i < length; ++i) {
-                m_out << byteToHex(m_machine->debugRead8(*address + offset + i)) << ' ';
+                m_out << byteToHex(debugRead8(*address + offset + i)) << ' ';
             }
             m_out << '\n';
         }
@@ -1155,6 +1230,38 @@ private:
 
     void printDevices(const QStringList& parts)
     {
+        if (m_iicxMachine != nullptr) {
+            const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
+            const auto io = m_iicxMachine->ioStatistics();
+            if (device.isEmpty() || device == QStringLiteral("nubus")) {
+                m_out << "nubus_reads=" << io.nubusReads << " nubus_writes=" << io.nubusWrites << '\n';
+                for (int slot = 9; slot <= 11; ++slot) {
+                    const auto card = m_iicxMachine->nubusCard(slot);
+                    if (!card) continue;
+                    const auto frame = card->videoFrame();
+                    m_out << "slot=" << slot << " card=" << card->id();
+                    if (frame.valid()) {
+                        m_out << " video=" << frame.width << 'x' << frame.height << " depth=" << frame.bitsPerPixel;
+                    }
+                    m_out << '\n';
+                }
+            }
+            if (device.isEmpty() || device == QStringLiteral("via")) {
+                const auto via1 = m_iicxMachine->via1DebugState();
+                const auto via2 = m_iicxMachine->via2DebugState();
+                m_out << "via1_ifr=" << hexValue(via1.interruptFlags, 2) << " ier=" << hexValue(via1.interruptEnable, 2)
+                      << " irq=" << (via1.interruptActive ? "yes" : "no") << '\n';
+                m_out << "via2_ifr=" << hexValue(via2.interruptFlags, 2) << " ier=" << hexValue(via2.interruptEnable, 2)
+                      << " irq=" << (via2.interruptActive ? "yes" : "no") << '\n';
+            }
+            if (device.isEmpty() || device == QStringLiteral("scsi")) {
+                m_out << "scsi_reads=" << io.scsiReads << " scsi_writes=" << io.scsiWrites << '\n';
+            }
+            if (device.isEmpty() || device == QStringLiteral("swim")) {
+                m_out << "swim_reads=" << io.swimReads << " swim_writes=" << io.swimWrites << '\n';
+            }
+            return;
+        }
         const auto& summary = m_machine->accessSummary();
         const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
         if (device.isEmpty() || device == QStringLiteral("via")) {
@@ -1252,26 +1359,34 @@ private:
 
     void handleScreen(const QStringList& parts)
     {
+        const auto frame = m_session->videoFrame();
+        const auto bytes = frame.pixels;
+        std::uint32_t hash = 2166136261U;
+        for (const auto byte : bytes) {
+            hash ^= static_cast<std::uint8_t>(byte);
+            hash *= 16777619U;
+        }
         if (parts.size() >= 2 && parts[1] == QStringLiteral("hash")) {
-            m_out << "screen_hash=" << hexValue(m_machine->framebufferHash()) << '\n';
+            m_out << "screen_hash=" << hexValue(hash) << " size=" << frame.width << 'x' << frame.height
+                  << " depth=" << frame.bitsPerPixel << '\n';
             return;
         }
         if (parts.size() >= 2 && parts[1] == QStringLiteral("probe")) {
-            const auto bytes = m_machine->framebufferBytes();
-            auto black = 0;
-            auto white = 0;
+            qsizetype zeroBytes = 0;
+            qsizetype fullBytes = 0;
             for (const auto byte : bytes) {
                 const auto value = static_cast<std::uint8_t>(byte);
-                for (int bit = 0; bit < 8; ++bit) {
-                    ((value & (1 << bit)) != 0 ? black : white)++;
-                }
+                if (value == 0) ++zeroBytes;
+                if (value == 0xff) ++fullBytes;
             }
-            const auto hash = m_machine->framebufferHash();
-            const auto label = black == 0 ? QStringLiteral("blank-white")
-                : white == 0          ? QStringLiteral("blank-black")
-                                      : QStringLiteral("nonblank");
-            appendTimeline(QStringLiteral("screen %1 hash=%2 black=%3 white=%4").arg(label, hexValue(hash)).arg(black).arg(white));
-            m_out << "screen=" << label << " hash=" << hexValue(hash) << " black=" << black << " white=" << white << '\n';
+            const auto label = bytes.isEmpty() ? QStringLiteral("invalid")
+                : zeroBytes == bytes.size()    ? QStringLiteral("blank-zero")
+                : fullBytes == bytes.size()    ? QStringLiteral("blank-full")
+                                               : QStringLiteral("nonblank");
+            appendTimeline(QStringLiteral("screen %1 hash=%2 zero=%3 full=%4").arg(label, hexValue(hash)).arg(zeroBytes).arg(fullBytes));
+            m_out << "screen=" << label << " hash=" << hexValue(hash) << " zero_bytes=" << zeroBytes
+                  << " full_bytes=" << fullBytes << " size=" << frame.width << 'x' << frame.height
+                  << " depth=" << frame.bitsPerPixel << '\n';
             return;
         }
         if (parts.size() >= 3 && parts[1] == QStringLiteral("export")) {
@@ -1283,16 +1398,7 @@ private:
 
     void exportScreen(const QString& path)
     {
-        const auto bytes = m_machine->framebufferBytes();
-        QImage image(macPlusScreenWidth, macPlusScreenHeight, QImage::Format_RGB32);
-        for (int y = 0; y < image.height(); ++y) {
-            for (int x = 0; x < image.width(); ++x) {
-                const auto byte = static_cast<std::uint8_t>(bytes[(y * image.width() + x) / 8]);
-                const auto bit = 7 - (x & 7);
-                const auto on = ((byte >> bit) & 1) != 0;
-                image.setPixelColor(x, y, on ? Qt::black : Qt::white);
-            }
-        }
+        const auto image = cutemac::session::FramebufferRenderer::render(m_session->videoFrame());
         m_out << (image.save(path) ? "saved " : "failed ") << path << '\n';
     }
 
@@ -1998,7 +2104,9 @@ private:
 
     cutemac::config::Configuration m_configuration;
     std::unique_ptr<cutemac::core::EmulationSession> m_session;
+    cutemac::core::IDebugCpuAccess* m_cpuDebug = nullptr;
     cutemac::machines::macplus::MacPlusMachine* m_machine = nullptr;
+    cutemac::machines::maciicx::MacIIcxMachine* m_iicxMachine = nullptr;
     std::unique_ptr<GdbStub> m_gdbStub;
     QTextStream m_out { stdout };
     bool m_romLoaded = false;

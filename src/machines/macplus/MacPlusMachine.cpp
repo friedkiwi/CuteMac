@@ -219,6 +219,34 @@ int MacPlusMachine::stepInstruction()
     return cycles;
 }
 
+QString MacPlusMachine::debugCpuArchitecture() const
+{
+    return QStringLiteral("m68k");
+}
+
+QStringList MacPlusMachine::debugRegisterLines() const
+{
+    const auto regs = cpuRegisters();
+    QStringList lines;
+    for (int first = 0; first < 8; first += 4) {
+        QString line;
+        for (int i = first; i < first + 4; ++i)
+            line += QStringLiteral("D%1=0x%2%3").arg(i).arg(regs.d[i], 8, 16, QLatin1Char('0')).arg(i == first + 3 ? QString() : QStringLiteral(" "));
+        lines.append(line);
+    }
+    for (int first = 0; first < 8; first += 4) {
+        QString line;
+        for (int i = first; i < first + 4; ++i)
+            line += QStringLiteral("A%1=0x%2%3").arg(i).arg(regs.a[i], 8, 16, QLatin1Char('0')).arg(i == first + 3 ? QString() : QStringLiteral(" "));
+        lines.append(line);
+    }
+    lines.append(QStringLiteral("PC=0x%1 SR=0x%2 USP=0x%3 ISP=0x%4 MSP=0x%5 VBR=0x%6")
+        .arg(regs.pc, 8, 16, QLatin1Char('0')).arg(regs.sr, 4, 16, QLatin1Char('0'))
+        .arg(regs.usp, 8, 16, QLatin1Char('0')).arg(regs.isp, 8, 16, QLatin1Char('0'))
+        .arg(regs.msp, 8, 16, QLatin1Char('0')).arg(regs.vbr, 8, 16, QLatin1Char('0')));
+    return lines;
+}
+
 std::uint64_t MacPlusMachine::cycleCount() const { return m_scheduler.now(); }
 
 void MacPlusMachine::queueInput(const core::GuestInputEvent& event, std::uint64_t cycle)

@@ -11,6 +11,7 @@
 
 #include "cutemac/cpu/m68k/M68kBus.h"
 #include "cutemac/core/IMachine.h"
+#include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/core/MachineScheduler.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/iwm/IwmController.h"
@@ -22,7 +23,7 @@
 
 namespace cutemac::machines::macplus {
 
-class MacPlusMachine final : public core::IMachine, public cpu::m68k::M68kBus {
+class MacPlusMachine final : public core::IMachine, public core::IDebugCpuAccess, public cpu::m68k::M68kBus {
 public:
     struct BusAccess {
         QString operation;
@@ -76,13 +77,15 @@ public:
     [[nodiscard]] int runCycles(int cycles) override;
     [[nodiscard]] std::uint64_t cycleCount() const override;
     void queueInput(const core::GuestInputEvent& event, std::uint64_t cycle) override;
-    [[nodiscard]] int stepInstruction();
+    [[nodiscard]] QString debugCpuArchitecture() const override;
+    [[nodiscard]] QStringList debugRegisterLines() const override;
+    [[nodiscard]] int stepInstruction() override;
     [[nodiscard]] bool runUntilPc(std::uint32_t address, int maxCycles);
 
     [[nodiscard]] std::uint32_t programCounter() const override;
     [[nodiscard]] cpu::m68k::M68kCpuCore::RegisterSnapshot cpuRegisters() const;
-    [[nodiscard]] QString disassemble(std::uint32_t address) const;
-    [[nodiscard]] int disassembleBytes(std::uint32_t address) const;
+    [[nodiscard]] QString disassemble(std::uint32_t address) const override;
+    [[nodiscard]] int disassembleBytes(std::uint32_t address) const override;
     [[nodiscard]] bool overlayEnabled() const override;
     [[nodiscard]] const AccessSummary& accessSummary() const;
     [[nodiscard]] const QVector<QString>& eventLog() const;
@@ -90,12 +93,12 @@ public:
     void clearBusTrace();
     void setBusTraceEnabled(bool enabled);
 
-    [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const;
-    [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const;
-    [[nodiscard]] std::uint32_t debugRead32(std::uint32_t address) const;
-    void debugWrite8(std::uint32_t address, std::uint8_t value);
-    void debugWrite16(std::uint32_t address, std::uint16_t value);
-    void debugWrite32(std::uint32_t address, std::uint32_t value);
+    [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const override;
+    [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const override;
+    [[nodiscard]] std::uint32_t debugRead32(std::uint32_t address) const override;
+    void debugWrite8(std::uint32_t address, std::uint8_t value) override;
+    void debugWrite16(std::uint32_t address, std::uint16_t value) override;
+    void debugWrite32(std::uint32_t address, std::uint32_t value) override;
 
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;

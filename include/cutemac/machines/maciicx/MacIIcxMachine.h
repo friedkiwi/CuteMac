@@ -12,6 +12,7 @@
 #include <QVector>
 
 #include "cutemac/core/IMachine.h"
+#include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/core/MachineScheduler.h"
 #include "cutemac/cpu/m68k/M68kBus.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
@@ -27,7 +28,7 @@
 
 namespace cutemac::machines::maciicx {
 
-class MacIIcxMachine final : public core::IMachine, public cpu::m68k::M68kBus {
+class MacIIcxMachine final : public core::IMachine, public core::IDebugCpuAccess, public cpu::m68k::M68kBus {
 public:
     explicit MacIIcxMachine(std::size_t ramSize, const QString& nvramPath = {});
 
@@ -41,6 +42,7 @@ public:
     void ejectFloppyImage() override;
     void reset() override;
     [[nodiscard]] int runCycles(int cycles) override;
+    [[nodiscard]] int stepInstruction() override;
     [[nodiscard]] std::uint64_t cycleCount() const override;
     [[nodiscard]] std::uint32_t programCounter() const override;
     [[nodiscard]] bool overlayEnabled() const override;
@@ -57,8 +59,18 @@ public:
     void write32(std::uint32_t address, std::uint32_t value) override;
 
     [[nodiscard]] bool installNuBusCard(int slot, std::shared_ptr<devices::nubus::NuBusCard> card);
+    [[nodiscard]] std::shared_ptr<devices::nubus::NuBusCard> nubusCard(int slot) const { return m_nubus.card(slot); }
     [[nodiscard]] cpu::m68k::M68kCpuCore::RegisterSnapshot cpuRegisters() const;
     [[nodiscard]] QString disassemble(std::uint32_t address) const;
+    [[nodiscard]] int disassembleBytes(std::uint32_t address) const;
+    [[nodiscard]] QString debugCpuArchitecture() const override;
+    [[nodiscard]] QStringList debugRegisterLines() const override;
+    [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const override;
+    [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const override;
+    [[nodiscard]] std::uint32_t debugRead32(std::uint32_t address) const override;
+    void debugWrite8(std::uint32_t address, std::uint8_t value) override;
+    void debugWrite16(std::uint32_t address, std::uint16_t value) override;
+    void debugWrite32(std::uint32_t address, std::uint32_t value) override;
     [[nodiscard]] devices::via6522::Via6522::DebugState via1DebugState() const { return m_via1.debugState(); }
     [[nodiscard]] devices::via6522::Via6522::DebugState via2DebugState() const { return m_via2.debugState(); }
     [[nodiscard]] bool sccInterruptActive() const { return m_scc.interruptActive(); }

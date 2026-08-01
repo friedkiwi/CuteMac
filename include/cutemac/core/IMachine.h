@@ -13,6 +13,8 @@
 
 namespace cutemac::core {
 
+class IDebugCpuAccess;
+
 class IMachine {
 public:
     virtual ~IMachine() = default;
@@ -41,6 +43,7 @@ class IDebugMachineAccess {
 public:
     virtual ~IDebugMachineAccess() = default;
     [[nodiscard]] virtual void* debugMachine(const QString& machineId) = 0;
+    [[nodiscard]] virtual IDebugCpuAccess* debugCpuAccess() = 0;
 };
 
 } // namespace cutemac::core

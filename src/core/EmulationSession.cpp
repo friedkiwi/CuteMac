@@ -5,6 +5,7 @@
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/MachineCatalog.h"
+#include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/rom/RomCatalog.h"
@@ -262,6 +263,12 @@ void* EmulationSession::debugMachine(const QString& machineId)
 {
     std::lock_guard lock(m_mutex);
     return m_machine && m_machine->machineId() == machineId ? m_machine.get() : nullptr;
+}
+
+IDebugCpuAccess* EmulationSession::debugCpuAccess()
+{
+    std::lock_guard lock(m_mutex);
+    return dynamic_cast<IDebugCpuAccess*>(m_machine.get());
 }
 
 } // namespace cutemac::core

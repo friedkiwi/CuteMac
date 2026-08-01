@@ -142,14 +142,19 @@ int MacIIcxMachine::runCycles(int cycles)
 {
     int used = 0;
     while (used < cycles) {
-        m_scheduler.dispatchDue();
-        updateInterrupts();
-        const auto instructionCycles = std::max(1, m_cpu.stepInstruction());
-        used += instructionCycles;
-        advanceDevices(instructionCycles);
-        m_scheduler.advance(static_cast<std::uint64_t>(instructionCycles));
+        used += stepInstruction();
     }
     return used;
+}
+
+int MacIIcxMachine::stepInstruction()
+{
+    m_scheduler.dispatchDue();
+    updateInterrupts();
+    const auto instructionCycles = std::max(1, m_cpu.stepInstruction());
+    advanceDevices(instructionCycles);
+    m_scheduler.advance(static_cast<std::uint64_t>(instructionCycles));
+    return instructionCycles;
 }
 
 std::uint64_t MacIIcxMachine::cycleCount() const { return m_scheduler.now(); }
@@ -321,6 +326,39 @@ bool MacIIcxMachine::installNuBusCard(int slot, std::shared_ptr<devices::nubus::
 
 cpu::m68k::M68kCpuCore::RegisterSnapshot MacIIcxMachine::cpuRegisters() const { return m_cpu.registers(); }
 QString MacIIcxMachine::disassemble(std::uint32_t address) const { return m_cpu.disassemble(address); }
+int MacIIcxMachine::disassembleBytes(std::uint32_t address) const { return m_cpu.disassembleBytes(address); }
+
+QString MacIIcxMachine::debugCpuArchitecture() const { return QStringLiteral("m68k:68030"); }
+
+QStringList MacIIcxMachine::debugRegisterLines() const
+{
+    const auto regs = cpuRegisters();
+    QStringList lines;
+    for (int base = 0; base < 8; base += 4) {
+        lines.append(QStringLiteral("D%1=%2 D%3=%4 D%5=%6 D%7=%8")
+                         .arg(base).arg(regs.d[base], 8, 16, QLatin1Char('0'))
+                         .arg(base + 1).arg(regs.d[base + 1], 8, 16, QLatin1Char('0'))
+                         .arg(base + 2).arg(regs.d[base + 2], 8, 16, QLatin1Char('0'))
+                         .arg(base + 3).arg(regs.d[base + 3], 8, 16, QLatin1Char('0')));
+        lines.append(QStringLiteral("A%1=%2 A%3=%4 A%5=%6 A%7=%8")
+                         .arg(base).arg(regs.a[base], 8, 16, QLatin1Char('0'))
+                         .arg(base + 1).arg(regs.a[base + 1], 8, 16, QLatin1Char('0'))
+                         .arg(base + 2).arg(regs.a[base + 2], 8, 16, QLatin1Char('0'))
+                         .arg(base + 3).arg(regs.a[base + 3], 8, 16, QLatin1Char('0')));
+    }
+    lines.append(QStringLiteral("PC=%1 SR=%2 USP=%3 ISP=%4 MSP=%5 VBR=%6")
+                     .arg(regs.pc, 8, 16, QLatin1Char('0')).arg(regs.sr, 4, 16, QLatin1Char('0'))
+                     .arg(regs.usp, 8, 16, QLatin1Char('0')).arg(regs.isp, 8, 16, QLatin1Char('0'))
+                     .arg(regs.msp, 8, 16, QLatin1Char('0')).arg(regs.vbr, 8, 16, QLatin1Char('0')));
+    return lines;
+}
+
+std::uint8_t MacIIcxMachine::debugRead8(std::uint32_t address) const { return const_cast<MacIIcxMachine*>(this)->read8(address); }
+std::uint16_t MacIIcxMachine::debugRead16(std::uint32_t address) const { return const_cast<MacIIcxMachine*>(this)->read16(address); }
+std::uint32_t MacIIcxMachine::debugRead32(std::uint32_t address) const { return const_cast<MacIIcxMachine*>(this)->read32(address); }
+void MacIIcxMachine::debugWrite8(std::uint32_t address, std::uint8_t value) { write8(address, value); }
+void MacIIcxMachine::debugWrite16(std::uint32_t address, std::uint16_t value) { write16(address, value); }
+void MacIIcxMachine::debugWrite32(std::uint32_t address, std::uint32_t value) { write32(address, value); }
 
 bool MacIIcxMachine::isIo(std::uint32_t address) const
 {
