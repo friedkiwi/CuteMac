@@ -14,6 +14,7 @@ constexpr std::uint8_t timer1LatchHigh = 7;
 constexpr std::uint8_t timer2CounterLow = 8;
 constexpr std::uint8_t timer2CounterHigh = 9;
 constexpr std::uint8_t auxiliaryControl = 11;
+constexpr std::uint8_t shiftRegister = 10;
 constexpr std::uint8_t interruptFlag = 13;
 constexpr std::uint8_t interruptEnable = 14;
 constexpr std::uint8_t registerA = 15;
@@ -23,8 +24,13 @@ constexpr std::uint8_t initialPortB = 0x8f;
 constexpr std::uint8_t initialDdrA = 0x7f;
 constexpr std::uint8_t initialDdrB = 0x87;
 constexpr std::uint8_t overlayBit = 0x10;
-constexpr std::uint8_t timer1InterruptBit = 0x02;
+constexpr std::uint8_t vblInterruptBit = 0x02;
+constexpr std::uint8_t timer1InterruptBit = 0x40;
 constexpr std::uint8_t timer2InterruptBit = 0x20;
+constexpr std::uint8_t shiftRegisterInterruptBit = 0x04;
+constexpr int keyboardByteCycles = 80;
+constexpr int keyboardInquiryTimeoutCycles = 1958400;
+constexpr int vblPeriodCycles = 130560;
 
 } // namespace
 
@@ -41,6 +47,12 @@ void Via6522::reset()
     m_timer1Running = false;
     m_timer2Counter = 0;
     m_timer2Running = false;
+    m_vblCycles = vblPeriodCycles;
+    m_keyboardTransitions.clear();
+    m_keyboardCommand = 0;
+    m_shiftCycles = 0;
+    m_keyboardCommandPending = false;
+    m_keyboardResponseReady = false;
     notifyPortAChanged();
 }
 
@@ -49,6 +61,19 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
     index &= 0x0f;
     if (index == registerB) {
         return portB();
+    }
+    if (index == shiftRegister) {
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~shiftRegisterInterruptBit);
+        const auto value = m_registers[shiftRegister];
+        if (m_keyboardResponseReady) {
+            m_keyboardResponseReady = false;
+            m_keyboardCommandPending = false;
+        } else if (m_keyboardCommandPending && (m_registers[auxiliaryControl] & 0x10) == 0 && m_shiftCycles == 0) {
+            m_shiftCycles = m_keyboardCommand == 0x10 && m_keyboardTransitions.empty()
+                ? keyboardInquiryTimeoutCycles
+                : keyboardByteCycles;
+        }
+        return value;
     }
     if (index == interruptFlag) {
         return interruptFlagRegister();
@@ -104,6 +129,17 @@ void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
         m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer2InterruptBit);
         return;
     }
+    if (index == shiftRegister) {
+        m_registers[index] = value;
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~shiftRegisterInterruptBit);
+        if ((m_registers[auxiliaryControl] & 0x1c) == 0x1c) {
+            m_keyboardCommand = value;
+            m_keyboardCommandPending = true;
+            m_keyboardResponseReady = false;
+            m_shiftCycles = keyboardByteCycles;
+        }
+        return;
+    }
     if (index == timer2CounterHigh) {
         m_registers[index] = value;
         m_timer2Counter = (static_cast<int>(m_registers[timer2CounterHigh]) << 8) | m_registers[timer2CounterLow];
@@ -122,6 +158,12 @@ void Via6522::tick(int cycles)
 {
     if (cycles <= 0) {
         return;
+    }
+
+    m_vblCycles -= cycles;
+    while (m_vblCycles <= 0) {
+        m_vblCycles += vblPeriodCycles;
+        m_registers[interruptFlag] |= vblInterruptBit;
     }
 
     if (m_timer1Running) {
@@ -149,14 +191,32 @@ void Via6522::tick(int cycles)
             const auto counter = static_cast<std::uint16_t>(m_timer2Counter);
             m_registers[timer2CounterLow] = static_cast<std::uint8_t>(counter);
             m_registers[timer2CounterHigh] = static_cast<std::uint8_t>(counter >> 8);
-            return;
+        } else {
+            m_timer2Counter = 0;
+            m_timer2Running = false;
+            m_registers[timer2CounterLow] = 0;
+            m_registers[timer2CounterHigh] = 0;
+            m_registers[interruptFlag] |= timer2InterruptBit;
         }
+    }
 
-        m_timer2Counter = 0;
-        m_timer2Running = false;
-        m_registers[timer2CounterLow] = 0;
-        m_registers[timer2CounterHigh] = 0;
-        m_registers[interruptFlag] |= timer2InterruptBit;
+    if (m_shiftCycles > 0) {
+        m_shiftCycles -= cycles;
+        if (m_shiftCycles <= 0) {
+            m_shiftCycles = 0;
+            if ((m_registers[auxiliaryControl] & 0x10) == 0 && m_keyboardCommandPending) {
+                if (m_keyboardCommand == 0x16) {
+                    m_registers[shiftRegister] = 0x03;
+                } else if (!m_keyboardTransitions.empty()) {
+                    m_registers[shiftRegister] = m_keyboardTransitions.front();
+                    m_keyboardTransitions.pop_front();
+                } else {
+                    m_registers[shiftRegister] = 0x7b;
+                }
+                m_keyboardResponseReady = true;
+            }
+            m_registers[interruptFlag] |= shiftRegisterInterruptBit;
+        }
     }
 }
 
@@ -191,6 +251,16 @@ void Via6522::setPortBInputBit(std::uint8_t bit, bool high)
     }
 }
 
+void Via6522::queueKeyboardTransition(std::uint8_t keyCode, bool pressed)
+{
+    keyCode &= 0x3f;
+    m_keyboardTransitions.push_back(static_cast<std::uint8_t>((keyCode << 1) | (pressed ? 0x00 : 0x80)));
+    if (m_keyboardCommandPending && m_keyboardCommand == 0x10 && !m_keyboardResponseReady
+        && (m_registers[auxiliaryControl] & 0x10) == 0) {
+        m_shiftCycles = keyboardByteCycles;
+    }
+}
+
 bool Via6522::overlayEnabled() const
 {
     return (portA() & overlayBit) != 0;
@@ -211,6 +281,11 @@ Via6522::DebugState Via6522::debugState() const
         m_timer2Counter,
         m_timer2Running,
         interruptActive(),
+        m_keyboardCommand,
+        m_shiftCycles,
+        m_keyboardTransitions.size(),
+        m_keyboardCommandPending,
+        m_keyboardResponseReady,
     };
 }
 

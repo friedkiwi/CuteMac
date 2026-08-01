@@ -628,33 +628,29 @@ void MacPlusMachine::setMousePosition(std::int16_t x, std::int16_t y)
 {
     m_mouseX = std::clamp<std::int16_t>(x, 0, 511);
     m_mouseY = std::clamp<std::int16_t>(y, 0, 341);
-    synchronizeMouseLowMemory();
+    const auto packed = (static_cast<std::uint32_t>(static_cast<std::uint16_t>(m_mouseY)) << 16)
+        | static_cast<std::uint16_t>(m_mouseX);
+    writeRam32Direct(lowMemoryMTemp, packed);
+    writeRam8Direct(lowMemoryCrsrCouple, 0xff);
+    writeRam8Direct(lowMemoryCrsrNew, 0xff);
 }
 
 void MacPlusMachine::moveMouse(std::int16_t dx, std::int16_t dy)
 {
-    setMousePosition(static_cast<std::int16_t>(m_mouseX + dx), static_cast<std::int16_t>(m_mouseY + dy));
+    const auto currentY = static_cast<std::int16_t>(readRam16Direct(lowMemoryMTemp));
+    const auto currentX = static_cast<std::int16_t>(readRam16Direct(lowMemoryMTemp + 2));
+    setMousePosition(static_cast<std::int16_t>(currentX + dx), static_cast<std::int16_t>(currentY + dy));
 }
 
 void MacPlusMachine::setMouseButton(bool pressed)
 {
     m_mouseButtonPressed = pressed;
     m_via.setPortBInputBit(3, !pressed);
-    writeRam8Direct(lowMemoryMbState, pressed ? 0x00 : 0x80);
 }
 
 void MacPlusMachine::setKeyState(std::uint8_t macKeyCode, bool pressed)
 {
-    macKeyCode &= 0x7f;
-    const auto address = lowMemoryKeyMap + (macKeyCode / 8);
-    auto value = readRam8Direct(address);
-    const auto bit = static_cast<std::uint8_t>(1U << (macKeyCode & 0x07));
-    if (pressed) {
-        value |= bit;
-    } else {
-        value &= static_cast<std::uint8_t>(~bit);
-    }
-    writeRam8Direct(address, value);
+    m_via.queueKeyboardTransition(macKeyCode, pressed);
 }
 
 void MacPlusMachine::resetKeyboard()
@@ -771,7 +767,8 @@ void MacPlusMachine::synchronizeMouseLowMemory()
     writeRam32Direct(lowMemoryMouse, packed);
     writeRam8Direct(lowMemoryCrsrCouple, 0xff);
     writeRam8Direct(lowMemoryCrsrNew, 0xff);
-    setMouseButton(m_mouseButtonPressed);
+    m_via.setPortBInputBit(3, !m_mouseButtonPressed);
+    writeRam8Direct(lowMemoryMbState, m_mouseButtonPressed ? 0x00 : 0x80);
 }
 
 void MacPlusMachine::setOverlayEnabled(bool enabled)

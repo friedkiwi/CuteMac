@@ -15,6 +15,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QCursor>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTimer>
@@ -88,6 +89,23 @@ public:
         m_keyCallback = std::move(callback);
     }
 
+    [[nodiscard]] bool mouseCaptured() const { return m_mouseCaptured; }
+
+    void releaseMouseCapture()
+    {
+        if (!m_mouseCaptured) {
+            return;
+        }
+        m_mouseCaptured = false;
+        releaseMouse();
+        unsetCursor();
+        if (m_keyCallback) {
+            m_keyCallback(0x36, false);
+            m_keyCallback(0x3a, false);
+        }
+        update();
+    }
+
 protected:
     void paintEvent(QPaintEvent*) override
     {
@@ -96,11 +114,7 @@ protected:
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
         const auto target = displayRect();
-        painter.fillRect(target.adjusted(-18, -18, 18, 18), QColor(44, 47, 49));
         painter.drawImage(target, m_image);
-
-        painter.setPen(QColor(20, 20, 20));
-        painter.drawRect(target.adjusted(0, 0, -1, -1));
 
         if (!m_running) {
             painter.fillRect(target, QColor(255, 255, 255, 72));
@@ -115,6 +129,11 @@ protected:
     void mousePressEvent(QMouseEvent* event) override
     {
         setFocus(Qt::MouseFocusReason);
+        if (!m_mouseCaptured && displayRect().contains(event->pos())) {
+            captureMouse();
+            event->accept();
+            return;
+        }
         sendMouseEvent(event);
     }
 
@@ -125,6 +144,11 @@ protected:
 
     void keyPressEvent(QKeyEvent* event) override
     {
+        if (isReleaseChord(event)) {
+            releaseMouseCapture();
+            event->accept();
+            return;
+        }
         sendKeyEvent(event, true);
     }
 
@@ -134,6 +158,30 @@ protected:
     }
 
 private:
+    void captureMouse()
+    {
+        m_mouseCaptured = true;
+        setCursor(Qt::BlankCursor);
+        grabMouse();
+        recenterMouse();
+    }
+
+    void recenterMouse()
+    {
+        m_mouseCenter = displayRect().center();
+        m_warpPending = true;
+        QCursor::setPos(mapToGlobal(m_mouseCenter));
+    }
+
+    [[nodiscard]] bool isReleaseChord(const QKeyEvent* event) const
+    {
+        if (!m_mouseCaptured) {
+            return false;
+        }
+        const auto modifiers = event->modifiers();
+        return (modifiers & Qt::ControlModifier) != 0 && (modifiers & Qt::AltModifier) != 0;
+    }
+
     [[nodiscard]] QRect displayRect() const
     {
         const QSize baseSize(512, 342);
@@ -157,6 +205,20 @@ private:
     void sendMouseEvent(QMouseEvent* event)
     {
         if (!m_mouseCallback) {
+            return;
+        }
+        if (m_mouseCaptured) {
+            if (m_warpPending && event->pos() == m_mouseCenter) {
+                m_warpPending = false;
+                return;
+            }
+            const auto delta = event->pos() - m_mouseCenter;
+            if (!delta.isNull()) {
+                m_mouseCallback(delta.x(), delta.y(), (event->buttons() & Qt::LeftButton) != 0);
+                recenterMouse();
+            } else {
+                m_mouseCallback(0, 0, (event->buttons() & Qt::LeftButton) != 0);
+            }
             return;
         }
         const auto point = macPointFor(event->pos());
@@ -245,6 +307,9 @@ private:
     }
 
     bool m_running = false;
+    bool m_mouseCaptured = false;
+    bool m_warpPending = false;
+    QPoint m_mouseCenter;
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
     std::function<void(int, bool)> m_keyCallback;
@@ -323,7 +388,11 @@ public:
 
         m_display = new DisplayWidget;
         m_display->setMouseCallback([this](int x, int y, bool pressed) {
-            m_machine.setMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+            if (m_display->mouseCaptured()) {
+                m_machine.moveMouse(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+            } else {
+                m_machine.setMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+            }
             m_machine.setMouseButton(pressed);
         });
         m_display->setKeyCallback([this](int keyCode, bool pressed) {
@@ -392,6 +461,14 @@ private:
         });
 
         auto* viewMenu = menuBar()->addMenu(QStringLiteral("View"));
+        const auto releaseInputText = QStringLiteral("Release Input\t")
+#if defined(Q_OS_MACOS)
+            + QStringLiteral("Control+Option");
+#else
+            + QStringLiteral("Ctrl+Alt");
+#endif
+        viewMenu->addAction(releaseInputText, this, [this]() { m_display->releaseMouseCapture(); });
+        viewMenu->addSeparator();
         viewMenu->addAction(QStringLiteral("Actual Size"), this, [this]() { resize(620, 480); });
         viewMenu->addAction(QStringLiteral("Double Size"), this, [this]() { resize(1120, 820); });
     }

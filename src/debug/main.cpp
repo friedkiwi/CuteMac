@@ -1176,6 +1176,11 @@ private:
                   << " t1_running=" << (via.timer1Running ? "yes" : "no")
                   << " t2=" << via.timer2Counter
                   << " t2_running=" << (via.timer2Running ? "yes" : "no") << '\n';
+            m_out << "via_keyboard command=" << hexValue(via.keyboardCommand, 2)
+                  << " cycles=" << via.keyboardCycles
+                  << " queued=" << via.keyboardQueueDepth
+                  << " pending=" << (via.keyboardCommandPending ? "yes" : "no")
+                  << " response=" << (via.keyboardResponseReady ? "yes" : "no") << '\n';
         }
         if (device.isEmpty() || device == QStringLiteral("scc")) {
             m_out << "scc_reads=" << summary.sccReads << " scc_writes=" << summary.sccWrites << '\n';
