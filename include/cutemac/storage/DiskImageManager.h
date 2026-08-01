@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace cutemac::storage {
@@ -27,6 +28,7 @@ public:
 
     [[nodiscard]] bool refresh();
     [[nodiscard]] bool importImage(const QString& sourcePath, DiskImageType type, QString* importedPath = nullptr);
+    [[nodiscard]] bool importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths = nullptr);
     [[nodiscard]] bool exportImage(const QString& imagePath, const QString& destinationPath) const;
     [[nodiscard]] bool createImage(const QString& path, DiskImageType type, qint64 sizeBytes);
     [[nodiscard]] bool forgetImage(const QString& path);

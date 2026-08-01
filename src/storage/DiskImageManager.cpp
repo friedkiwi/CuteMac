@@ -106,6 +106,20 @@ bool DiskImageManager::importImage(const QString& sourcePath, DiskImageType type
     return true;
 }
 
+bool DiskImageManager::importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths)
+{
+    if (sourcePaths.isEmpty()) return false;
+    bool success = true;
+    QStringList results;
+    for (const auto& sourcePath : sourcePaths) {
+        QString importedPath;
+        if (importImage(sourcePath, type, &importedPath)) results.append(importedPath);
+        else success = false;
+    }
+    if (importedPaths != nullptr) *importedPaths = results;
+    return success;
+}
+
 bool DiskImageManager::exportImage(const QString& imagePath, const QString& destinationPath) const
 {
     if (imagePath.isEmpty() || destinationPath.isEmpty()) return false;

@@ -39,12 +39,16 @@ QString imageFilter(storage::DiskImageType type)
 
 bool importWithDialog(storage::DiskImageManager& manager, storage::DiskImageType type, QWidget* parent)
 {
-    const auto source = QFileDialog::getOpenFileName(parent, QStringLiteral("Import %1 Image").arg(storage::DiskImageManager::typeName(type)),
+    const auto sources = QFileDialog::getOpenFileNames(parent, QStringLiteral("Import %1 Images").arg(storage::DiskImageManager::typeName(type)),
         QDir::homePath(), imageFilter(type));
-    if (source.isEmpty()) return false;
-    if (manager.importImage(source, type)) return true;
-    QMessageBox::critical(parent, QStringLiteral("Import Disk Image"), QStringLiteral("Could not copy the image into the disk image library."));
-    return false;
+    if (sources.isEmpty()) return false;
+    QStringList importedPaths;
+    const bool success = manager.importImages(sources, type, &importedPaths);
+    if (!success) {
+        QMessageBox::warning(parent, QStringLiteral("Import Disk Images"),
+            QStringLiteral("%1 of %2 images were copied into the disk image library.").arg(importedPaths.size()).arg(sources.size()));
+    }
+    return !importedPaths.isEmpty();
 }
 
 class CreateImageDialog final : public QDialog {

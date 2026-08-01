@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 
@@ -46,6 +47,17 @@ int main()
     require(manager.importImage(sourceIso, DiskImageType::CdRom, &importedPath), "CD import should succeed");
     require(importedPath.startsWith(libraryPath), "imports should be copied into the library");
     require(manager.images(DiskImageType::CdRom).size() == 1, "imported CD should retain its explicit type");
+
+    const auto sourceFloppy1 = temporary.filePath(QStringLiteral("install-1.dsk"));
+    const auto sourceFloppy2 = temporary.filePath(QStringLiteral("install-2.dsk"));
+    require(DiskImageManager::createBlankImage(sourceFloppy1, 800 * 1024), "first batch source should be created");
+    require(DiskImageManager::createBlankImage(sourceFloppy2, 1440 * 1024), "second batch source should be created");
+    QStringList importedFloppies;
+    require(manager.importImages({ sourceFloppy1, sourceFloppy2 }, DiskImageType::Floppy, &importedFloppies), "multiple images should import together");
+    require(importedFloppies.size() == 2, "batch import should return every copied image");
+    require(std::all_of(importedFloppies.cbegin(), importedFloppies.cend(), [&](const auto& path) { return path.startsWith(libraryPath); }),
+        "every batch import should be copied into the designated library folder");
+    require(manager.images(DiskImageType::Floppy).size() == 3, "all imported floppies should be cataloged");
 
     DiskImageManager reloaded(libraryPath);
     require(reloaded.images(DiskImageType::CdRom).size() == 1, "catalog type should persist across manager instances");
