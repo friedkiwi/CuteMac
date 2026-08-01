@@ -248,6 +248,20 @@ void Ncr5380::executeCommand()
         setPhase(Phase::DataOut);
         return;
     }
+    if (opcode == 0x15 && m_command.size() >= 6 && static_cast<std::uint8_t>(m_command[4]) != 0) {
+        m_expectedDataOut = static_cast<std::uint8_t>(m_command[4]);
+        m_dataBuffer.clear();
+        m_dataIndex = 0;
+        setPhase(Phase::DataOut);
+        return;
+    }
+    if (opcode == 0x04 && m_command.size() >= 6 && (static_cast<std::uint8_t>(m_command[1]) & 0x10) != 0) {
+        m_expectedDataOut = 4;
+        m_dataBuffer.clear();
+        m_dataIndex = 0;
+        setPhase(Phase::DataOut);
+        return;
+    }
 
     const auto result = m_activeTarget->executeCommand(m_command, {});
     m_lastCommand = m_command;
@@ -263,6 +277,30 @@ void Ncr5380::executeCommand()
 void Ncr5380::finishDataPhaseIfDone()
 {
     if (m_phase == Phase::DataIn && m_dataIndex >= m_dataBuffer.size()) {
+        setPhase(Phase::Status);
+    } else if (m_phase == Phase::DataOut && !m_command.isEmpty()
+        && static_cast<std::uint8_t>(m_command[0]) == 0x04 && m_dataOut.size() >= m_expectedDataOut) {
+        const auto defectLength = (static_cast<qsizetype>(static_cast<std::uint8_t>(m_dataOut[2])) << 8)
+            | static_cast<std::uint8_t>(m_dataOut[3]);
+        const bool initializationPattern = (static_cast<std::uint8_t>(m_dataOut[1]) & 0x08) != 0;
+        if (initializationPattern && m_dataOut.size() < 8) {
+            m_expectedDataOut = 8;
+            return;
+        }
+        const auto patternLength = initializationPattern
+            ? (static_cast<qsizetype>(static_cast<std::uint8_t>(m_dataOut[6])) << 8) | static_cast<std::uint8_t>(m_dataOut[7])
+            : 0;
+        const auto totalLength = 4 + (initializationPattern ? 4 : 0) + defectLength + patternLength;
+        if (m_dataOut.size() < totalLength) {
+            m_expectedDataOut = totalLength;
+            return;
+        }
+        const auto result = m_activeTarget ? m_activeTarget->executeCommand(m_command, m_dataOut) : ScsiCommandResult {};
+        m_lastCommand = m_command;
+        ++m_completedCommands;
+        m_status = result.status;
+        m_message = result.message;
+        m_senseKey = result.senseKey;
         setPhase(Phase::Status);
     } else if (m_phase == Phase::DataOut && m_dataOut.size() >= m_expectedDataOut) {
         const auto result = m_activeTarget ? m_activeTarget->executeCommand(m_command, m_dataOut) : ScsiCommandResult {};
@@ -301,7 +339,6 @@ void Ncr5380::writeDataByte(std::uint8_t value)
         return;
     }
     m_dataOut.append(static_cast<char>(value));
-    finishDataPhaseIfDone();
 }
 
 std::uint8_t Ncr5380::currentBusStatus() const

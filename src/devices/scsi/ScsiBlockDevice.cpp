@@ -112,6 +112,9 @@ ScsiCommandResult ScsiBlockDevice::executeCommand(const QByteArray& cdb, const Q
             cdb.size() > 1 ? (static_cast<std::uint8_t>(cdb[1]) & 0x01) != 0 : false,
             cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) : 0,
             cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 36);
+    case 0x15:
+        // Geometry and format parameters are advisory for the fixed-size image.
+        return good();
     case 0x1a:
         return modeSense(
             cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) & 0x3f : 0x3f,
@@ -149,6 +152,11 @@ bool ScsiBlockDevice::writeBlocks(std::uint32_t lba, const QByteArray& bytes)
         return false;
     }
 
+    QFile file(m_imagePath);
+    if (!file.open(QIODevice::ReadWrite) || !file.seek(offset) || file.write(bytes) != bytes.size()) {
+        m_senseKey = senseIllegalRequest;
+        return false;
+    }
     std::copy(bytes.begin(), bytes.end(), m_image.begin() + offset);
     m_senseKey = senseNoSense;
     return true;
@@ -256,8 +264,10 @@ ScsiCommandResult ScsiBlockDevice::modeSense(std::uint8_t pageCode, std::uint8_t
     data[2] = m_readOnly ? static_cast<char>(0x80) : static_cast<char>(0x00);
     if (pageCode == 0x30 || pageCode == 0x3f) {
         data.append(static_cast<char>(0x30));
-        data.append(static_cast<char>(0x16));
-        data.append(QByteArrayLiteral("APPLE COMPUTER, INC   "));
+        data.append(static_cast<char>(0x24));
+        QByteArray page(0x24, '\0');
+        page.replace(8, 22, QByteArrayLiteral("APPLE COMPUTER, INC   "));
+        data.append(page);
     } else if (pageCode != 0x00) {
         return checkCondition(senseIllegalRequest);
     }
