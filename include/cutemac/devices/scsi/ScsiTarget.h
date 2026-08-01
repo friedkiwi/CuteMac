@@ -17,6 +17,7 @@ public:
     virtual ~ScsiTarget() = default;
 
     [[nodiscard]] virtual bool ready() const = 0;
+    [[nodiscard]] virtual bool selectable() const { return ready(); }
     [[nodiscard]] virtual ScsiCommandResult executeCommand(const QByteArray& cdb, const QByteArray& dataOut) = 0;
 };
 

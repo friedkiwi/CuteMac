@@ -71,6 +71,7 @@ public:
     void ejectDiskImage() override;
     [[nodiscard]] bool loadScsiDisk(int id, const QString& path, bool readOnly) override;
     [[nodiscard]] bool loadScsiCdRom(int id, const QString& path) override;
+    void ejectScsiCdRom(int id) override;
     void ejectScsiDevice(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly = false) override;
     void ejectFloppyImage() override;

@@ -58,8 +58,8 @@ bool EmulationSession::initialize()
     const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
     m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
-        if (device.imagePath.isEmpty()) continue;
         if (device.type == config::ScsiDeviceType::CdRom) (void)m_machine->loadScsiCdRom(device.id, device.imagePath);
+        else if (device.imagePath.isEmpty()) continue;
         else (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
     }
     if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
@@ -91,8 +91,8 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
     m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
-        if (device.imagePath.isEmpty()) continue;
         if (device.type == config::ScsiDeviceType::CdRom) (void)m_machine->loadScsiCdRom(device.id, device.imagePath);
+        else if (device.imagePath.isEmpty()) continue;
         else (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
     }
     if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
@@ -235,6 +235,37 @@ void EmulationSession::ejectDisk()
         m_machine->ejectDiskImage();
     }
     m_configuration.diskPath.clear();
+}
+
+bool EmulationSession::insertScsiDevice(int id, config::ScsiDeviceType type, const QString& path, bool readOnly)
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_machine || path.isEmpty()) return false;
+    const bool loaded = type == config::ScsiDeviceType::CdRom
+        ? m_machine->loadScsiCdRom(id, path)
+        : m_machine->loadScsiDisk(id, path, readOnly);
+    if (!loaded) return false;
+    for (auto& device : m_configuration.scsiDevices) {
+        if (device.id != id) continue;
+        device.type = type;
+        device.imagePath = path;
+        device.readOnly = type == config::ScsiDeviceType::CdRom || readOnly;
+        return true;
+    }
+    return false;
+}
+
+void EmulationSession::ejectScsiDevice(int id)
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_machine) return;
+    for (auto& device : m_configuration.scsiDevices) {
+        if (device.id != id) continue;
+        if (device.type == config::ScsiDeviceType::CdRom) m_machine->ejectScsiCdRom(id);
+        else m_machine->ejectScsiDevice(id);
+        device.imagePath.clear();
+        return;
+    }
 }
 
 bool EmulationSession::insertFloppy(const QString& path, bool readOnly)

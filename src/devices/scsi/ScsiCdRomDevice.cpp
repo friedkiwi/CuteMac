@@ -58,6 +58,7 @@ bool ScsiCdRomDevice::loadImage(const QString& path)
     m_imagePath = path;
     m_senseKey = senseNoSense;
     m_additionalSenseCode = 0;
+    m_unitAttention = true;
     return true;
 }
 
@@ -67,6 +68,7 @@ void ScsiCdRomDevice::eject()
     m_imagePath.clear();
     m_senseKey = senseNotReady;
     m_additionalSenseCode = 0x3a;
+    m_unitAttention = true;
 }
 
 bool ScsiCdRomDevice::ready() const { return !m_image.isEmpty(); }
@@ -75,6 +77,10 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
 {
     if (cdb.isEmpty()) return checkCondition(senseIllegalRequest, 0x24);
     const auto opcode = static_cast<std::uint8_t>(cdb[0]);
+    if (m_unitAttention && opcode != 0x03 && opcode != 0x12) {
+        m_unitAttention = false;
+        return checkCondition(0x06, 0x28);
+    }
     if (!ready() && opcode != 0x03 && opcode != 0x12) return checkCondition(senseNotReady, 0x3a);
 
     switch (opcode) {
@@ -108,8 +114,43 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
     case 0xa8:
         if (cdb.size() < 12) return checkCondition(senseIllegalRequest, 0x24);
         return read(be32(cdb, 2), be32(cdb, 6));
+    case 0xd8:
+        if (cdb.size() < 12 || static_cast<std::uint8_t>(cdb[10]) != 0) return checkCondition(senseIllegalRequest, 0x24);
+        return readAppleRaw(be32(cdb, 2), be32(cdb, 6));
+    case 0xd9: {
+        if (cdb.size() < 12 || static_cast<std::uint8_t>(cdb[10]) != 0) return checkCondition(senseIllegalRequest, 0x24);
+        const auto startFrames = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[3])) * 60
+                                     + static_cast<std::uint8_t>(cdb[4])) * 75
+            + static_cast<std::uint8_t>(cdb[5]);
+        const auto endFrames = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[7])) * 60
+                                   + static_cast<std::uint8_t>(cdb[8])) * 75
+            + static_cast<std::uint8_t>(cdb[9]);
+        if (startFrames < 150 || endFrames < startFrames) return checkCondition(senseIllegalRequest, 0x24);
+        return readAppleRaw(startFrames - 150, endFrames - startFrames);
+    }
     default: return checkCondition(senseIllegalRequest, 0x20);
     }
+}
+
+ScsiCommandResult ScsiCdRomDevice::readAppleRaw(std::uint32_t lba, std::uint32_t blocks)
+{
+    if (lba > blockCount() || blocks > blockCount() - lba) return checkCondition(senseIllegalRequest, 0x21);
+    QByteArray raw;
+    raw.reserve(static_cast<qsizetype>(blocks) * 2352);
+    for (std::uint32_t block = 0; block < blocks; ++block) {
+        QByteArray sector(2352, '\0');
+        sector[0] = 0;
+        std::fill(sector.begin() + 1, sector.begin() + 11, static_cast<char>(0xff));
+        sector[11] = 0;
+        const auto frames = lba + block + 150;
+        sector[12] = static_cast<char>(frames / (60 * 75));
+        sector[13] = static_cast<char>((frames / 75) % 60);
+        sector[14] = static_cast<char>(frames % 75);
+        sector[15] = 1;
+        std::copy_n(m_image.cbegin() + static_cast<qsizetype>(lba + block) * blockSize, blockSize, sector.begin() + 16);
+        raw.append(sector);
+    }
+    return good(raw);
 }
 
 std::uint32_t ScsiCdRomDevice::blockCount() const { return static_cast<std::uint32_t>(m_image.size() / blockSize); }

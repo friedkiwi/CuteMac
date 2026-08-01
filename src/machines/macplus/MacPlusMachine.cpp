@@ -143,12 +143,20 @@ bool MacPlusMachine::loadScsiDisk(int id, const QString& path, bool readOnly)
 bool MacPlusMachine::loadScsiCdRom(int id, const QString& path)
 {
     if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return false;
-    auto cdRom = std::make_shared<devices::scsi::ScsiCdRomDevice>();
-    if (!cdRom->loadImage(path)) return false;
+    auto cdRom = m_scsiCdRoms[static_cast<std::size_t>(id)];
+    if (!cdRom) cdRom = std::make_shared<devices::scsi::ScsiCdRomDevice>();
+    if (!path.isEmpty() && !cdRom->loadImage(path)) return false;
     m_scsiDisks[static_cast<std::size_t>(id)].reset();
     m_scsiCdRoms[static_cast<std::size_t>(id)] = cdRom;
     m_scsi.attachTarget(static_cast<std::uint8_t>(id), cdRom);
     return true;
+}
+
+void MacPlusMachine::ejectScsiCdRom(int id)
+{
+    if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return;
+    const auto& cdRom = m_scsiCdRoms[static_cast<std::size_t>(id)];
+    if (cdRom) cdRom->eject();
 }
 
 void MacPlusMachine::ejectDiskImage()
@@ -196,7 +204,7 @@ void MacPlusMachine::reset()
     for (std::size_t id = 0; id < m_scsiDisks.size(); ++id) {
         if (m_scsiDisks[id] && m_scsiDisks[id]->ready()) {
             m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
-        } else if (m_scsiCdRoms[id] && m_scsiCdRoms[id]->ready()) {
+        } else if (m_scsiCdRoms[id]) {
             m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiCdRoms[id]);
         }
     }

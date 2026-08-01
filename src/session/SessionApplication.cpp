@@ -586,17 +586,99 @@ private:
             const bool cdRom = device.type == cutemac::config::ScsiDeviceType::CdRom;
             disk->setIcon(style()->standardIcon(cdRom ? QStyle::SP_DriveCDIcon : QStyle::SP_DriveHDIcon));
             disk->setToolTip(QStringLiteral("SCSI ID %1 %2").arg(device.id).arg(cdRom ? QStringLiteral("CD-ROM") : QStringLiteral("hard disk")));
-            connect(disk, &QToolButton::clicked, this, [this, device]() {
-                const bool cdRom = device.type == cutemac::config::ScsiDeviceType::CdRom;
-                QMessageBox::information(this, cdRom ? QStringLiteral("SCSI CD-ROM") : QStringLiteral("SCSI Hard Disk"),
-                    QStringLiteral("SCSI ID: %1\nType: %2\nImage: %3\nAccess: %4")
-                        .arg(device.id)
-                        .arg(cdRom ? QStringLiteral("CD-ROM") : QStringLiteral("Hard disk"))
-                        .arg(device.imagePath.isEmpty() ? QStringLiteral("No image") : device.imagePath)
-                        .arg(device.readOnly ? QStringLiteral("Read-only") : QStringLiteral("Read/write")));
-            });
+            disk->setPopupMode(QToolButton::InstantPopup);
+            auto* menu = new QMenu(disk);
+            menu->addAction(device.imagePath.isEmpty() ? QStringLiteral("Insert...") : QStringLiteral("Change Image..."), this,
+                [this, id = device.id, type = device.type]() { insertScsiFromToolbar(id, type); });
+            auto* eject = menu->addAction(QStringLiteral("Eject"), this, [this, id = device.id]() { ejectScsiFromToolbar(id); });
+            eject->setEnabled(!device.imagePath.isEmpty());
+            if (!cdRom) {
+                menu->addAction(QStringLiteral("New Hard Disk Image..."), this,
+                    [this, id = device.id]() { createHardDiskFromToolbar(id); });
+                menu->addSeparator();
+                auto* readOnly = menu->addAction(QStringLiteral("Read-only"));
+                readOnly->setCheckable(true);
+                readOnly->setChecked(device.readOnly);
+                connect(readOnly, &QAction::toggled, this, [this, id = device.id](bool enabled) { setScsiReadOnly(id, enabled); });
+            }
+            menu->addSeparator();
+            menu->addAction(QStringLiteral("Details..."), this, [this, id = device.id]() { showScsiDetails(id); });
+            disk->setMenu(menu);
             m_toolbar->addWidget(disk);
         }
+    }
+
+    void insertScsiFromToolbar(int id, cutemac::config::ScsiDeviceType type)
+    {
+        const bool cdRom = type == cutemac::config::ScsiDeviceType::CdRom;
+        const auto imageType = cdRom ? cutemac::storage::DiskImageType::CdRom : cutemac::storage::DiskImageType::HardDisk;
+        const auto path = cutemac::ui::DiskImagePickerDialog::getImage(imageType,
+            cdRom ? QStringLiteral("Insert CD-ROM Image") : QStringLiteral("Insert Hard Disk Image"), this);
+        if (path.isEmpty()) return;
+        auto iterator = std::find_if(m_configuration.scsiDevices.begin(), m_configuration.scsiDevices.end(),
+            [id](const auto& device) { return device.id == id; });
+        if (iterator == m_configuration.scsiDevices.end()) return;
+        if (!m_session.insertScsiDevice(id, type, path, iterator->readOnly)) {
+            statusBar()->showMessage(QStringLiteral("Failed to insert SCSI image"), 3000);
+            return;
+        }
+        iterator->imagePath = path;
+        iterator->readOnly = cdRom || iterator->readOnly;
+        saveConfiguration();
+        QTimer::singleShot(0, this, [this]() { buildToolbar(); });
+        updateStatus();
+    }
+
+    void ejectScsiFromToolbar(int id)
+    {
+        m_session.ejectScsiDevice(id);
+        const auto iterator = std::find_if(m_configuration.scsiDevices.begin(), m_configuration.scsiDevices.end(),
+            [id](const auto& device) { return device.id == id; });
+        if (iterator != m_configuration.scsiDevices.end()) iterator->imagePath.clear();
+        saveConfiguration();
+        QTimer::singleShot(0, this, [this]() { buildToolbar(); });
+        updateStatus();
+    }
+
+    void createHardDiskFromToolbar(int id)
+    {
+        const auto path = cutemac::ui::createDiskImage(cutemac::storage::DiskImageType::HardDisk, this);
+        if (path.isEmpty()) return;
+        auto iterator = std::find_if(m_configuration.scsiDevices.begin(), m_configuration.scsiDevices.end(),
+            [id](const auto& device) { return device.id == id; });
+        if (iterator == m_configuration.scsiDevices.end()) return;
+        if (!m_session.insertScsiDevice(id, iterator->type, path, iterator->readOnly)) {
+            statusBar()->showMessage(QStringLiteral("Failed to insert new hard disk image"), 3000);
+            return;
+        }
+        iterator->imagePath = path;
+        saveConfiguration();
+        QTimer::singleShot(0, this, [this]() { buildToolbar(); });
+        updateStatus();
+    }
+
+    void setScsiReadOnly(int id, bool enabled)
+    {
+        const auto iterator = std::find_if(m_configuration.scsiDevices.begin(), m_configuration.scsiDevices.end(),
+            [id](const auto& device) { return device.id == id; });
+        if (iterator == m_configuration.scsiDevices.end()) return;
+        iterator->readOnly = enabled;
+        if (!iterator->imagePath.isEmpty()) (void)m_session.insertScsiDevice(id, iterator->type, iterator->imagePath, enabled);
+        saveConfiguration();
+    }
+
+    void showScsiDetails(int id)
+    {
+        const auto iterator = std::find_if(m_configuration.scsiDevices.cbegin(), m_configuration.scsiDevices.cend(),
+            [id](const auto& device) { return device.id == id; });
+        if (iterator == m_configuration.scsiDevices.cend()) return;
+        const bool cdRom = iterator->type == cutemac::config::ScsiDeviceType::CdRom;
+        QMessageBox::information(this, cdRom ? QStringLiteral("SCSI CD-ROM") : QStringLiteral("SCSI Hard Disk"),
+            QStringLiteral("SCSI ID: %1\nType: %2\nImage: %3\nAccess: %4")
+                .arg(iterator->id)
+                .arg(cdRom ? QStringLiteral("CD-ROM") : QStringLiteral("Hard disk"))
+                .arg(iterator->imagePath.isEmpty() ? QStringLiteral("No image") : iterator->imagePath)
+                .arg(cdRom || iterator->readOnly ? QStringLiteral("Read-only") : QStringLiteral("Read/write")));
     }
 
     void insertFloppyFromToolbar()

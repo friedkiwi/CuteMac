@@ -75,7 +75,7 @@ void Ncr5380::detachTarget(std::uint8_t id)
 
 bool Ncr5380::hasTarget(std::uint8_t id) const
 {
-    return id < m_targets.size() && m_targets[id] != nullptr && m_targets[id]->ready();
+    return id < m_targets.size() && m_targets[id] != nullptr && m_targets[id]->selectable();
 }
 
 std::uint8_t Ncr5380::readRegister(std::uint8_t registerIndex, bool dack)
@@ -436,6 +436,7 @@ QString Ncr5380::phaseName() const
 
 qsizetype Ncr5380::expectedCommandLength(std::uint8_t opcode) const
 {
+    if (opcode == 0xd8 || opcode == 0xd9) return 12;
     const auto group = opcode >> 5;
     if (group == 0) {
         return 6;

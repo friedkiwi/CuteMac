@@ -104,6 +104,11 @@ int main()
     ok &= expect(cdInquiry.data.mid(8, 8) == QByteArrayLiteral("MATSHITA")
             && cdInquiry.data.mid(16, 16) == QByteArrayLiteral("CD-ROM CR-8004  "),
         "AppleCD-compatible identity is wrong");
+    const auto mediaChanged = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});
+    ok &= expect(mediaChanged.status == 0x02 && mediaChanged.senseKey == 0x06, "CD insertion must report unit attention");
+    const auto mediaChangedSense = cdRom.executeCommand(QByteArray::fromHex("030000001200"), {});
+    ok &= expect(mediaChangedSense.status == 0 && static_cast<std::uint8_t>(mediaChangedSense.data[12]) == 0x28,
+        "CD insertion sense code must report changed media");
     const auto capacity = cdRom.executeCommand(QByteArray::fromHex("25000000000000000000"), {});
     ok &= expect(capacity.data == QByteArray::fromHex("0000000300000800"), "CD-ROM capacity must use 2048-byte blocks");
     const auto cdRead = cdRom.executeCommand(QByteArray::fromHex("28000000000200000100"), {});
@@ -116,6 +121,16 @@ int main()
     ok &= expect(cdMode.status == 0 && cdMode.data.contains(QByteArray::fromHex("0d06000d003c004b"))
             && cdMode.data.contains(QByteArray::fromHex("2a0e")),
         "CD-ROM mode pages are missing");
+    const auto appleRaw = cdRom.executeCommand(QByteArray::fromHex("d80000000002000000010000"), {});
+    ok &= expect(appleRaw.status == 0 && appleRaw.data.size() == 2352
+            && appleRaw.data.mid(16, 2048) == QByteArray(2048, static_cast<char>(0x5a)),
+        "AppleCD 0xD8 raw-sector command failed");
+    cdRom.eject();
+    ok &= expect(cdRom.selectable() && !cdRom.ready(), "empty CD-ROM drive must remain selectable");
+    const auto ejected = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});
+    ok &= expect(ejected.status == 0x02 && ejected.senseKey == 0x06, "CD ejection must report unit attention");
+    const auto noMedia = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});
+    ok &= expect(noMedia.status == 0x02 && noMedia.senseKey == 0x02, "empty CD-ROM must report not ready after unit attention");
 
     auto target = std::make_shared<RecordingTarget>();
     cutemac::devices::scsi::ncr5380::Ncr5380 controller;
