@@ -26,6 +26,8 @@ int main(int argc, char** argv)
     std::map<std::uint32_t, unsigned> exceptions;
     std::map<std::uint32_t, unsigned> sampledPcs;
     auto lastPc = machine.programCounter();
+    bool stopPcOk = false;
+    const auto stopPc = qEnvironmentVariable("CUTEMAC_8100_STOP_PC").toUInt(&stopPcOk, 0);
     int stationary = 0;
     for (int used = 0; used < cycleBudget;) {
         used += machine.stepInstruction();
@@ -35,6 +37,7 @@ int main(int argc, char** argv)
         if ((used & 0x3ffU) == 0) ++sampledPcs[pc];
         stationary = pc == lastPc ? stationary + 1 : 0;
         lastPc = pc;
+        if (stopPcOk && pc == stopPc) break;
         if (qEnvironmentVariableIsSet("CUTEMAC_8100_STOP_ON_UNMAPPED") && machine.unmappedAccessCount() != 0) break;
         if (qEnvironmentVariableIsSet("CUTEMAC_8100_STOP_ON_ALIGNMENT") && pc == 0xfff00600U) break;
         if (qEnvironmentVariableIsSet("CUTEMAC_8100_STOP_ON_PROGRAM") && pc == 0xfff00700U) break;
@@ -45,8 +48,14 @@ int main(int argc, char** argv)
               << "pc=0x" << std::setw(8) << state.pc << " msr=0x" << std::setw(8) << state.msr
               << " srr0=0x" << std::setw(8) << state.srr0 << " srr1=0x" << std::setw(8) << state.srr1
               << " lr=0x" << std::setw(8) << state.lr << " ctr=0x" << std::setw(8) << state.ctr
-              << " r8=0x" << std::setw(8) << state.gpr[8] << " r10=0x" << std::setw(8) << state.gpr[10]
+              << " r6=0x" << std::setw(8) << state.gpr[6] << " r8=0x" << std::setw(8) << state.gpr[8]
+              << " r10=0x" << std::setw(8) << state.gpr[10]
               << " dar=0x" << std::setw(8) << state.dar << " dsisr=0x" << std::setw(8) << state.dsisr
+              << " sdr1=0x" << std::setw(8) << state.sdr1 << " sr6=0x" << std::setw(8) << state.sr[6]
+              << " bats=0x" << std::setw(8) << state.batu[0] << '/' << std::setw(8) << state.batl[0]
+              << ',' << std::setw(8) << state.batu[1] << '/' << std::setw(8) << state.batl[1]
+              << ',' << std::setw(8) << state.batu[2] << '/' << std::setw(8) << state.batl[2]
+              << ',' << std::setw(8) << state.batu[3] << '/' << std::setw(8) << state.batl[3]
               << std::dec << " cycles=" << machine.cycleCount()
               << " unmapped=" << machine.unmappedAccessCount() << '\n';
     std::cout << machine.disassemble(state.pc).toStdString() << '\n';

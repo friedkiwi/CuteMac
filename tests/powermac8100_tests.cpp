@@ -34,9 +34,22 @@ int main(int argc, char** argv)
     require(machine.cpuRegisters().gpr[3] == 42, "execute instruction through reset ROM alias");
     require(machine.debugRead32(0x40000000U + 0x300100U) == 0x3860002aU, "normal ROM mapping");
     require(machine.debugRead32(0x5ffffffcU) == 0x00003013U, "8100 machine ID");
-    require(machine.debugRead8(0x50f2c000U) == 0xffU, "diagnostic pin inactive");
+    require(machine.debugRead8(0x5ffffffcU) == 0xa5U && machine.debugRead16(0x5ffffffcU) == 0xa55aU,
+        "partial machine ID reads retain signature");
+    require(machine.debugRead8(0x50f2c000U) == 1U && machine.debugRead8(0x50f2c001U) == 0U,
+        "diagnostic window idle values");
     machine.debugWrite32(0x100, 0x12345678U);
     require(machine.debugRead32(0x100) == 0x12345678U, "RAM mapping");
+
+    cutemac::machines::powermac8100::PowerMac8100Machine expanded(16 * 1024 * 1024);
+    require(expanded.loadRomFile(path, {}), "load expanded-memory test ROM"); expanded.reset();
+    const std::uint64_t hmcConfig = std::uint64_t { 2 } << 29; // 8 MiB SIMM decode spacing
+    for (unsigned bit = 0; bit < 35; ++bit)
+        expanded.write8(0x50f40000U, static_cast<std::uint8_t>((hmcConfig >> bit) & 1U));
+    expanded.debugWrite32(0x00800000U, 0x89abcdefU);
+    require(expanded.debugRead32(0x10000000U) == 0x89abcdefU, "bank A sizing alias");
+    expanded.debugWrite32(0x01000000U, 0x76543210U);
+    require(expanded.debugRead32(0x0fc00000U) == 0x76543210U, "small bank B warm-start alias");
     std::cout << "Power Macintosh 8100 machine tests passed\n";
     return 0;
 }

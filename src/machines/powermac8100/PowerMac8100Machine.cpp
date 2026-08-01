@@ -14,7 +14,8 @@ constexpr std::uint32_t romSize = 4U * 1024U * 1024U;
 constexpr std::uint32_t amicBase = 0x50f00000U;
 constexpr std::uint32_t hmcBase = 0x50f40000U;
 constexpr std::uint32_t machineIdAddress = 0x5ffffffcU;
-constexpr std::uint32_t machineIdValue = 0x00003013U;
+constexpr std::uint32_t machineIdValue = 0xa55a3013U;
+constexpr std::uint32_t motherboardRamSize = 8U * 1024U * 1024U;
 constexpr std::size_t maxBusTrace = 4096;
 }
 
@@ -27,6 +28,11 @@ PowerMac8100Machine::PowerMac8100Machine(std::size_t ramSize)
 }
 
 QString PowerMac8100Machine::machineId() const { return QStringLiteral("powermac-8100"); }
+
+void PowerMac8100Machine::attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint)
+{
+    m_scc.attachEndpoint(channel == 0 ? devices::scc::Z8530Scc::Channel::A : devices::scc::Z8530Scc::Channel::B, std::move(endpoint));
+}
 
 bool PowerMac8100Machine::loadRomFile(const QString& path, const QStringList& patches)
 {
@@ -47,7 +53,9 @@ void PowerMac8100Machine::reset()
     m_scheduler.reset();
     m_scc.reset();
     m_hmcControl = 0;
+    m_hmcShiftBuffer = 0;
     m_hmcBitPosition = 0;
+    m_hmcCommitted = false;
     m_soundDmaStartCycle = 0;
     m_amicRegisters.fill(0);
     m_unmappedAccessCount = 0;
@@ -77,8 +85,8 @@ std::uint32_t PowerMac8100Machine::programCounter() const { return m_cpu.program
 
 PowerMac8100Machine::BusRegion PowerMac8100Machine::regionFor(std::uint32_t address) const
 {
-    if (address < static_cast<std::uint32_t>(m_ram.size())) return BusRegion::Ram;
-    if ((address >= romBase && address < romBase + romSize)
+    if (ramIndex(address)) return BusRegion::Ram;
+    if ((address >= romBase && address < 0x50000000U)
         || address >= resetRomBase) return BusRegion::Rom;
     if (address >= hmcBase && address < hmcBase + 0x10000U) return BusRegion::Hmc;
     if (address >= amicBase && address < amicBase + 0x40000U) return BusRegion::Amic;
@@ -86,12 +94,42 @@ PowerMac8100Machine::BusRegion PowerMac8100Machine::regionFor(std::uint32_t addr
     return BusRegion::Unmapped;
 }
 
+std::optional<std::size_t> PowerMac8100Machine::ramIndex(std::uint32_t address) const
+{
+    const auto total = static_cast<std::size_t>(m_ram.size());
+    if (!m_hmcCommitted) return address < total ? std::optional<std::size_t>(address) : std::nullopt;
+    if (address < motherboardRamSize) return address;
+    if (total <= motherboardRamSize) return std::nullopt;
+
+    const auto simmSize = (total - motherboardRamSize) / 2U;
+    if (simmSize == 0) return std::nullopt;
+    if (address >= motherboardRamSize && address < motherboardRamSize + simmSize)
+        return motherboardRamSize + (address - motherboardRamSize);
+    if (address >= 0x10000000U && address < 0x10000000U + simmSize)
+        return motherboardRamSize + (address - 0x10000000U);
+
+    static constexpr std::uint32_t configuredBankSizes[] {
+        128U * 1024U * 1024U, 2U * 1024U * 1024U, 8U * 1024U * 1024U, 32U * 1024U * 1024U
+    };
+    const auto configuration = static_cast<unsigned>((m_hmcControl >> 29) & 3U);
+    const auto bankBBase = configuration == 0 ? 0x08000000U
+        : motherboardRamSize + configuredBankSizes[configuration];
+    if (address >= bankBBase && address < bankBBase + simmSize)
+        return motherboardRamSize + simmSize + (address - bankBBase);
+    if (simmSize < motherboardRamSize) {
+        const auto alias = 0x10000000U + static_cast<std::uint32_t>(simmSize) - motherboardRamSize;
+        if (address >= alias && address < alias + simmSize)
+            return motherboardRamSize + simmSize + (address - alias);
+    }
+    return std::nullopt;
+}
+
 std::uint8_t PowerMac8100Machine::readHmc(std::uint32_t address)
 {
     const auto offset = address - hmcBase;
     if (offset == 0) {
         const auto value = static_cast<std::uint8_t>((m_hmcControl >> m_hmcBitPosition) & 1U);
-        m_hmcBitPosition = (m_hmcBitPosition + 1U) & 63U;
+        m_hmcBitPosition = (m_hmcBitPosition + 1U) % 35U;
         return value;
     }
     return 0;
@@ -102,8 +140,13 @@ void PowerMac8100Machine::writeHmc(std::uint32_t address, std::uint8_t value)
     const auto offset = address - hmcBase;
     if (offset == 0) {
         const auto bit = std::uint64_t { 1 } << m_hmcBitPosition;
-        m_hmcControl = (value & 1U) ? m_hmcControl | bit : m_hmcControl & ~bit;
-        m_hmcBitPosition = (m_hmcBitPosition + 1U) & 63U;
+        m_hmcShiftBuffer = (value & 1U) ? m_hmcShiftBuffer | bit : m_hmcShiftBuffer & ~bit;
+        ++m_hmcBitPosition;
+        if (m_hmcBitPosition == 35U) {
+            m_hmcControl = m_hmcShiftBuffer & ~std::uint64_t { 3 };
+            m_hmcBitPosition = 0;
+            m_hmcCommitted = true;
+        }
     } else if (offset == 8) {
         m_hmcBitPosition = 0;
     }
@@ -112,7 +155,7 @@ void PowerMac8100Machine::writeHmc(std::uint32_t address, std::uint8_t value)
 std::uint8_t PowerMac8100Machine::readMapped8(std::uint32_t address)
 {
     switch (regionFor(address)) {
-    case BusRegion::Ram: return m_ram[static_cast<qsizetype>(address)];
+    case BusRegion::Ram: return m_ram[static_cast<qsizetype>(*ramIndex(address))];
     case BusRegion::Rom: return m_romLoaded ? static_cast<std::uint8_t>(m_rom.at((address - romBase) & (romSize - 1U))) : 0xff;
     case BusRegion::Hmc: return readHmc(address);
     case BusRegion::Amic: {
@@ -126,7 +169,7 @@ std::uint8_t PowerMac8100Machine::readMapped8(std::uint32_t address)
             default: return m_scc.readControl(Channel::B);
             }
         }
-        if (offset == 0x2c000U) return 0xff; // EMMO/diagnostic pin inactive
+        if (offset >= 0x2c000U && offset < 0x2e000U) return offset == 0x2c000U ? 1U : 0U;
         if (offset >= 0x1400cU && offset <= 0x1400eU) return 0; // idle sound phase
         if (offset == 0x14018U && (static_cast<std::uint8_t>(m_amicRegisters[0x14010]) & 1U)
             && m_scheduler.now() - m_soundDmaStartCycle >= 4096U) {
@@ -143,7 +186,7 @@ std::uint8_t PowerMac8100Machine::readMapped8(std::uint32_t address)
 void PowerMac8100Machine::writeMapped8(std::uint32_t address, std::uint8_t value)
 {
     switch (regionFor(address)) {
-    case BusRegion::Ram: m_ram[static_cast<qsizetype>(address)] = value; break;
+    case BusRegion::Ram: m_ram[static_cast<qsizetype>(*ramIndex(address))] = value; break;
     case BusRegion::Hmc: writeHmc(address, value); break;
     case BusRegion::Amic: {
         const auto offset = address - amicBase;
@@ -201,7 +244,8 @@ std::uint16_t PowerMac8100Machine::read16(std::uint32_t address)
 std::uint32_t PowerMac8100Machine::read32(std::uint32_t address)
 {
     const auto region = regionFor(address);
-    const auto value = (static_cast<std::uint32_t>(readMapped8(address)) << 24)
+    const auto value = address == machineIdAddress ? machineIdValue & 0xffffU
+        : (static_cast<std::uint32_t>(readMapped8(address)) << 24)
         | (static_cast<std::uint32_t>(readMapped8(address + 1)) << 16)
         | (static_cast<std::uint32_t>(readMapped8(address + 2)) << 8) | readMapped8(address + 3);
     recordBus(address, value, 4, false, region);
@@ -231,7 +275,8 @@ std::uint8_t PowerMac8100Machine::debugRead8(std::uint32_t address) const { retu
 std::uint16_t PowerMac8100Machine::debugRead16(std::uint32_t address) const
 { return static_cast<std::uint16_t>((debugRead8(address) << 8) | debugRead8(address + 1)); }
 std::uint32_t PowerMac8100Machine::debugRead32(std::uint32_t address) const
-{ return (static_cast<std::uint32_t>(debugRead16(address)) << 16) | debugRead16(address + 2); }
+{ return address == machineIdAddress ? machineIdValue & 0xffffU
+    : (static_cast<std::uint32_t>(debugRead16(address)) << 16) | debugRead16(address + 2); }
 void PowerMac8100Machine::setBusTraceEnabled(bool enabled) { m_busTraceEnabled = enabled; if (!enabled) m_busTrace.clear(); }
 
 } // namespace cutemac::machines::powermac8100

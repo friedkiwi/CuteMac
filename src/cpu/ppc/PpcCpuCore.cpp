@@ -376,8 +376,8 @@ void PowerPc601Core::enterException(Exception exception, std::uint32_t savedPc, 
 {
     const auto oldMsr = m_state.msr;
     m_state.srr0 = savedPc;
-    m_state.srr1 = (oldMsr & 0x0000ffffU) | srr1Bits;
-    m_state.msr = oldMsr & (msrMe | msrIp);
+    m_state.srr1 = (oldMsr & 0x0000ff73U) | srr1Bits;
+    m_state.msr = oldMsr & 0xfffb1041U;
     m_state.pc = ((oldMsr & msrIp) ? exceptionPrefixHigh : exceptionPrefixLow)
         | static_cast<std::uint32_t>(exception);
     m_state.reservationValid = false;
@@ -579,7 +579,12 @@ int PowerPc601Core::executeOpcode19(std::uint32_t op, std::uint32_t instructionP
     }
     case 50: // rfi
         if (m_state.msr & msrPr) { programException(instructionPc, programPrivileged); return 1; }
-        m_state.msr = m_state.srr1 & 0x0000ffffU;
+        {
+            constexpr std::uint32_t replaceMask = 0x87c0ff73U;
+            constexpr std::uint32_t powerManagement = 0x00040000U;
+            m_state.msr = (m_state.msr & ~(replaceMask | powerManagement))
+                | (m_state.srr1 & (replaceMask & ~powerManagement));
+        }
         m_state.pc = m_state.srr0 & ~3U;
         return 2;
     case 150: // isync
@@ -780,7 +785,10 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     case 316: finish(ra(op), m_state.gpr[rt(op)] ^ b); return 1;
     case 339: { // mfspr
         const auto spr = decodedSpr(op);
-        if ((m_state.msr & msrPr) && spr != 4 && spr != 5 && spr != 6) { programException(instructionPc, programPrivileged); return 1; }
+        // SPR number bit 4 is the architectural supervisor-access marker.
+        // This leaves XER, LR, CTR, and the 601 user RTC aliases accessible
+        // in problem state while protecting the supervisor SPR set.
+        if ((m_state.msr & msrPr) && (spr & 0x10U)) { programException(instructionPc, programPrivileged); return 1; }
         finish(rt(op), readSpr(spr)); return 1;
     }
     case 360: case 872: { const auto result = static_cast<std::int32_t>(a) < 0 ? 0U - a : a; setOverflow(a == 0x80000000U); finish(rt(op), result); return 1; } // abs
@@ -794,8 +802,9 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
         return 1;
     case 459: case 971: { const bool invalid = b == 0; const auto result = invalid ? 0U : a / b; setOverflow(invalid); finish(rt(op), result); return 20; }
     case 467: { // mtspr
-        if (m_state.msr & msrPr) { programException(instructionPc, programPrivileged); return 1; }
-        if (!writeSpr(decodedSpr(op), m_state.gpr[rt(op)])) programException(instructionPc, programIllegal);
+        const auto spr = decodedSpr(op);
+        if ((m_state.msr & msrPr) && (spr & 0x10U)) { programException(instructionPc, programPrivileged); return 1; }
+        if (!writeSpr(spr, m_state.gpr[rt(op)])) programException(instructionPc, programIllegal);
         return 1;
     }
     case 476: finish(ra(op), ~(m_state.gpr[rt(op)] & b)); return 1;

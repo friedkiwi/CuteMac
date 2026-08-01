@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <optional>
 
 #include <QByteArray>
 #include <QStringList>
@@ -44,6 +45,7 @@ public:
     [[nodiscard]] bool loadFloppyImage(const QString&, bool) override { return false; }
     void ejectFloppyImage() override {}
     void reset() override;
+    void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     [[nodiscard]] int runCycles(int cycles) override;
     [[nodiscard]] int stepInstruction() override;
     [[nodiscard]] std::uint64_t cycleCount() const override;
@@ -78,6 +80,7 @@ public:
 
 private:
     [[nodiscard]] BusRegion regionFor(std::uint32_t address) const;
+    [[nodiscard]] std::optional<std::size_t> ramIndex(std::uint32_t address) const;
     [[nodiscard]] std::uint8_t readMapped8(std::uint32_t address);
     void writeMapped8(std::uint32_t address, std::uint8_t value);
     void recordBus(std::uint32_t address, std::uint32_t value, unsigned size, bool write, BusRegion region);
@@ -91,7 +94,9 @@ private:
     core::MachineScheduler m_scheduler;
     devices::scc::Z8530Scc m_scc;
     std::uint64_t m_hmcControl = 0;
+    std::uint64_t m_hmcShiftBuffer = 0;
     unsigned m_hmcBitPosition = 0;
+    bool m_hmcCommitted = false;
     std::uint64_t m_soundDmaStartCycle = 0;
     bool m_romLoaded = false;
     bool m_busTraceEnabled = false;

@@ -57,6 +57,10 @@ std::uint32_t x(unsigned rd, unsigned ra, unsigned rb, unsigned xo, bool rc = fa
 {
     return (31U << 26) | (rd << 21) | (ra << 16) | (rb << 11) | (oe ? 0x400U : 0U) | (xo << 1) | rc;
 }
+std::uint32_t xspr(unsigned rd, unsigned spr, unsigned xo)
+{
+    return (31U << 26) | (rd << 21) | ((spr & 31U) << 16) | ((spr >> 5) << 11) | (xo << 1);
+}
 
 struct Fixture {
     TestBus bus;
@@ -221,6 +225,30 @@ void testPrivilegedStateAndPreciseFaults()
     require(unaligned.cpu.registers().gpr[5] == 0x11223344U, "big-endian unaligned integer access");
 }
 
+void testProblemStateSprAccess()
+{
+    Fixture userSpr;
+    auto s = userSpr.cpu.registers();
+    s.msr = Core::msrMe | Core::msrPr;
+    s.lr = 0x12345678U;
+    s.gpr[4] = 0x87654321U;
+    userSpr.cpu.setRegisters(s);
+    userSpr.instruction(0x100, xspr(3, 8, 339));     // mflr r3
+    userSpr.instruction(0x104, xspr(4, 9, 467));     // mtctr r4
+    (void)userSpr.cpu.stepInstruction();
+    (void)userSpr.cpu.stepInstruction();
+    s = userSpr.cpu.registers();
+    require(s.gpr[3] == 0x12345678U && s.ctr == 0x87654321U && s.pc == 0x108,
+        "problem-state access to user SPRs");
+
+    userSpr.cpu.setProgramCounter(0x10c);
+    userSpr.instruction(0x10c, xspr(3, 26, 339));    // mfsrr0 r3
+    (void)userSpr.cpu.stepInstruction();
+    s = userSpr.cpu.registers();
+    require(s.pc == 0x700 && s.srr0 == 0x10c && (s.srr1 & 0x00040000U),
+        "problem-state access to supervisor SPR traps");
+}
+
 std::uint64_t doubleBits(double value)
 {
     std::uint64_t bits; std::memcpy(&bits, &value, sizeof(bits)); return bits;
@@ -337,6 +365,7 @@ int main(int argc, char** argv)
     testArithmeticVectorMatrix();
     test601SpecificAndTimebase();
     testPrivilegedStateAndPreciseFaults();
+    testProblemStateSprAccess();
     testFloatingPoint();
     std::cout << "PowerPC 601 core tests passed\n";
     return 0;
