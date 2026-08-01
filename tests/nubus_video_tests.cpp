@@ -128,6 +128,13 @@ int main()
             && authenticCard.read8(0x00090008) == 0xcb
             && authenticCard.read8(0x00090008) == 0xa9,
         "authentic Bt453 palette entries must be readable by GetEntries");
+    authenticCard.write8(0x00090004, 0xf5);
+    ok &= expect(authenticCard.read8(0x00090008) == 0xed
+            && authenticCard.read8(0x00090009) == 0xff
+            && authenticCard.read8(0x0009000a) == 0xff
+            && authenticCard.read8(0x0009000b) == 0xff
+            && authenticCard.read8(0x00090008) == 0xcb,
+        "undriven Bt453 lanes must not advance palette read state");
     authenticCard.tick(261379);
     ok &= expect(authenticCard.read8(0x000d0000) == 0xff
             && authenticCard.read8(0x000d0003) == 0xff,
@@ -138,6 +145,14 @@ int main()
     authenticCard.tick((261379 * 45) / 525);
     ok &= expect(authenticCard.read8(0x000d0003) == 0xff,
         "authentic VBL status must clear after the blanking interval");
+    authenticCard.write8(0x000a0000, 0x00);
+    ok &= expect(authenticCard.vblEnabled(), "authentic VBL acknowledge register must enable interrupts");
+    authenticCard.write8(0x000a0004, 0x00);
+    const auto assertionsBeforeDisabledFrame = authenticCard.vblAssertions();
+    authenticCard.tick(261379);
+    ok &= expect(!authenticCard.vblEnabled()
+            && authenticCard.vblAssertions() == assertionsBeforeDisabledFrame,
+        "authentic VBL +4 register must disable slot interrupts");
 
     return ok ? 0 : 1;
 }

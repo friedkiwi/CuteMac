@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <map>
+#include <deque>
 #include <vector>
 
 #include <QCoreApplication>
@@ -46,7 +47,40 @@ int main(int argc, char** argv)
         return 1;
     }
     machine.reset();
-    (void)machine.runCycles(cycles);
+    if (qEnvironmentVariableIsSet("CUTEMAC_IICX_STOP_BAD_STACK")) {
+        struct TraceEntry {
+            std::uint64_t cycle;
+            cutemac::cpu::m68k::M68kCpuCore::RegisterSnapshot registers;
+        };
+        const auto traceFrom = qEnvironmentVariableIntValue("CUTEMAC_IICX_TRACE_FROM");
+        std::deque<TraceEntry> trace;
+        while (machine.cycleCount() < static_cast<std::uint64_t>(cycles)) {
+            const auto registers = machine.cpuRegisters();
+            if (machine.cycleCount() >= static_cast<std::uint64_t>(std::max(0, traceFrom))) {
+                trace.push_back({ machine.cycleCount(), registers });
+                if (trace.size() > 64) trace.pop_front();
+                const auto physicalSp = registers.a[7] & 0x00ffffffU;
+                if (physicalSp < 0x1000U || physicalSp >= 8U * 1024U * 1024U) {
+                    std::cerr << "invalid-stack cycle=" << machine.cycleCount()
+                              << " logical=0x" << std::hex << registers.a[7]
+                              << " physical=0x" << physicalSp << std::dec << '\n';
+                    for (const auto& entry : trace) {
+                        std::cerr << "cpu-trace cycle=" << entry.cycle
+                                  << " pc=0x" << std::hex << entry.registers.pc
+                                  << " physical=0x" << entry.registers.physicalPc
+                                  << " sp=0x" << entry.registers.a[7]
+                                  << " sr=0x" << entry.registers.sr << ' '
+                                  << machine.disassemble(entry.registers.physicalPc).toStdString()
+                                  << std::dec << '\n';
+                    }
+                    break;
+                }
+            }
+            (void)machine.stepInstruction();
+        }
+    } else {
+        (void)machine.runCycles(cycles);
+    }
     if (qEnvironmentVariableIsSet("CUTEMAC_IICX_OPEN_UTILITIES")) {
         bool tracedCursorTask = false;
         int hostMouseX = 15;
@@ -215,6 +249,12 @@ int main(int argc, char** argv)
                   << " assertions=" << authenticVideo->vblAssertions()
                   << " acks=" << authenticVideo->vblAcks()
                   << " status-reads=" << authenticVideo->vblStatusReads() << '\n';
+        std::cout << "video-vbl-writes";
+        const auto& writes = authenticVideo->vblWriteOffsets();
+        for (std::size_t offset = 0; offset < writes.size(); ++offset) {
+            if (writes[offset] != 0) std::cout << " +0x" << std::hex << offset << '=' << std::dec << writes[offset];
+        }
+        std::cout << '\n';
     }
     std::cout << "io scsi=" << io.scsiReads << '/' << io.scsiWrites
               << " swim=" << io.swimReads << '/' << io.swimWrites

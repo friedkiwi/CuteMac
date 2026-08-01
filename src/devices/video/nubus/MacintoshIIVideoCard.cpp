@@ -85,6 +85,7 @@ void MacintoshIIVideoCard::reset()
     m_vblStatusReads = 0;
     m_vblAcks = 0;
     m_vblAssertions = 0;
+    m_vblWriteOffsets.fill(0);
     setIrq(false);
 }
 
@@ -120,7 +121,11 @@ std::uint8_t MacintoshIIVideoCard::read8(std::uint32_t offset)
     }
     const auto local = offset & localMask;
     if (local < 0x80000) return static_cast<std::uint8_t>(m_vram[static_cast<qsizetype>(local)]) ^ 0xffU;
-    if (local >= 0x90000 && local < 0x90020) return readRamdac((local - 0x90000) >> 2);
+    if (local >= 0x90000 && local < 0x90020) {
+        // Bt453 is connected to NuBus byte lane 0. Undriven lanes must not
+        // advance its address or RGB component state during a wide read.
+        return (local & 3) == 0 ? readRamdac((local - 0x90000) >> 2) : 0xff;
+    }
     if (local >= 0xd0000 && local < 0xe0000) {
         ++m_vblStatusReads;
         // MAME maps vbl_r on the low byte of the 32-bit NuBus word only.
@@ -148,7 +153,8 @@ void MacintoshIIVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         // Bt453 is physically connected to NuBus byte lane 0 only.
         if ((local & 3) == 0) writeRamdac((local - 0x90000) >> 2, value);
     } else if (local >= 0xa0000 && local < 0xb0000) {
-        if ((local & 0x10) != 0) {
+        ++m_vblWriteOffsets[local & 0x1f];
+        if ((local & 0x04) != 0) {
             m_vblEnabled = false;
         } else {
             m_vblEnabled = true;

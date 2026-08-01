@@ -32,6 +32,7 @@ public:
     [[nodiscard]] std::uint64_t vblStatusReads() const { return m_vblStatusReads; }
     [[nodiscard]] std::uint64_t vblAcks() const { return m_vblAcks; }
     [[nodiscard]] std::uint64_t vblAssertions() const { return m_vblAssertions; }
+    [[nodiscard]] const std::array<std::uint64_t, 32>& vblWriteOffsets() const { return m_vblWriteOffsets; }
 
 private:
     void writeRamdac(std::uint32_t offset, std::uint8_t value);
@@ -55,6 +56,7 @@ private:
     std::uint64_t m_vblStatusReads = 0;
     std::uint64_t m_vblAcks = 0;
     std::uint64_t m_vblAssertions = 0;
+    std::array<std::uint64_t, 32> m_vblWriteOffsets {};
 };
 
 } // namespace cutemac::devices::video::nubus
