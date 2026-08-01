@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 project(CuteMac
     VERSION 0.1.0
     DESCRIPTION "Modular classic Macintosh emulator"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 17)
@@ -18,6 +18,9 @@ add_library(CuteMacCore
     src/config/Configuration.cpp
     src/core/Emulator.cpp
     src/cpu/m68k/M68kCpuCore.cpp
+    src/cpu/m68k/engine/m68kcpu.c
+    src/cpu/m68k/engine/m68kops.c
+    src/cpu/m68k/engine/softfloat/softfloat.c
     src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
     src/devices/scsi/ScsiBus.cpp
@@ -34,6 +37,13 @@ target_link_libraries(CuteMacCore
     PUBLIC
         Qt6::Core
 )
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(CuteMacCore
+        PRIVATE
+        m
+    )
+endif()
 
 add_executable(CuteMac
     src/app/main.cpp

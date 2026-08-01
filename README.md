@@ -10,6 +10,8 @@ The repository is currently a scaffold for modular emulator work:
 - TOML configuration files for emulator and machine settings
 - portable CMake/Qt 6 builds for Linux, Windows, macOS, and WebAssembly
 
+The M68k CPU core starts from Musashi-derived source maintained directly in the CuteMac tree.
+
 ## Build
 
 Ubuntu/WSL2 prerequisites:

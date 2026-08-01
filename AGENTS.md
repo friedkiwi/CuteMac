@@ -20,6 +20,8 @@
 ## Architecture Guidelines
 
 - Separate CPU emulation cores from machine definitions and reusable hardware devices.
+- The M68k CPU core starts from Musashi-derived source maintained directly in the CuteMac source tree, not as a third-party vendor subtree.
+- Preserve provenance notices for imported or derived code under `licenses/`.
 - Compose machine models from reusable devices where practical, for example SCSI, ADB, VIA, SCC, video, sound, memory, storage, and bus glue.
 - Keep machine-specific behavior in machine profile or chipset modules rather than spreading conditionals through shared device code.
 - Prefer clear interfaces between emulator core, devices, machine profiles, configuration, and Qt UI.
