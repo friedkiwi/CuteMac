@@ -1885,7 +1885,8 @@ private:
 
     [[nodiscard]] bool tracingRequiresStepping() const
     {
-        return m_trace.pc || m_trace.irq || m_trace.trap || m_trace.driver || m_trace.lowmem || m_trace.screen || m_trace.sound || m_trace.timeline;
+        return !m_breakpoints.empty() || m_trace.pc || m_trace.irq || m_trace.trap || m_trace.driver
+            || m_trace.lowmem || m_trace.screen || m_trace.sound || m_trace.timeline;
     }
 
     int runCyclesWithTracing(int cycles)
