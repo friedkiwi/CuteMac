@@ -52,7 +52,7 @@
 - Emulator windows provide Display → Zoom choices for 1x, 1.5x, 2x, and Custom, with a 512-pixel-wide display opening at 2x by default. Preset selection requests the matching window size; manual resize selects Custom. Preserve aspect ratio and center with letterboxing when the host cannot honor the requested size.
 - Session management commands use newline-delimited JSON over a loopback-only control socket. Keep networking compiled out at runtime on wasm.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
-- Keep optional guest integrations behind versioned device protocols. CuteMac Video exposes a declaration-ROM `.CuteMac` service and a synchronous MMIO mailbox; its ROM-resident shutdown callback may request host power-off or restart without installing a System extension.
+- Keep optional guest integrations behind versioned device protocols. CuteMac Video exposes a declaration-ROM `.CuteMac` service and a synchronous MMIO mailbox. Never call the System 6 Shutdown Manager from the driver's early `Open` path; install its ROM-resident shutdown callback only through the explicit guest-helper control after system traps are initialized.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.
 - Keep debug-only interactive tools in `CuteMacDebugSession` so normal emulator sessions stay lean.
 - Keep ROM-driver probes in `CuteMacDebugSession`; log Device Manager request fields at driver entry so failed media requests can be traced without adding normal-session hot-path overhead.

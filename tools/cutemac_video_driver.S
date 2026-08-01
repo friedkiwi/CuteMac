@@ -17,16 +17,6 @@ driver_start:
         .even
 
 open:
-        lea     service_base(%pc),%a2
-        move.l  42(%a1),(%a2)
-        tst.b   4(%a2)
-        bne.s   open_done
-        st      4(%a2)
-        pea     shutdown_callback(%pc)
-        move.w  #3,-(%sp)              | sdOnPowerOff | sdOnRestart
-        move.w  #3,-(%sp)              | ShutDwnInstall selector
-        .word   0xa895                  | _Shutdown
-open_done:
         moveq   #0,%d0
         rts
 prime:
@@ -44,6 +34,8 @@ control:
         beq.w   set_entries
         cmpi.w  #7,%d0
         beq.w   set_interrupt
+        cmpi.w  #26,%d0                | CuteMac: install guest helpers
+        beq.w   install_guest_helpers
         moveq   #0,%d0
         bra.w   complete
 
@@ -91,6 +83,20 @@ set_interrupt:
         movea.l 42(%a1),%a2
         adda.l  #0x00800001,%a2
         move.b  28(%a0),(%a2)
+        moveq   #0,%d0
+        bra.w   complete
+
+install_guest_helpers:
+        lea     service_base(%pc),%a2
+        move.l  42(%a1),(%a2)
+        tst.b   4(%a2)
+        bne.s   helpers_installed
+        st      4(%a2)
+        pea     shutdown_callback(%pc)
+        move.w  #3,-(%sp)              | sdOnPowerOff | sdOnRestart
+        move.w  #3,-(%sp)              | ShutDwnInstall selector
+        .word   0xa895                  | _Shutdown
+helpers_installed:
         moveq   #0,%d0
         bra.w   complete
 
