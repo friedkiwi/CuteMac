@@ -26,3 +26,9 @@ cmake --build build
 ```
 
 The current executable is only a Qt 6 stub used to verify project structure and toolchain setup.
+
+Mac Plus ROM smoke test:
+
+```sh
+./build/CuteMacMacPlusSmoke work/roms/MacPlusV3.rom
+```

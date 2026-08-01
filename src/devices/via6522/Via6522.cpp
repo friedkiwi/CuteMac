@@ -1,0 +1,102 @@
+#include "cutemac/devices/via6522/Via6522.h"
+
+namespace cutemac::devices::via6522 {
+
+namespace {
+
+constexpr std::uint8_t registerB = 0;
+constexpr std::uint8_t dataDirectionB = 2;
+constexpr std::uint8_t dataDirectionA = 3;
+constexpr std::uint8_t interruptFlag = 13;
+constexpr std::uint8_t interruptEnable = 14;
+constexpr std::uint8_t registerA = 15;
+
+constexpr std::uint8_t initialPortA = 0x7b;
+constexpr std::uint8_t initialPortB = 0x87;
+constexpr std::uint8_t initialDdrA = 0x7f;
+constexpr std::uint8_t initialDdrB = 0x87;
+constexpr std::uint8_t overlayBit = 0x10;
+
+} // namespace
+
+void Via6522::reset()
+{
+    m_registers.fill(0);
+    m_registers[registerA] = initialPortA;
+    m_registers[registerB] = initialPortB;
+    m_registers[dataDirectionA] = initialDdrA;
+    m_registers[dataDirectionB] = initialDdrB;
+    m_interruptEnable = 0;
+    notifyPortAChanged();
+}
+
+std::uint8_t Via6522::readRegister(std::uint8_t index)
+{
+    index &= 0x0f;
+    if (index == interruptFlag) {
+        m_registers[interruptFlag] |= 0x02;
+        return interruptFlagRegister();
+    }
+    if (index == interruptEnable) {
+        return static_cast<std::uint8_t>(0x80 | m_interruptEnable);
+    }
+
+    return m_registers[index];
+}
+
+void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
+{
+    index &= 0x0f;
+    if (index == interruptFlag) {
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~value);
+        return;
+    }
+    if (index == interruptEnable) {
+        if ((value & 0x80) != 0) {
+            m_interruptEnable |= static_cast<std::uint8_t>(value & 0x7f);
+        } else {
+            m_interruptEnable &= static_cast<std::uint8_t>(~value);
+        }
+        return;
+    }
+
+    m_registers[index] = value;
+    if (index == registerA) {
+        notifyPortAChanged();
+    }
+}
+
+void Via6522::setPortAChangedCallback(PortAChangedCallback callback)
+{
+    m_portAChanged = std::move(callback);
+}
+
+std::uint8_t Via6522::portA() const
+{
+    return m_registers[registerA];
+}
+
+std::uint8_t Via6522::portB() const
+{
+    return m_registers[registerB];
+}
+
+bool Via6522::overlayEnabled() const
+{
+    return (portA() & overlayBit) != 0;
+}
+
+void Via6522::notifyPortAChanged()
+{
+    if (m_portAChanged) {
+        m_portAChanged(portA());
+    }
+}
+
+std::uint8_t Via6522::interruptFlagRegister() const
+{
+    const auto active = static_cast<std::uint8_t>(m_registers[interruptFlag] & m_interruptEnable);
+    return active == 0 ? m_registers[interruptFlag] : static_cast<std::uint8_t>(m_registers[interruptFlag] | 0x80);
+}
+
+} // namespace cutemac::devices::via6522

@@ -23,9 +23,14 @@ add_library(CuteMacCore
     src/cpu/m68k/engine/softfloat/softfloat.c
     src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
+    src/devices/iwm/IwmController.cpp
     src/devices/scsi/ScsiBus.cpp
+    src/devices/scsi/ncr5380/Ncr5380.cpp
+    src/devices/scc/Z8530Scc.cpp
+    src/devices/via6522/Via6522.cpp
     src/devices/video/VideoDevice.cpp
     src/machines/MachineCatalog.cpp
+    src/machines/macplus/MacPlusMachine.cpp
 )
 
 target_include_directories(CuteMacCore
@@ -58,4 +63,13 @@ target_link_libraries(CuteMac
 set_target_properties(CuteMac PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE
+)
+
+add_executable(CuteMacMacPlusSmoke
+    tools/macplus_smoke.cpp
+)
+
+target_link_libraries(CuteMacMacPlusSmoke
+    PRIVATE
+        CuteMacCore
 )

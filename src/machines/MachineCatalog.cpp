@@ -6,11 +6,19 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
 {
     return {
         {
-            QStringLiteral("mac-128k"),
-            QStringLiteral("Macintosh 128K"),
+            QStringLiteral("mac-plus"),
+            QStringLiteral("Macintosh Plus"),
             CpuFamily::M68k,
             QStringLiteral("68000"),
-            { QStringLiteral("device.video") },
+            {
+                QStringLiteral("device.via6522"),
+                QStringLiteral("device.scc.z8530"),
+                QStringLiteral("device.iwm"),
+                QStringLiteral("device.scsi.ncr5380"),
+                QStringLiteral("device.video.compact-mac"),
+                QStringLiteral("device.audio.compact-mac"),
+                QStringLiteral("device.rtc.pram"),
+            },
         },
         {
             QStringLiteral("mac-iicx"),
