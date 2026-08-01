@@ -42,6 +42,7 @@ add_library(CuteMacCore
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
     src/rom/RomPatcher.cpp
+    src/storage/DiskImageManager.cpp
 )
 
 target_include_directories(CuteMacCore
@@ -64,6 +65,7 @@ endif()
 
 add_library(CuteMacWidgets
     src/ui/ConfigurationDialog.cpp
+    src/ui/DiskImageWidgets.cpp
 )
 
 target_link_libraries(CuteMacWidgets
@@ -186,4 +188,8 @@ if(BUILD_TESTING)
     add_executable(CuteMacScsiBlockDeviceTests tests/scsi_block_device_tests.cpp)
     target_link_libraries(CuteMacScsiBlockDeviceTests PRIVATE CuteMacCore)
     add_test(NAME scsi-block-device COMMAND CuteMacScsiBlockDeviceTests)
+
+    add_executable(CuteMacDiskImageManagerTests tests/disk_image_manager_tests.cpp)
+    target_link_libraries(CuteMacDiskImageManagerTests PRIVATE CuteMacCore)
+    add_test(NAME disk-image-manager COMMAND CuteMacDiskImageManagerTests)
 endif()

@@ -3,17 +3,13 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
-#include <QDoubleValidator>
-#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -23,116 +19,9 @@
 #include <algorithm>
 
 #include "cutemac/machines/MachineCatalog.h"
+#include "cutemac/ui/DiskImageWidgets.h"
 
 namespace cutemac::ui {
-namespace {
-
-QString chooseImage(QWidget* parent, const QString& title, const QString& filter)
-{
-    return QFileDialog::getOpenFileName(parent, title, config::ConfigurationManager::diskImageDirectoryPath(), filter);
-}
-
-class DiskImageDialog final : public QDialog {
-public:
-    explicit DiskImageDialog(QWidget* parent = nullptr)
-        : QDialog(parent)
-    {
-        setWindowTitle(QStringLiteral("Create Blank Disk Image"));
-        auto* layout = new QVBoxLayout(this);
-        auto* form = new QFormLayout;
-        m_path = new QLineEdit;
-        auto* browse = new QPushButton(QStringLiteral("Browse..."));
-        auto* pathRow = new QHBoxLayout;
-        pathRow->addWidget(m_path, 1);
-        pathRow->addWidget(browse);
-        form->addRow(QStringLiteral("Image file"), pathRow);
-
-        m_preset = new QComboBox;
-        m_preset->addItem(QStringLiteral("20 MB (early external drive)"), 20);
-        m_preset->addItem(QStringLiteral("40 MB (Macintosh IIcx)"), 40);
-        m_preset->addItem(QStringLiteral("80 MB (Macintosh IIcx)"), 80);
-        m_preset->addItem(QStringLiteral("160 MB"), 160);
-        m_preset->addItem(QStringLiteral("230 MB (Quadra 800)"), 230);
-        m_preset->addItem(QStringLiteral("500 MB (Quadra 800)"), 500);
-        m_preset->addItem(QStringLiteral("1 GB (Quadra 800)"), 1024);
-        m_preset->addItem(QStringLiteral("Custom"), -1);
-        form->addRow(QStringLiteral("Common size"), m_preset);
-
-        m_custom = new QLineEdit(QStringLiteral("100"));
-        auto* sizeValidator = new QDoubleValidator(0.001, 999999.0, 3, m_custom);
-        sizeValidator->setNotation(QDoubleValidator::StandardNotation);
-        m_custom->setValidator(sizeValidator);
-        m_unit = new QComboBox;
-        m_unit->addItem(QStringLiteral("MB"), 1024LL * 1024LL);
-        m_unit->addItem(QStringLiteral("GB"), 1024LL * 1024LL * 1024LL);
-        m_lastUnitMultiplier = m_unit->currentData().toLongLong();
-        auto* customRow = new QHBoxLayout;
-        customRow->addWidget(m_custom, 1);
-        customRow->addWidget(m_unit);
-        form->addRow(QStringLiteral("Custom size"), customRow);
-        layout->addLayout(form);
-
-        auto* note = new QLabel(QStringLiteral("Images are created as raw, sparse files. They are not partitioned or formatted."));
-        note->setWordWrap(true);
-        layout->addWidget(note);
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addWidget(buttons);
-
-        const auto updateCustom = [this]() {
-            const bool custom = m_preset->currentData().toInt() < 0;
-            m_custom->setEnabled(custom);
-            m_unit->setEnabled(custom);
-        };
-        connect(m_preset, &QComboBox::currentIndexChanged, this, updateCustom);
-        connect(m_unit, &QComboBox::currentIndexChanged, this, [this]() {
-            const auto bytes = m_custom->text().toDouble() * static_cast<double>(m_lastUnitMultiplier);
-            m_lastUnitMultiplier = m_unit->currentData().toLongLong();
-            m_custom->setText(QString::number(bytes / static_cast<double>(m_lastUnitMultiplier), 'f', 3).remove(QRegularExpression(QStringLiteral(R"(\.?0+$)"))));
-        });
-        connect(browse, &QPushButton::clicked, this, [this]() {
-            const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Create Blank Disk Image"),
-                config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("Raw disk image (*.hda *.img);;All files (*)"));
-            if (!path.isEmpty()) m_path->setText(path);
-        });
-        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-        connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
-            if (m_path->text().trimmed().isEmpty()) {
-                QMessageBox::warning(this, windowTitle(), QStringLiteral("Select an image file."));
-                return;
-            }
-            const auto bytes = sizeBytes();
-            if (bytes > 4LL * 1024 * 1024 * 1024
-                && QMessageBox::warning(this, windowTitle(), QStringLiteral("Images over 4 GB may not work with vintage Macintosh software. Create it anyway?"),
-                       QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
-                return;
-            }
-            QFile file(m_path->text().trimmed());
-            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || !file.resize(bytes)) {
-                QMessageBox::critical(this, windowTitle(), QStringLiteral("Could not create the disk image."));
-                return;
-            }
-            accept();
-        });
-        updateCustom();
-    }
-
-    [[nodiscard]] QString imagePath() const { return m_path->text().trimmed(); }
-
-private:
-    [[nodiscard]] qint64 sizeBytes() const
-    {
-        const auto presetMiB = m_preset->currentData().toLongLong();
-        return presetMiB >= 0 ? presetMiB * 1024 * 1024 : qRound64(m_custom->text().toDouble() * m_unit->currentData().toLongLong());
-    }
-
-    QLineEdit* m_path = nullptr;
-    QComboBox* m_preset = nullptr;
-    QLineEdit* m_custom = nullptr;
-    QComboBox* m_unit = nullptr;
-    qint64 m_lastUnitMultiplier = 1024LL * 1024LL;
-};
-
-} // namespace
 
 class ConfigurationDialog::Impl {
 public:
@@ -218,9 +107,11 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     scsiLayout->addWidget(m_impl->scsi, 1);
     auto* scsiButtons = new QHBoxLayout;
     auto* addDisk = new QPushButton(QStringLiteral("Add Hard Disk..."));
+    auto* addCd = new QPushButton(QStringLiteral("Add CD-ROM..."));
     auto* remove = new QPushButton(QStringLiteral("Remove"));
     auto* create = new QPushButton(QStringLiteral("Create Disk Image..."));
     scsiButtons->addWidget(addDisk);
+    scsiButtons->addWidget(addCd);
     scsiButtons->addWidget(remove);
     scsiButtons->addWidget(create);
     scsiButtons->addStretch();
@@ -236,6 +127,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         m_impl->scsi->setCellWidget(row, 0, id);
         auto* type = new QComboBox;
         type->addItem(QStringLiteral("Hard disk"), static_cast<int>(config::ScsiDeviceType::HardDisk));
+        type->addItem(QStringLiteral("CD-ROM"), static_cast<int>(config::ScsiDeviceType::CdRom));
         type->setCurrentIndex(type->findData(static_cast<int>(device.type)));
         m_impl->scsi->setCellWidget(row, 1, type);
         m_impl->scsi->setItem(row, 2, new QTableWidgetItem(device.imagePath));
@@ -266,26 +158,27 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         if (!path.isEmpty()) m_impl->rom->setText(path);
     });
     connect(floppyBrowse, &QPushButton::clicked, this, [this]() {
-        const auto path = chooseImage(this, QStringLiteral("Insert Floppy Image"), QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
+        const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::Floppy, QStringLiteral("Select Floppy Image"), this);
         if (!path.isEmpty()) m_impl->floppy->setText(path);
     });
     connect(floppyNew, &QPushButton::clicked, this, [this]() {
-        const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Create Blank Floppy Image"), config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("Raw 800K floppy (*.dsk)"));
-        if (path.isEmpty()) return;
-        QFile file(path);
-        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.resize(800 * 1024)) m_impl->floppy->setText(path);
-        else QMessageBox::critical(this, windowTitle(), QStringLiteral("Could not create the floppy image."));
+        const auto path = createDiskImage(storage::DiskImageType::Floppy, this);
+        if (!path.isEmpty()) m_impl->floppy->setText(path);
     });
     connect(addDisk, &QPushButton::clicked, this, [this, addScsiRow]() {
-        const auto path = chooseImage(this, QStringLiteral("Select SCSI Media"), QStringLiteral("Disk and CD images (*.hda *.img *.iso);;All files (*)"));
+        const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::HardDisk, QStringLiteral("Select Hard Disk Image"), this);
         if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::HardDisk, path, false });
+    });
+    connect(addCd, &QPushButton::clicked, this, [this, addScsiRow]() {
+        const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::CdRom, QStringLiteral("Select CD-ROM Image"), this);
+        if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::CdRom, path, true });
     });
     connect(remove, &QPushButton::clicked, this, [this]() {
         if (m_impl->scsi->currentRow() >= 0) m_impl->scsi->removeRow(m_impl->scsi->currentRow());
     });
     connect(create, &QPushButton::clicked, this, [this, addScsiRow]() {
-        DiskImageDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::HardDisk, dialog.imagePath(), false });
+        const auto path = createDiskImage(storage::DiskImageType::HardDisk, this);
+        if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::HardDisk, path, false });
     });
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);

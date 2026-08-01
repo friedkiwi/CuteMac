@@ -34,6 +34,7 @@
 - Runtime speed is profile-controlled with `[runtime] speed = "realtime"|"unlimited"` and can change without resetting the guest. Desktop unlimited mode removes throttling; wasm unlimited mode uses a bounded host-frame work budget so the browser remains responsive.
 - Unlimited desktop execution must leave a deterministic host-service window between emulation quanta. A scheduler yield alone does not prevent the worker from starving the session mutex and makes Qt input/framebuffer access unreliable.
 - New profiles default to unlimited speed. The shared tabbed configuration UI derives IWM and SCSI tab visibility from machine device capabilities. Persist SCSI devices as typed targets with unique IDs 0-6; retain migration support for legacy `[storage]` paths.
+- Keep managed floppy, CD-ROM, and hard-disk images in the shared disk-image catalog. Configuration and live insertion flows use the common media-type-filtered disk picker, and blank floppy/hard-disk creation shares the same image creation path.
 - Keep host key mapping, capture policy, and framebuffer conversion in session frontend adapters. Wayland/wasm remain on the no-warp absolute-pointer path.
 - Session management commands use newline-delimited JSON over a loopback-only control socket. Keep networking compiled out at runtime on wasm.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.

@@ -5,7 +5,6 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
-#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QImage>
@@ -39,6 +38,7 @@
 #include "cutemac/session/FramebufferRenderer.h"
 #include "cutemac/session/HostInputMapper.h"
 #include "cutemac/ui/ConfigurationDialog.h"
+#include "cutemac/ui/DiskImageWidgets.h"
 
 namespace {
 
@@ -428,10 +428,8 @@ private:
 
         auto* mediaMenu = menuBar()->addMenu(QStringLiteral("Media"));
         mediaMenu->addAction(QStringLiteral("Insert Floppy Image"), this, [this]() {
-            const auto path = QFileDialog::getOpenFileName(this,
-                QStringLiteral("Insert Floppy Image"),
-                cutemac::config::ConfigurationManager::diskImageDirectoryPath(),
-                QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
+            const auto path = cutemac::ui::DiskImagePickerDialog::getImage(cutemac::storage::DiskImageType::Floppy,
+                QStringLiteral("Insert Floppy Image"), this);
             if (!path.isEmpty()) {
                 m_configuration.floppyPath = path;
                 if (!m_configuration.iwmDevices.isEmpty()) m_configuration.iwmDevices[0].imagePath = path;
@@ -506,12 +504,15 @@ private:
 
         for (const auto& device : m_configuration.scsiDevices) {
             auto* disk = new QToolButton(m_toolbar);
-            disk->setIcon(style()->standardIcon(QStyle::SP_DriveHDIcon));
-            disk->setToolTip(QStringLiteral("SCSI ID %1 hard disk").arg(device.id));
+            const bool cdRom = device.type == cutemac::config::ScsiDeviceType::CdRom;
+            disk->setIcon(style()->standardIcon(cdRom ? QStyle::SP_DriveCDIcon : QStyle::SP_DriveHDIcon));
+            disk->setToolTip(QStringLiteral("SCSI ID %1 %2").arg(device.id).arg(cdRom ? QStringLiteral("CD-ROM") : QStringLiteral("hard disk")));
             connect(disk, &QToolButton::clicked, this, [this, device]() {
-                QMessageBox::information(this, QStringLiteral("SCSI Hard Disk"),
-                    QStringLiteral("SCSI ID: %1\nImage: %2\nAccess: %3")
+                const bool cdRom = device.type == cutemac::config::ScsiDeviceType::CdRom;
+                QMessageBox::information(this, cdRom ? QStringLiteral("SCSI CD-ROM") : QStringLiteral("SCSI Hard Disk"),
+                    QStringLiteral("SCSI ID: %1\nType: %2\nImage: %3\nAccess: %4")
                         .arg(device.id)
+                        .arg(cdRom ? QStringLiteral("CD-ROM") : QStringLiteral("Hard disk"))
                         .arg(device.imagePath.isEmpty() ? QStringLiteral("No image") : device.imagePath)
                         .arg(device.readOnly ? QStringLiteral("Read-only") : QStringLiteral("Read/write")));
             });
@@ -521,8 +522,8 @@ private:
 
     void insertFloppyFromToolbar()
     {
-        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Insert Floppy Image"),
-            cutemac::config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
+        const auto path = cutemac::ui::DiskImagePickerDialog::getImage(cutemac::storage::DiskImageType::Floppy,
+            QStringLiteral("Insert Floppy Image"), this);
         if (path.isEmpty()) return;
         m_configuration.floppyPath = path;
         m_configuration.iwmDevices[0].imagePath = path;
@@ -533,14 +534,8 @@ private:
 
     void createFloppyFromToolbar()
     {
-        const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Create Blank Floppy Image"),
-            cutemac::config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("Raw 800K floppy (*.dsk)"));
+        const auto path = cutemac::ui::createDiskImage(cutemac::storage::DiskImageType::Floppy, this);
         if (path.isEmpty()) return;
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || !file.resize(800 * 1024)) {
-            QMessageBox::critical(this, QStringLiteral("Create Floppy Image"), QStringLiteral("Could not create the floppy image."));
-            return;
-        }
         insertCreatedFloppy(path);
     }
 

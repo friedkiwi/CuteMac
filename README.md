@@ -53,7 +53,7 @@ Runtime speed can be changed live from the session's Machine menu and persisted 
 speed = "realtime" # or "unlimited"
 ```
 
-New profiles default to unlimited speed. The shared machine configuration window organizes general, IWM/floppy, and addressed SCSI-device settings into capability-dependent tabs and can create blank raw floppy and hard-disk images.
+New profiles default to unlimited speed. The shared machine configuration window organizes general, IWM/floppy, and addressed SCSI-device settings into capability-dependent tabs. The Tools menu provides a disk image manager for importing, exporting, and creating typed floppy and hard-disk images. Configuration and live media insertion use the same library picker, filtered to the requested floppy, CD-ROM, or hard-disk media type.
 
 Mac Plus ROM smoke test:
 

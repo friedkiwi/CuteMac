@@ -32,6 +32,7 @@
 
 #include "cutemac/config/Configuration.h"
 #include "cutemac/ui/ConfigurationDialog.h"
+#include "cutemac/ui/DiskImageWidgets.h"
 
 namespace {
 
@@ -113,6 +114,10 @@ private:
         fileMenu->addAction(QStringLiteral("Quit"), this, &QWidget::close);
 
         auto* toolsMenu = menuBar()->addMenu(QStringLiteral("Tools"));
+        toolsMenu->addAction(QStringLiteral("Disk Image Manager..."), this, [this]() {
+            cutemac::ui::DiskImageManagerDialog dialog(this);
+            dialog.exec();
+        });
         toolsMenu->addAction(QStringLiteral("Open ROM Folder"), this, []() {
             QDesktopServices::openUrl(QUrl::fromLocalFile(cutemac::config::ConfigurationManager::romDirectoryPath()));
         });
