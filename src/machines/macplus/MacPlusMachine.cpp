@@ -183,7 +183,7 @@ bool MacPlusMachine::runUntilPc(std::uint32_t address, int maxCycles)
         if (programCounter() == (address & 0x00ffffff)) {
             return true;
         }
-        cyclesUsed += std::max(1, m_cpu.stepInstruction());
+        cyclesUsed += std::max(1, stepInstruction());
     }
 
     return programCounter() == (address & 0x00ffffff);
