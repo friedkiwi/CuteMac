@@ -14,7 +14,7 @@ int main(int argc, char** argv)
 {
     QCoreApplication application(argc, argv);
     if (argc < 2) {
-        std::cerr << "usage: CuteMacIIcxSmoke <rom> [cycles] [floppy-image] [framebuffer.pgm] [ram-code.bin]\n";
+        std::cerr << "usage: CuteMacIIcxSmoke <rom> [cycles] [floppy-image] [framebuffer.pgm] [ram-code.bin] [scsi-disk]\n";
         return 2;
     }
 
@@ -29,8 +29,32 @@ int main(int argc, char** argv)
         std::cerr << "failed to load floppy image\n";
         return 1;
     }
+    if (argc >= 7 && !machine.loadScsiDisk(0, QString::fromLocal8Bit(argv[6]), false)) {
+        std::cerr << "failed to load SCSI disk image\n";
+        return 1;
+    }
     machine.reset();
     (void)machine.runCycles(cycles);
+    if (qEnvironmentVariableIsSet("CUTEMAC_IICX_OPEN_UTILITIES")) {
+        const auto moveMouse = [&machine](int dx, int dy) {
+            while (dx != 0 || dy != 0) {
+                const int stepX = std::clamp(dx, -32, 32);
+                const int stepY = std::clamp(dy, -32, 32);
+                machine.queueInput({cutemac::core::GuestInputEvent::Type::MouseDelta, stepX, stepY, false}, machine.cycleCount());
+                (void)machine.runCycles(1'000'000);
+                dx -= stepX;
+                dy -= stepY;
+            }
+        };
+        moveMouse(580, 45);
+        for (int click = 0; click < 2; ++click) {
+            machine.queueInput({cutemac::core::GuestInputEvent::Type::MouseButton, 0, 0, true}, machine.cycleCount());
+            (void)machine.runCycles(1'000'000);
+            machine.queueInput({cutemac::core::GuestInputEvent::Type::MouseButton, 0, 0, false}, machine.cycleCount());
+            (void)machine.runCycles(1'000'000);
+        }
+        (void)machine.runCycles(50'000'000);
+    }
     std::map<std::uint32_t, int> sampledPcs;
     for (int sample = 0; sample < 256; ++sample) {
         (void)machine.runCycles(1000);
