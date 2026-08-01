@@ -72,6 +72,7 @@ bool EmulationSession::initialize()
         m_machine->reset();
     }
     m_paused = !m_romLoaded;
+    m_powerRequest = GuestPowerRequest::None;
     return m_romLoaded;
 }
 
@@ -82,6 +83,7 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     m_machine = createMachine(m_configuration);
     m_romLoaded = false;
     m_paused = true;
+    m_powerRequest = GuestPowerRequest::None;
     if (!m_machine) {
         return false;
     }
@@ -111,13 +113,21 @@ void EmulationSession::reset()
     std::lock_guard lock(m_mutex);
     if (m_machine && m_romLoaded) {
         m_machine->reset();
+        m_powerRequest = GuestPowerRequest::None;
     }
 }
 
 int EmulationSession::runCycles(int cycles)
 {
     std::lock_guard lock(m_mutex);
-    return !m_machine || m_paused ? 0 : m_machine->runCycles(cycles);
+    if (!m_machine || m_paused) return 0;
+    const auto used = m_machine->runCycles(cycles);
+    const auto request = m_machine->takePowerRequest();
+    if (request != GuestPowerRequest::None) {
+        m_powerRequest = request;
+        m_paused = true;
+    }
+    return used;
 }
 
 void EmulationSession::setPaused(bool paused)
@@ -158,6 +168,14 @@ devices::audio::AudioFrame EmulationSession::takeAudioFrame()
 {
     std::lock_guard lock(m_mutex);
     return m_machine ? m_machine->takeAudioFrame() : devices::audio::AudioFrame {};
+}
+
+GuestPowerRequest EmulationSession::takePowerRequest()
+{
+    std::lock_guard lock(m_mutex);
+    const auto request = m_powerRequest;
+    m_powerRequest = GuestPowerRequest::None;
+    return request;
 }
 
 config::Configuration EmulationSession::configuration() const

@@ -46,6 +46,7 @@ public:
     [[nodiscard]] bool overlayEnabled() const override;
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;
+    [[nodiscard]] core::GuestPowerRequest takePowerRequest() override;
     void queueInput(const core::GuestInputEvent& event, std::uint64_t cycle) override;
 
     [[nodiscard]] std::uint8_t read8(std::uint32_t address) override;

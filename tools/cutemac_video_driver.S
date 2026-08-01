@@ -17,6 +17,16 @@ driver_start:
         .even
 
 open:
+        lea     service_base(%pc),%a2
+        move.l  42(%a1),(%a2)
+        tst.b   4(%a2)
+        bne.s   open_done
+        st      4(%a2)
+        pea     shutdown_callback(%pc)
+        move.w  #3,-(%sp)              | sdOnPowerOff | sdOnRestart
+        move.w  #3,-(%sp)              | ShutDwnInstall selector
+        .word   0xa895                  | _Shutdown
+open_done:
         moveq   #0,%d0
         rts
 prime:
@@ -180,3 +190,21 @@ complete:
 queued:
         movea.l 0x08fc,%a2
         jmp     (%a2)
+
+shutdown_callback:
+        movem.l %d0-%d1/%a0-%a1,-(%sp)
+        cmpi.l  #1,%d0                 | 0 = power off, 1 = restart
+        bhi.s   shutdown_done
+        addq.b  #1,%d0                 | mailbox commands are 1 and 2
+        movea.l service_base(%pc),%a0
+        adda.l  #0x00900010,%a0
+        move.b  %d0,(%a0)
+shutdown_done:
+        movem.l (%sp)+,%d0-%d1/%a0-%a1
+        rts
+
+service_base:
+        .long   0
+shutdown_installed:
+        .byte   0
+        .even

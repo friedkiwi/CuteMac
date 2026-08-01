@@ -11,6 +11,9 @@ namespace cutemac::devices::video::nubus {
 
 class CuteMacVideoCard final : public devices::nubus::NuBusCard {
 public:
+    static constexpr std::uint32_t guestServicesBase = 0x00900000;
+    static constexpr std::uint32_t guestServicesCommand = guestServicesBase + 0x10;
+
     CuteMacVideoCard(int width, int height, int depth, int vramMiB, bool acceleration);
 
     [[nodiscard]] QString id() const override;
@@ -19,6 +22,7 @@ public:
     [[nodiscard]] std::uint8_t read8(std::uint32_t offset) override;
     void write8(std::uint32_t offset, std::uint8_t value) override;
     [[nodiscard]] VideoFrame videoFrame() const override;
+    [[nodiscard]] core::GuestPowerRequest takePowerRequest() override;
     [[nodiscard]] const QByteArray& declarationRom() const { return m_declarationRom; }
 
 private:
@@ -39,6 +43,7 @@ private:
     std::array<std::uint8_t, 3> m_paletteLatch {};
     bool m_vblEnabled = false;
     std::uint64_t m_vblCycles = 0;
+    core::GuestPowerRequest m_powerRequest = core::GuestPowerRequest::None;
 };
 
 } // namespace cutemac::devices::video::nubus

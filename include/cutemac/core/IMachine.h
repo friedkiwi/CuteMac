@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include "cutemac/core/GuestInput.h"
+#include "cutemac/core/GuestPowerRequest.h"
 #include "cutemac/devices/audio/AudioFrame.h"
 #include "cutemac/devices/video/VideoFrame.h"
 
@@ -32,6 +33,7 @@ public:
     [[nodiscard]] virtual QByteArray framebufferBytes() const = 0;
     [[nodiscard]] virtual devices::video::VideoFrame videoFrame() const = 0;
     [[nodiscard]] virtual devices::audio::AudioFrame takeAudioFrame() { return {}; }
+    [[nodiscard]] virtual GuestPowerRequest takePowerRequest() { return GuestPowerRequest::None; }
     virtual void queueInput(const GuestInputEvent& event, std::uint64_t cycle) = 0;
 };
 

@@ -28,6 +28,9 @@ int main()
     ok &= expect(virtualCard.declarationRom().mid(4090, 4).toHex() == QByteArray("5a932bc7"), "CuteMac declaration ROM test pattern");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc00800002")),
         "CuteMac declaration ROM driver must expose palette operations");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray(".CuteMac\0", 9))
+            && virtualCard.declarationRom().contains(QByteArray::fromHex("a895")),
+        "CuteMac declaration ROM must advertise guest services and install its shutdown callback");
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
         "CuteMac video must reset to one-bit indexed mode");
     ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
@@ -48,6 +51,20 @@ int main()
     ok &= expect(virtualCard.read8(0x00800003) == 0x12 && virtualCard.read8(0x00800004) == 0x34
             && virtualCard.read8(0x00800005) == 0x56,
         "CuteMac RAMDAC palette entries must be readable by GetEntries");
+    ok &= expect(virtualCard.read8(CuteMacVideoCard::guestServicesBase) == 'C'
+            && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 1) == 'T'
+            && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 2) == 'M'
+            && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 3) == 'C'
+            && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 4) == 1
+            && (virtualCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 1) != 0,
+        "CuteMac guest-services mailbox identity and clean-shutdown capability");
+    virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 1);
+    ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::PowerOff
+            && virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
+        "CuteMac guest-services power-off request must be consumed once");
+    virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 2);
+    ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::Restart,
+        "CuteMac guest-services restart request");
 
     QTemporaryDir directory;
     const auto romPath = directory.filePath(QStringLiteral("342-0008-a.bin"));

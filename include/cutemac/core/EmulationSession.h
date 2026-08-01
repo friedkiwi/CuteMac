@@ -40,6 +40,7 @@ public:
     [[nodiscard]] QByteArray framebufferBytes() const;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const;
     [[nodiscard]] devices::audio::AudioFrame takeAudioFrame();
+    [[nodiscard]] GuestPowerRequest takePowerRequest();
     [[nodiscard]] config::Configuration configuration() const;
 
     void queueMousePosition(std::int16_t x, std::int16_t y);
@@ -64,6 +65,7 @@ private:
     std::unique_ptr<IMachine> m_machine;
     bool m_romLoaded = false;
     bool m_paused = true;
+    GuestPowerRequest m_powerRequest = GuestPowerRequest::None;
 };
 
 } // namespace cutemac::core

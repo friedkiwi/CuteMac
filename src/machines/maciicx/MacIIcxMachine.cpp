@@ -172,6 +172,17 @@ devices::video::VideoFrame MacIIcxMachine::videoFrame() const
     return {};
 }
 
+core::GuestPowerRequest MacIIcxMachine::takePowerRequest()
+{
+    for (int slot = 9; slot <= 14; ++slot) {
+        const auto card = m_nubus.card(slot);
+        if (!card) continue;
+        const auto request = card->takePowerRequest();
+        if (request != core::GuestPowerRequest::None) return request;
+    }
+    return core::GuestPowerRequest::None;
+}
+
 void MacIIcxMachine::queueInput(const core::GuestInputEvent& event, std::uint64_t cycle)
 {
     m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); });

@@ -5,6 +5,7 @@
 
 #include <QString>
 
+#include "cutemac/core/GuestPowerRequest.h"
 #include "cutemac/devices/video/VideoFrame.h"
 
 namespace cutemac::devices::nubus {
@@ -21,6 +22,7 @@ public:
     [[nodiscard]] virtual std::uint8_t read8(std::uint32_t offset) = 0;
     virtual void write8(std::uint32_t offset, std::uint8_t value) = 0;
     [[nodiscard]] virtual video::VideoFrame videoFrame() const { return {}; }
+    [[nodiscard]] virtual core::GuestPowerRequest takePowerRequest() { return core::GuestPowerRequest::None; }
 
     void setIrqCallback(IrqCallback callback) { m_irqCallback = std::move(callback); }
 

@@ -733,6 +733,17 @@ private:
         m_runner.runHostFrame();
         m_display->setFramebuffer(m_session.videoFrame());
         m_audioOutput.enqueue(m_session.takeAudioFrame());
+        switch (m_session.takePowerRequest()) {
+        case cutemac::core::GuestPowerRequest::PowerOff:
+            setPaused(true);
+            close();
+            return;
+        case cutemac::core::GuestPowerRequest::Restart:
+            loadAndReset();
+            return;
+        case cutemac::core::GuestPowerRequest::None:
+            break;
+        }
         ++m_frames;
         if ((m_frames % 15) == 0) {
             updateStatus();
