@@ -47,6 +47,9 @@ void Via6522::reset()
 std::uint8_t Via6522::readRegister(std::uint8_t index)
 {
     index &= 0x0f;
+    if (index == registerB) {
+        return portB();
+    }
     if (index == interruptFlag) {
         return interruptFlagRegister();
     }
@@ -169,7 +172,9 @@ std::uint8_t Via6522::portA() const
 
 std::uint8_t Via6522::portB() const
 {
-    return m_registers[registerB];
+    const auto outputs = static_cast<std::uint8_t>(m_registers[registerB] & m_registers[dataDirectionB]);
+    const auto inputs = static_cast<std::uint8_t>(m_portBInputs & ~m_registers[dataDirectionB]);
+    return static_cast<std::uint8_t>(outputs | inputs);
 }
 
 void Via6522::setPortBInputBit(std::uint8_t bit, bool high)
@@ -180,9 +185,9 @@ void Via6522::setPortBInputBit(std::uint8_t bit, bool high)
 
     const auto mask = static_cast<std::uint8_t>(1U << bit);
     if (high) {
-        m_registers[registerB] |= mask;
+        m_portBInputs |= mask;
     } else {
-        m_registers[registerB] &= static_cast<std::uint8_t>(~mask);
+        m_portBInputs &= static_cast<std::uint8_t>(~mask);
     }
 }
 

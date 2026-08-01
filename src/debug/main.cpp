@@ -486,7 +486,7 @@ private:
     {
         return {
             QStringLiteral("regs"), QStringLiteral("state"), QStringLiteral("devices"),
-            QStringLiteral("step"), QStringLiteral("run"), QStringLiteral("run-until"),
+            QStringLiteral("step"), QStringLiteral("run"), QStringLiteral("run-until"), QStringLiteral("run-until-event"),
             QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("mem-find"),
             QStringLiteral("mem-snapshot"), QStringLiteral("memory-diff"),
             QStringLiteral("write8"), QStringLiteral("write16"), QStringLiteral("write32"),
@@ -559,6 +559,8 @@ private:
             stepInstructions(parts);
         } else if (command == QStringLiteral("run-until")) {
             runUntil(parts);
+        } else if (command == QStringLiteral("run-until-event")) {
+            runUntilEvent(parts);
         } else if (command == QStringLiteral("state")) {
             printState();
         } else if (command == QStringLiteral("regs")) {
@@ -669,7 +671,7 @@ private:
     {
         m_out << "commands:\n";
         m_out << "  regs | state | devices [via|iwm|scc|scsi]\n";
-        m_out << "  step [count] | run [cycles] | run-until <addr> [max-cycles]\n";
+        m_out << "  step [count] | run [cycles] | run-until <addr> [max-cycles] | run-until-event floppy-eject [max-cycles]\n";
         m_out << "  disasm [addr|pc] [count] | mem <addr> [len]\n";
         m_out << "  mem-find <hex> [start len] | mem-snapshot <name> <addr> <len> | memory-diff <name>\n";
         m_out << "  write8|write16|write32 <addr> <value>\n";
@@ -877,6 +879,32 @@ private:
         const auto maxCycles = parts.size() >= 3 ? parts[2].toInt() : 10000000;
         const auto hit = m_machine->runUntilPc(*address, maxCycles);
         m_out << (hit ? "hit " : "timeout ") << hexValue(m_machine->programCounter()) << '\n';
+    }
+
+    void runUntilEvent(const QStringList& parts)
+    {
+        if (!requireRom()) {
+            return;
+        }
+        if (parts.size() < 2 || parts[1] != QStringLiteral("floppy-eject")) {
+            m_out << "usage: run-until-event floppy-eject [max-cycles]\n";
+            return;
+        }
+        if (m_machine->floppyImagePath().isEmpty()) {
+            m_out << "no floppy inserted\n";
+            return;
+        }
+
+        const auto maxCycles = parts.size() >= 3 ? parts[2].toInt() : 10000000;
+        int cyclesUsed = 0;
+        while (cyclesUsed < maxCycles && !m_machine->floppyImagePath().isEmpty()) {
+            sampleBeforeStep();
+            cyclesUsed += std::max(1, m_machine->stepInstruction());
+            sampleAfterStep();
+        }
+        const auto ejected = m_machine->floppyImagePath().isEmpty();
+        m_out << (ejected ? "event floppy-eject" : "timeout")
+              << " cycles=" << cyclesUsed << " pc=" << hexValue(m_machine->programCounter()) << '\n';
     }
 
     void printState()

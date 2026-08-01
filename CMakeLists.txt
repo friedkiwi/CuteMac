@@ -125,6 +125,17 @@ if(BUILD_TESTING)
 
     add_test(NAME iwm-register-protocol COMMAND CuteMacIwmTests)
 
+    add_executable(CuteMacViaTests
+        tests/via_tests.cpp
+    )
+
+    target_link_libraries(CuteMacViaTests
+        PRIVATE
+            CuteMacCore
+    )
+
+    add_test(NAME via-port-inputs COMMAND CuteMacViaTests)
+
     add_executable(CuteMacRomPatchTests
         tests/rom_patch_tests.cpp
     )

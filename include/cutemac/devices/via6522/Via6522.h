@@ -40,6 +40,7 @@ private:
     [[nodiscard]] std::uint8_t interruptFlagRegister() const;
 
     std::array<std::uint8_t, 16> m_registers {};
+    std::uint8_t m_portBInputs = 0xff;
     std::uint8_t m_interruptEnable = 0;
     int m_timer1Counter = 0;
     int m_timer1Latch = 0;
