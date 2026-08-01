@@ -149,6 +149,8 @@ int main(int argc, char** argv)
                     moveMouse(184, 74);
                     click();
                     auto completed = machine.scsiDebugState().completedCommands;
+                    int idleCycles = 0;
+                    bool sawCommand = false;
                     for (int elapsed = 0; elapsed < 1'000'000'000; elapsed += 100'000) {
                         (void)machine.runCycles(100'000);
                         const auto state = machine.scsiDebugState();
@@ -158,6 +160,13 @@ int main(int argc, char** argv)
                                       << " phase=" << state.phase.toStdString()
                                       << " status=" << static_cast<int>(state.status) << '\n';
                             completed = state.completedCommands;
+                            idleCycles = 0;
+                            sawCommand = true;
+                        } else if (sawCommand && state.phase == QStringLiteral("bus-free")) {
+                            idleCycles += 100'000;
+                            if (idleCycles >= 20'000'000) break;
+                        } else {
+                            idleCycles = 0;
                         }
                     }
                     if (qEnvironmentVariableIsSet("CUTEMAC_IICX_HD_SC_FINISH")) {
