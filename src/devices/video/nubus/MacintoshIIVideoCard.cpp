@@ -9,7 +9,7 @@ namespace cutemac::devices::video::nubus {
 namespace {
 
 constexpr std::uint32_t localMask = 0x000fffff;
-constexpr std::uint32_t declarationRomBase = 0x00f00000;
+constexpr std::uint32_t declarationRomBase = 0x00ffc000;
 constexpr std::uint64_t cyclesPerVbl = 260608;
 
 int strideForMode(int mode)
@@ -37,7 +37,22 @@ bool MacintoshIIVideoCard::loadDeclarationRom(const QString& path)
     if (!file.open(QIODevice::ReadOnly)) return false;
     const auto bytes = file.readAll();
     if (bytes.size() != declarationRomBytes) return false;
-    m_declarationRom = bytes;
+    // The 342-0008-A dump is stored backwards, with all bits inverted, on
+    // NuBus byte lane 0 (descriptor 0xe1). This matches MAME's
+    // install_declaration_rom("declrom", true, true) mapping.
+    QByteArray reversed = bytes;
+    std::reverse(reversed.begin(), reversed.end());
+    const auto inverted = static_cast<std::uint8_t>(reversed[reversed.size() - 2]) == 0xff;
+    auto byteLanes = static_cast<std::uint8_t>(reversed.back());
+    if (inverted) byteLanes ^= 0xff;
+    if (byteLanes != 0xe1) return false;
+
+    m_declarationRom.fill(static_cast<char>(0xff), mappedDeclarationRomBytes);
+    for (qsizetype index = 0; index < reversed.size(); ++index) {
+        auto value = static_cast<std::uint8_t>(reversed[index]);
+        if (inverted) value ^= 0xff;
+        m_declarationRom[index * 4] = static_cast<char>(value);
+    }
     return true;
 }
 
@@ -78,7 +93,7 @@ void MacintoshIIVideoCard::tick(std::uint64_t cycles)
 std::uint8_t MacintoshIIVideoCard::read8(std::uint32_t offset)
 {
     if (offset >= declarationRomBase && declarationRomLoaded()) {
-        return static_cast<std::uint8_t>(m_declarationRom[static_cast<qsizetype>(offset & (declarationRomBytes - 1))]);
+        return static_cast<std::uint8_t>(m_declarationRom[static_cast<qsizetype>(offset & (mappedDeclarationRomBytes - 1))]);
     }
     const auto local = offset & localMask;
     if (local < 0x80000) return static_cast<std::uint8_t>(m_vram[static_cast<qsizetype>(local)]) ^ 0xffU;

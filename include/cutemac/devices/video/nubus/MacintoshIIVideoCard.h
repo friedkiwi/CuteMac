@@ -13,13 +13,14 @@ namespace cutemac::devices::video::nubus {
 class MacintoshIIVideoCard final : public devices::nubus::NuBusCard {
 public:
     static constexpr int declarationRomBytes = 4096;
+    static constexpr int mappedDeclarationRomBytes = declarationRomBytes * 4;
     static constexpr int vramBytes = 512 * 1024;
 
     MacintoshIIVideoCard();
 
     [[nodiscard]] QString id() const override;
     [[nodiscard]] bool loadDeclarationRom(const QString& path);
-    [[nodiscard]] bool declarationRomLoaded() const { return m_declarationRom.size() == declarationRomBytes; }
+    [[nodiscard]] bool declarationRomLoaded() const { return m_declarationRom.size() == mappedDeclarationRomBytes; }
     void reset() override;
     void tick(std::uint64_t cycles) override;
     [[nodiscard]] std::uint8_t read8(std::uint32_t offset) override;

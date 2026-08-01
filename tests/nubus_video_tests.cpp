@@ -72,12 +72,18 @@ int main()
     const auto romPath = directory.filePath(QStringLiteral("342-0008-a.bin"));
     QFile rom(romPath);
     ok &= expect(rom.open(QIODevice::WriteOnly), "authentic card ROM fixture open");
-    ok &= expect(rom.write(QByteArray(4096, static_cast<char>(0xa5))) == 4096, "authentic card ROM fixture write");
+    QByteArray authenticRom(4096, static_cast<char>(0xff));
+    authenticRom[0] = 0x1e; // Reversed and inverted this becomes the 0xe1 lane descriptor.
+    authenticRom[1] = static_cast<char>(0xff);
+    authenticRom[4095] = static_cast<char>(0xfe);
+    ok &= expect(rom.write(authenticRom) == 4096, "authentic card ROM fixture write");
     rom.close();
 
     MacintoshIIVideoCard authenticCard;
     ok &= expect(authenticCard.loadDeclarationRom(romPath), "authentic card must accept a 4 KiB declaration ROM");
-    ok &= expect(authenticCard.read8(0x00f00000) == 0xa5, "authentic declaration ROM mapping");
+    ok &= expect(authenticCard.read8(0x00ffc000) == 0x01, "authentic declaration ROM reversal and inversion");
+    ok &= expect(authenticCard.read8(0x00fffffc) == 0xe1, "authentic declaration ROM byte-lane descriptor");
+    ok &= expect(authenticCard.read8(0x00fffffd) == 0xff, "authentic declaration ROM unused byte lane");
     ok &= expect(authenticCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 128 }
             && authenticCard.videoFrame().colorTable[128] == 0xff000000U,
         "authentic one-bit boot mode must use TFB's high-bit CLUT mapping");
