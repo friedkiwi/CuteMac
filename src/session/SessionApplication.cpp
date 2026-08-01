@@ -613,7 +613,7 @@ private:
         cutemac::ui::ConfigurationDialog dialog(m_configuration, this);
         if (dialog.exec() == QDialog::Accepted) {
             const auto proposed = dialog.configuration();
-            const bool resetRequired = requiresMachineReset(m_configuration, proposed);
+            const bool resetRequired = dialog.nvramZapped() || requiresMachineReset(m_configuration, proposed);
             if (!resetRequired || QMessageBox::question(this, QStringLiteral("Reset Required"),
                                       QStringLiteral("Applying these hardware or media changes will reset the emulated Macintosh. Continue?"),
                                       QMessageBox::Yes | QMessageBox::No, QMessageBox::No)

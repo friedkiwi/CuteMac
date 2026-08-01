@@ -13,6 +13,7 @@ public:
     ~ConfigurationDialog() override;
 
     [[nodiscard]] config::Configuration configuration() const;
+    [[nodiscard]] bool nvramZapped() const;
 
 private:
     class Impl;

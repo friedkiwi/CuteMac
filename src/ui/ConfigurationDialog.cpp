@@ -11,6 +11,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -31,6 +32,7 @@ public:
     QLineEdit* name = nullptr;
     QComboBox* machine = nullptr;
     QLineEdit* nvram = nullptr;
+    bool nvramZapped = false;
     QSpinBox* ram = nullptr;
     QComboBox* speed = nullptr;
     QCheckBox* skipRamTest = nullptr;
@@ -145,10 +147,12 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->nvram = new QLineEdit(m_impl->original.nvramPath);
     auto* nvramBrowse = new QPushButton(QStringLiteral("Browse..."));
     auto* nvramNew = new QPushButton(QStringLiteral("New..."));
+    auto* nvramZap = new QPushButton(QStringLiteral("Zap..."));
     auto* nvramRow = new QHBoxLayout;
     nvramRow->addWidget(m_impl->nvram, 1);
     nvramRow->addWidget(nvramBrowse);
     nvramRow->addWidget(nvramNew);
+    nvramRow->addWidget(nvramZap);
     form->addRow(QStringLiteral("NVRAM image"), nvramRow);
     m_impl->ram = new QSpinBox;
     m_impl->ram->setSuffix(QStringLiteral(" MiB"));
@@ -281,6 +285,35 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("NVRAM image (*.nvram)"));
         if (!path.isEmpty()) m_impl->nvram->setText(path);
     });
+    connect(nvramZap, &QPushButton::clicked, this, [this]() {
+        const auto path = m_impl->nvram->text().trimmed();
+        if (path.isEmpty()) {
+            QMessageBox::information(this, QStringLiteral("Zap NVRAM"),
+                QStringLiteral("Select or create an NVRAM image first."));
+            return;
+        }
+        if (QMessageBox::warning(this, QStringLiteral("Zap NVRAM"),
+                QStringLiteral("Erase all parameter RAM settings in this image?\n\n%1\n\n"
+                               "The Macintosh ROM will install its default settings on the next reset.")
+                    .arg(path),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+            != QMessageBox::Yes) {
+            return;
+        }
+
+        QSaveFile file(path);
+        const QByteArray blankNvram(256, '\0');
+        if (!file.open(QIODevice::WriteOnly)
+            || file.write(blankNvram) != blankNvram.size()
+            || !file.commit()) {
+            QMessageBox::critical(this, QStringLiteral("Zap NVRAM"),
+                QStringLiteral("Could not erase the NVRAM image."));
+            return;
+        }
+        m_impl->nvramZapped = true;
+        QMessageBox::information(this, QStringLiteral("Zap NVRAM"),
+            QStringLiteral("The NVRAM image was erased. Apply the configuration to reset the Macintosh."));
+    });
     connect(floppyBrowse, &QPushButton::clicked, this, [this]() {
         const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::Floppy, QStringLiteral("Select Floppy Image"), this);
         if (!path.isEmpty()) m_impl->floppy->setText(path);
@@ -367,6 +400,11 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
 }
 
 ConfigurationDialog::~ConfigurationDialog() = default;
+
+bool ConfigurationDialog::nvramZapped() const
+{
+    return m_impl->nvramZapped;
+}
 
 config::Configuration ConfigurationDialog::configuration() const
 {
