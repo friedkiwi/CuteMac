@@ -158,19 +158,25 @@ protected:
     {
         setFocus(Qt::MouseFocusReason);
         if (!m_mouseCaptured && displayRect().contains(event->pos())) {
-            if (m_mouseCallback) {
-                const auto point = macPointFor(event->pos());
-                m_mouseCallback(point.x(), point.y(), (event->buttons() & Qt::LeftButton) != 0);
-            }
             captureMouse();
+            if (!m_relativeCapture && m_mouseCallback) {
+                const auto point = macPointFor(event->pos());
+                m_mouseCallback(point.x(), point.y(), false);
+            }
             event->accept();
             return;
+        }
+        if (event->button() == Qt::LeftButton) {
+            m_leftButtonPressed = true;
         }
         sendMouseEvent(event);
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
+        if (event->button() == Qt::LeftButton) {
+            m_leftButtonPressed = false;
+        }
         sendMouseEvent(event);
     }
 
@@ -179,6 +185,9 @@ protected:
         // Qt sends the second press of a double-click as MouseButtonDblClick
         // instead of calling mousePressEvent(). Forward it so the guest sees
         // both complete clicks and can perform Finder's double-click action.
+        if (event->button() == Qt::LeftButton) {
+            m_leftButtonPressed = true;
+        }
         sendMouseEvent(event);
     }
 
@@ -273,24 +282,24 @@ private:
         if (m_mouseCaptured) {
             if (!m_relativeCapture) {
                 const auto point = macPointFor(event->pos());
-                m_mouseCallback(point.x(), point.y(), (event->buttons() & Qt::LeftButton) != 0);
+                m_mouseCallback(point.x(), point.y(), m_leftButtonPressed);
                 return;
             }
-            if (m_warpPending && event->pos() == m_mouseCenter) {
+            if (event->type() == QEvent::MouseMove && m_warpPending && event->pos() == m_mouseCenter) {
                 m_warpPending = false;
                 return;
             }
             const auto delta = event->pos() - m_mouseCenter;
             if (!delta.isNull()) {
-                m_mouseCallback(delta.x(), delta.y(), (event->buttons() & Qt::LeftButton) != 0);
+                m_mouseCallback(delta.x(), delta.y(), m_leftButtonPressed);
                 recenterMouse();
             } else {
-                m_mouseCallback(0, 0, (event->buttons() & Qt::LeftButton) != 0);
+                m_mouseCallback(0, 0, m_leftButtonPressed);
             }
             return;
         }
         const auto point = macPointFor(event->pos());
-        m_mouseCallback(point.x(), point.y(), (event->buttons() & Qt::LeftButton) != 0);
+        m_mouseCallback(point.x(), point.y(), m_leftButtonPressed);
     }
 
     void sendKeyEvent(QKeyEvent* event, bool pressed)
@@ -383,6 +392,7 @@ private:
     bool m_mouseCaptured = false;
     bool m_relativeCapture = false;
     bool m_warpPending = false;
+    bool m_leftButtonPressed = false;
     QPoint m_mouseCenter;
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
