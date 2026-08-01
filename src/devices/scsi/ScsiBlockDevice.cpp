@@ -82,6 +82,9 @@ ScsiCommandResult ScsiBlockDevice::executeCommand(const QByteArray& cdb, const Q
     switch (opcode) {
     case 0x00:
         return good();
+    case 0x04:
+        // The backing image is already a fixed-size block medium; formatting is completed by subsequent writes.
+        return good();
     case 0x03:
         return requestSense(cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 4);
     case 0x08: {
@@ -231,8 +234,8 @@ ScsiCommandResult ScsiBlockDevice::inquiry(bool evpd, std::uint8_t pageCode, std
     data[3] = 0x01;
     data[4] = 31;
     data[7] = 0x18; // linked commands and synchronous transfer supported.
-    data.replace(8, 8, QByteArrayLiteral("DEC     "));
-    data.replace(16, 16, QByteArrayLiteral("ZuluSCSI HDD    "));
+    data.replace(8, 8, QByteArrayLiteral(" SEAGATE"));
+    data.replace(16, 16, QByteArrayLiteral("          ST225N"));
     data.replace(32, 4, QByteArrayLiteral("1.0 "));
     return good(clipped(data, allocationLength));
 }

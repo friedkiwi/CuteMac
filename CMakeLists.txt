@@ -182,4 +182,8 @@ if(BUILD_TESTING)
     add_executable(CuteMacSchedulerTests tests/scheduler_tests.cpp)
     target_link_libraries(CuteMacSchedulerTests PRIVATE CuteMacCore)
     add_test(NAME machine-scheduler COMMAND CuteMacSchedulerTests)
+
+    add_executable(CuteMacScsiBlockDeviceTests tests/scsi_block_device_tests.cpp)
+    target_link_libraries(CuteMacScsiBlockDeviceTests PRIVATE CuteMacCore)
+    add_test(NAME scsi-block-device COMMAND CuteMacScsiBlockDeviceTests)
 endif()

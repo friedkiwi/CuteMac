@@ -42,6 +42,35 @@
 
 namespace {
 
+bool sameIwmDevices(const QVector<cutemac::config::IwmDeviceConfiguration>& left,
+    const QVector<cutemac::config::IwmDeviceConfiguration>& right)
+{
+    if (left.size() != right.size()) return false;
+    for (qsizetype index = 0; index < left.size(); ++index) {
+        if (left[index].imagePath != right[index].imagePath || left[index].readOnly != right[index].readOnly) return false;
+    }
+    return true;
+}
+
+bool sameScsiDevices(const QVector<cutemac::config::ScsiDeviceConfiguration>& left,
+    const QVector<cutemac::config::ScsiDeviceConfiguration>& right)
+{
+    if (left.size() != right.size()) return false;
+    for (qsizetype index = 0; index < left.size(); ++index) {
+        if (left[index].id != right[index].id || left[index].type != right[index].type
+            || left[index].imagePath != right[index].imagePath || left[index].readOnly != right[index].readOnly) return false;
+    }
+    return true;
+}
+
+bool requiresMachineReset(const cutemac::config::Configuration& current, const cutemac::config::Configuration& proposed)
+{
+    return current.machineId != proposed.machineId || current.romPath != proposed.romPath
+        || current.ramSizeMiB != proposed.ramSizeMiB || current.skipRamPatternTest != proposed.skipRamPatternTest
+        || !sameIwmDevices(current.iwmDevices, proposed.iwmDevices)
+        || !sameScsiDevices(current.scsiDevices, proposed.scsiDevices);
+}
+
 class DisplayWidget final : public QWidget {
 public:
     explicit DisplayWidget(QWidget* parent = nullptr)
@@ -333,8 +362,9 @@ private:
 
 class EmulatorWindow final : public QMainWindow {
 public:
-    explicit EmulatorWindow(cutemac::config::Configuration configuration)
+    explicit EmulatorWindow(cutemac::config::Configuration configuration, QString profilePath)
         : m_configuration(std::move(configuration))
+        , m_profilePath(std::move(profilePath))
         , m_session(m_configuration)
         , m_runner(m_session, m_configuration.cyclesPerFrame, m_configuration.runtimeSpeed)
         , m_controlServer(m_session, m_runner, this)
@@ -380,7 +410,7 @@ private:
         auto* machineMenu = menuBar()->addMenu(QStringLiteral("Machine"));
         machineMenu->addAction(QStringLiteral("Pause/Resume"), this, [this]() { setPaused(!m_paused); });
         machineMenu->addAction(QStringLiteral("Reset"), this, [this]() { loadAndReset(); });
-        machineMenu->addAction(QStringLiteral("Configure Running Instance"), this, [this]() { configureRunningInstance(); });
+        machineMenu->addAction(QStringLiteral("Configure"), this, [this]() { configureMachine(); });
         auto* speedMenu = machineMenu->addMenu(QStringLiteral("Speed"));
         auto* speedGroup = new QActionGroup(this);
         speedGroup->setExclusive(true);
@@ -404,15 +434,20 @@ private:
                 QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
             if (!path.isEmpty()) {
                 m_configuration.floppyPath = path;
-                if (!m_session.insertFloppy(path)) {
+                if (!m_configuration.iwmDevices.isEmpty()) m_configuration.iwmDevices[0].imagePath = path;
+                const bool readOnly = !m_configuration.iwmDevices.isEmpty() && m_configuration.iwmDevices.first().readOnly;
+                if (!m_session.insertFloppy(path, readOnly)) {
                     statusBar()->showMessage(QStringLiteral("Failed to load floppy image"), 3000);
                 }
+                saveConfiguration();
                 updateStatus();
             }
         });
         mediaMenu->addAction(QStringLiteral("Eject Floppy Image"), this, [this]() {
             m_configuration.floppyPath.clear();
+            if (!m_configuration.iwmDevices.isEmpty()) m_configuration.iwmDevices[0].imagePath.clear();
             m_session.ejectFloppy();
+            saveConfiguration();
             updateStatus();
         });
 
@@ -452,6 +487,7 @@ private:
                 m_configuration.floppyPath.clear();
                 m_configuration.iwmDevices[0].imagePath.clear();
                 m_session.ejectFloppy();
+                saveConfiguration();
                 updateStatus();
             });
             menu->addAction(QStringLiteral("New 800K Image..."), this, [this]() { createFloppyFromToolbar(); });
@@ -461,6 +497,7 @@ private:
             readOnly->setChecked(m_configuration.iwmDevices.first().readOnly);
             connect(readOnly, &QAction::toggled, this, [this](bool enabled) {
                 m_configuration.iwmDevices[0].readOnly = enabled;
+                saveConfiguration();
                 statusBar()->showMessage(QStringLiteral("Floppy access mode will apply when the media is next inserted"), 3000);
             });
             floppy->setMenu(menu);
@@ -490,6 +527,7 @@ private:
         m_configuration.floppyPath = path;
         m_configuration.iwmDevices[0].imagePath = path;
         if (!m_session.insertFloppy(path, m_configuration.iwmDevices.first().readOnly)) statusBar()->showMessage(QStringLiteral("Failed to load floppy image"), 3000);
+        saveConfiguration();
         updateStatus();
     }
 
@@ -511,6 +549,7 @@ private:
         m_configuration.floppyPath = path;
         m_configuration.iwmDevices[0].imagePath = path;
         if (!m_session.insertFloppy(path, m_configuration.iwmDevices.first().readOnly)) statusBar()->showMessage(QStringLiteral("Failed to load new floppy image"), 3000);
+        saveConfiguration();
         updateStatus();
     }
 
@@ -543,6 +582,7 @@ private:
     {
         m_configuration.runtimeSpeed = speed;
         m_runner.setSpeed(speed);
+        saveConfiguration();
         updateSpeedActions();
         updateStatus();
     }
@@ -555,7 +595,7 @@ private:
         }
     }
 
-    void configureRunningInstance()
+    void configureMachine()
     {
         const auto wasPaused = m_paused;
         m_display->releaseMouseCapture();
@@ -563,12 +603,35 @@ private:
 
         cutemac::ui::ConfigurationDialog dialog(m_configuration, this);
         if (dialog.exec() == QDialog::Accepted) {
-            m_configuration = dialog.configuration();
-            loadAndReset();
+            const auto proposed = dialog.configuration();
+            const bool resetRequired = requiresMachineReset(m_configuration, proposed);
+            if (!resetRequired || QMessageBox::question(this, QStringLiteral("Reset Required"),
+                                      QStringLiteral("Applying these hardware or media changes will reset the emulated Macintosh. Continue?"),
+                                      QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+                    == QMessageBox::Yes) {
+                m_configuration = proposed;
+                setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
+                saveConfiguration();
+                if (resetRequired) {
+                    loadAndReset();
+                } else {
+                    m_runner.setSpeed(m_configuration.runtimeSpeed);
+                    updateSpeedActions();
+                    updateStatus();
+                }
+            }
         }
 
-        if (!wasPaused && m_romLoaded) {
-            setPaused(false);
+        if (m_romLoaded) setPaused(wasPaused);
+    }
+
+    void saveConfiguration()
+    {
+        if (m_profilePath.isEmpty()) {
+            m_profilePath = cutemac::config::ConfigurationManager().profilePathForName(m_configuration.profileName);
+        }
+        if (!cutemac::config::ConfigurationManager().saveTomlFile(m_profilePath, m_configuration)) {
+            statusBar()->showMessage(QStringLiteral("Failed to save profile"), 4000);
         }
     }
 
@@ -622,6 +685,7 @@ private:
     }
 
     cutemac::config::Configuration m_configuration;
+    QString m_profilePath;
     cutemac::core::EmulationSession m_session;
     cutemac::core::SessionRunner m_runner;
     cutemac::session::SessionControlServer m_controlServer;
@@ -660,7 +724,7 @@ int cutemac::session::runSessionApplication(int argc, char* argv[])
         }
     }
 
-    EmulatorWindow window(configuration);
+    EmulatorWindow window(configuration, parser.isSet(profileOption) ? QFileInfo(parser.value(profileOption)).absoluteFilePath() : QString());
     window.show();
 
     return app.exec();
