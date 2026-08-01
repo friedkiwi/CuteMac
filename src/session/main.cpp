@@ -90,6 +90,7 @@ public:
     }
 
     [[nodiscard]] bool mouseCaptured() const { return m_mouseCaptured; }
+    [[nodiscard]] bool relativeMouseCapture() const { return m_mouseCaptured && m_relativeCapture; }
 
     void releaseMouseCapture()
     {
@@ -97,7 +98,9 @@ public:
             return;
         }
         m_mouseCaptured = false;
-        releaseMouse();
+        if (mouseGrabber() == this) {
+            releaseMouse();
+        }
         unsetCursor();
         if (m_keyCallback) {
             m_keyCallback(0x36, false);
@@ -131,6 +134,10 @@ protected:
         setFocus(Qt::MouseFocusReason);
         if (!m_mouseCaptured && displayRect().contains(event->pos())) {
             captureMouse();
+            if (!m_relativeCapture && m_mouseCallback) {
+                const auto point = macPointFor(event->pos());
+                m_mouseCallback(point.x(), point.y(), false);
+            }
             event->accept();
             return;
         }
@@ -162,8 +169,23 @@ private:
     {
         m_mouseCaptured = true;
         setCursor(Qt::BlankCursor);
-        grabMouse();
-        recenterMouse();
+        m_relativeCapture = supportsRelativeCapture();
+        if (m_relativeCapture) {
+            grabMouse();
+            m_relativeCapture = mouseGrabber() == this;
+        }
+        if (m_relativeCapture) {
+            recenterMouse();
+        }
+    }
+
+    [[nodiscard]] bool supportsRelativeCapture() const
+    {
+#if defined(Q_OS_WASM)
+        return false;
+#else
+        return !QGuiApplication::platformName().startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
+#endif
     }
 
     void recenterMouse()
@@ -208,6 +230,11 @@ private:
             return;
         }
         if (m_mouseCaptured) {
+            if (!m_relativeCapture) {
+                const auto point = macPointFor(event->pos());
+                m_mouseCallback(point.x(), point.y(), (event->buttons() & Qt::LeftButton) != 0);
+                return;
+            }
             if (m_warpPending && event->pos() == m_mouseCenter) {
                 m_warpPending = false;
                 return;
@@ -308,6 +335,7 @@ private:
 
     bool m_running = false;
     bool m_mouseCaptured = false;
+    bool m_relativeCapture = false;
     bool m_warpPending = false;
     QPoint m_mouseCenter;
     QImage m_image;
@@ -388,7 +416,7 @@ public:
 
         m_display = new DisplayWidget;
         m_display->setMouseCallback([this](int x, int y, bool pressed) {
-            if (m_display->mouseCaptured()) {
+            if (m_display->relativeMouseCapture()) {
                 m_machine.moveMouse(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
             } else {
                 m_machine.setMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
