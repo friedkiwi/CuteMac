@@ -12,6 +12,12 @@ The repository is currently a scaffold for modular emulator work:
 
 ## Build
 
+Ubuntu/WSL2 prerequisites:
+
+```sh
+sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev
+```
+
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
