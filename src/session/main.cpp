@@ -152,7 +152,7 @@ public:
         , m_machine(static_cast<std::size_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024)
     {
         setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
-        resize(960, 720);
+        resize(1120, 820);
 
         m_display = new DisplayWidget;
         setCentralWidget(m_display);
