@@ -31,6 +31,7 @@
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.
 - Keep debug-only interactive tools in `CuteMacDebugSession` so normal emulator sessions stay lean.
+- Keep ROM-driver probes in `CuteMacDebugSession`; log Device Manager request fields at driver entry so failed media requests can be traced without adding normal-session hot-path overhead.
 - `CuteMacDebugSession` owns bringup tooling: register/memory/disassembly commands, framebuffer export/probing, Mac Plus sound-buffer capture export, bus logs, trace rings, and the current minimal GDB remote stub. It uses libreadline for history and tab completion.
 - Prefer the debug trace framework over ad hoc prints. Useful probes include `trace pc|irq|trap|driver|lowmem|iwm|floppy|timeline on`, `pc-trace`, `irq-trace`, `trap-trace`, `driver-trace`, `timeline`, `lowmem watch <name>`, `mem-find`, `mem-snapshot`, `memory-diff`, `bootblock verify`, `floppy last-window`, and `floppy export-window`.
 - Debug execution helpers must advance devices and interrupts through the same timing path as normal execution. Do not step only the CPU in `run-until` or breakpoint handling.

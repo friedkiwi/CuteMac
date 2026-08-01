@@ -1919,8 +1919,19 @@ private:
         if (m_trace.driver) {
             if (m_sonyProbePcs.contains(pc)) {
                 const auto regs = m_machine->cpuRegisters();
-                const auto event = QStringLiteral("%1 pc=%2 d0=%3 d1=%4 d2=%5 a0=%6")
-                    .arg(m_sonyProbePcs[pc], hexValue(pc), hexValue(regs.d[0]), hexValue(regs.d[1]), hexValue(regs.d[2]), hexValue(regs.a[0]));
+                QString event;
+                if (pc == 0x0041811c) {
+                    const auto dce = m_machine->debugRead32(regs.a[1]);
+                    const auto request = m_machine->debugRead32(dce + 8);
+                    event = QStringLiteral("%1 pc=%2 trap=%3 position=%4 request=%5 actual=%6 buffer=%7 dce=%8 pb=%9")
+                                .arg(m_sonyProbePcs[pc], hexValue(pc), hexValue(m_machine->debugRead16(request + 6), 4),
+                                    hexValue(m_machine->debugRead32(dce + 16)), hexValue(m_machine->debugRead32(request + 36)),
+                                    hexValue(m_machine->debugRead32(request + 40)), hexValue(m_machine->debugRead32(request + 32)),
+                                    hexValue(dce), hexValue(request));
+                } else {
+                    event = QStringLiteral("%1 pc=%2 d0=%3 d1=%4 d2=%5 a0=%6")
+                                .arg(m_sonyProbePcs[pc], hexValue(pc), hexValue(regs.d[0]), hexValue(regs.d[1]), hexValue(regs.d[2]), hexValue(regs.a[0]));
+                }
                 appendRing(m_driverTrace, event);
                 appendTimeline(QStringLiteral("driver ") + event);
             }
@@ -2014,10 +2025,13 @@ private:
         { 0x004007ba, QStringLiteral("ROMBootSpin") },
         { 0x00402174, QStringLiteral("Sony_RdData") },
         { 0x0040016e, QStringLiteral("Sony_EjectOrSwitchDisk") },
+        { 0x0041811c, QStringLiteral("Sony_DiskPrimeRequest") },
+        { 0x0041813e, QStringLiteral("Sony_DiskPrimeParamErr") },
     };
     QMap<QString, std::uint32_t> m_lowMemoryNames {
         { QStringLiteral("MemTop"), 0x0108 },
         { QStringLiteral("BufPtr"), 0x010c },
+        { QStringLiteral("DskErr"), 0x0142 },
         { QStringLiteral("BootDrive"), 0x0210 },
         { QStringLiteral("DSAlertTab"), 0x02ba },
         { QStringLiteral("TagData"), 0x02fa },
@@ -2031,6 +2045,7 @@ private:
         { QStringLiteral("Ticks"), 0x016a },
         { QStringLiteral("VIA"), 0x01d4 },
         { QStringLiteral("IWM"), 0x01e0 },
+        { QStringLiteral("ResErr"), 0x0a60 },
     };
     QMap<QString, std::uint32_t> m_lowMemoryWatchValues;
     bool m_irqInitialized = false;
