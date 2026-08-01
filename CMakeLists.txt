@@ -21,7 +21,9 @@ qt_standard_project_setup()
 
 add_library(CuteMacCore
     src/config/Configuration.cpp
-    src/core/Emulator.cpp
+    src/core/EmulationSession.cpp
+    src/core/MachineScheduler.cpp
+    src/core/SessionRunner.cpp
     src/cpu/m68k/M68kCpuCore.cpp
     src/cpu/m68k/engine/m68kcpu.c
     src/cpu/m68k/engine/m68kdasm.c
@@ -77,11 +79,16 @@ set_target_properties(CuteMac PROPERTIES
 
 add_executable(CuteMacSession
     src/session/main.cpp
+    src/session/SessionApplication.cpp
+    src/session/SessionControlServer.cpp
+    src/session/FramebufferRenderer.cpp
+    src/session/HostInputMapper.cpp
 )
 
 target_link_libraries(CuteMacSession
     PRIVATE
         CuteMacCore
+        Qt6::Network
         Qt6::Widgets
 )
 
@@ -157,4 +164,8 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME configuration-toml COMMAND CuteMacConfigurationTests)
+
+    add_executable(CuteMacSchedulerTests tests/scheduler_tests.cpp)
+    target_link_libraries(CuteMacSchedulerTests PRIVATE CuteMacCore)
+    add_test(NAME machine-scheduler COMMAND CuteMacSchedulerTests)
 endif()

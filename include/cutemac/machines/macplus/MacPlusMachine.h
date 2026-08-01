@@ -10,6 +10,8 @@
 #include <QVector>
 
 #include "cutemac/cpu/m68k/M68kBus.h"
+#include "cutemac/core/IMachine.h"
+#include "cutemac/core/MachineScheduler.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/iwm/IwmController.h"
 #include "cutemac/devices/scc/Z8530Scc.h"
@@ -19,7 +21,7 @@
 
 namespace cutemac::machines::macplus {
 
-class MacPlusMachine final : public cpu::m68k::M68kBus {
+class MacPlusMachine final : public core::IMachine, public cpu::m68k::M68kBus {
 public:
     struct BusAccess {
         QString operation;
@@ -60,22 +62,25 @@ public:
 
     explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024);
 
-    [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {});
-    [[nodiscard]] bool loadDiskImage(const QString& path);
-    void ejectDiskImage();
-    [[nodiscard]] bool loadFloppyImage(const QString& path);
-    void ejectFloppyImage();
-    void reset();
+    [[nodiscard]] QString machineId() const override;
+    [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {}) override;
+    [[nodiscard]] bool loadDiskImage(const QString& path) override;
+    void ejectDiskImage() override;
+    [[nodiscard]] bool loadFloppyImage(const QString& path) override;
+    void ejectFloppyImage() override;
+    void reset() override;
 
-    [[nodiscard]] int runCycles(int cycles);
+    [[nodiscard]] int runCycles(int cycles) override;
+    [[nodiscard]] std::uint64_t cycleCount() const override;
+    void queueInput(const core::GuestInputEvent& event, std::uint64_t cycle) override;
     [[nodiscard]] int stepInstruction();
     [[nodiscard]] bool runUntilPc(std::uint32_t address, int maxCycles);
 
-    [[nodiscard]] std::uint32_t programCounter() const;
+    [[nodiscard]] std::uint32_t programCounter() const override;
     [[nodiscard]] cpu::m68k::M68kCpuCore::RegisterSnapshot cpuRegisters() const;
     [[nodiscard]] QString disassemble(std::uint32_t address) const;
     [[nodiscard]] int disassembleBytes(std::uint32_t address) const;
-    [[nodiscard]] bool overlayEnabled() const;
+    [[nodiscard]] bool overlayEnabled() const override;
     [[nodiscard]] const AccessSummary& accessSummary() const;
     [[nodiscard]] const QVector<QString>& eventLog() const;
     [[nodiscard]] QVector<BusAccess> busTrace() const;
@@ -89,7 +94,7 @@ public:
     void debugWrite16(std::uint32_t address, std::uint16_t value);
     void debugWrite32(std::uint32_t address, std::uint32_t value);
 
-    [[nodiscard]] QByteArray framebufferBytes() const;
+    [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] std::uint32_t framebufferHash() const;
     [[nodiscard]] QByteArray soundBufferBytes() const;
     [[nodiscard]] std::uint32_t soundBufferHash() const;
@@ -154,6 +159,7 @@ private:
     void writeRam16Direct(std::uint32_t address, std::uint16_t value);
     void writeRam32Direct(std::uint32_t address, std::uint32_t value);
     void synchronizeMouseLowMemory();
+    void applyInput(const core::GuestInputEvent& event);
 
     void setOverlayEnabled(bool enabled);
     void logEvent(const QString& message);
@@ -189,6 +195,9 @@ private:
     QByteArray m_soundCapture;
     bool m_busTraceEnabled = false;
     bool m_soundCaptureEnabled = false;
+    core::MachineScheduler m_scheduler;
+    std::uint64_t m_lastMouseButtonCycle = 0;
+    bool m_queuedMouseButtonPressed = false;
 };
 
 } // namespace cutemac::machines::macplus

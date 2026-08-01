@@ -28,6 +28,11 @@
 - ROM patches are optional profile features and default off. Apply them to an in-memory copy only, gate them by the original ROM SHA-256 and expected bytes, apply transactionally, and expose applied patch IDs in debug state. Never modify the user's ROM file.
 - The Mac Plus v3 `skip_ram_pattern_test` patch skips only the destructive pattern passes. It preserves ROM checksum verification and RAM sizing, and updates the ROM's stored checksum to account for the branch edit.
 - Prefer clear interfaces between emulator core, devices, machine profiles, configuration, and Qt UI.
+- Frontends depend on `core::EmulationSession` and `core::IMachine`, never directly on a concrete machine. Concrete access is permitted only through `IDebugMachineAccess` in debug-only tooling.
+- Timestamp host input with the machine cycle counter and deliver it through `MachineScheduler`; preserve button transitions long enough for guest VBL sampling.
+- Desktop sessions run emulation through `SessionRunner` off the Qt event thread. WebAssembly uses the same runner API in single-threaded host-frame mode.
+- Keep host key mapping, capture policy, and framebuffer conversion in session frontend adapters. Wayland/wasm remain on the no-warp absolute-pointer path.
+- Session management commands use newline-delimited JSON over a loopback-only control socket. Keep networking compiled out at runtime on wasm.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.
 - Keep debug-only interactive tools in `CuteMacDebugSession` so normal emulator sessions stay lean.

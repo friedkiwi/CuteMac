@@ -33,6 +33,7 @@ constexpr std::uint32_t lowMemoryCrsrCouple = 0x0008cf;
 constexpr std::uint32_t screenBytes = 512 * 342 / 8;
 constexpr std::uint32_t soundBase4MiB = 0x3ffd00;
 constexpr std::uint32_t soundBytes = 370;
+constexpr std::uint64_t inputDebounceCycles = 4 * 130560;
 constexpr qsizetype maxBusTraceEntries = 4096;
 constexpr qsizetype maxSoundCaptureBytes = 22255 * 30;
 
@@ -53,6 +54,8 @@ constexpr std::uint8_t viaDiskSelectBit = 0x20;
 }
 
 } // namespace
+
+QString MacPlusMachine::machineId() const { return QStringLiteral("mac-plus"); }
 
 MacPlusMachine::MacPlusMachine(std::size_t ramSize)
     : m_ram(static_cast<qsizetype>(ramSize), 0)
@@ -144,6 +147,9 @@ void MacPlusMachine::reset()
         m_scsi.attachTarget(0, m_scsiDisk);
     }
     m_via.reset();
+    m_scheduler.reset();
+    m_lastMouseButtonCycle = 0;
+    m_queuedMouseButtonPressed = false;
     setOverlayEnabled(true);
 
     m_cpu.reset();
@@ -164,11 +170,50 @@ int MacPlusMachine::runCycles(int cycles)
 
 int MacPlusMachine::stepInstruction()
 {
+    m_scheduler.dispatchDue();
     updateInterrupts();
     const auto cycles = m_cpu.stepInstruction();
     m_via.tick(std::max(1, cycles));
+    m_scheduler.advance(static_cast<std::uint64_t>(std::max(1, cycles)));
     updateInterrupts();
     return cycles;
+}
+
+std::uint64_t MacPlusMachine::cycleCount() const { return m_scheduler.now(); }
+
+void MacPlusMachine::queueInput(const core::GuestInputEvent& event, std::uint64_t cycle)
+{
+    auto deliveryCycle = std::max(cycle, m_scheduler.now());
+    if (event.type == core::GuestInputEvent::Type::MouseButton) {
+        if (event.pressed == m_queuedMouseButtonPressed) {
+            return;
+        }
+        m_queuedMouseButtonPressed = event.pressed;
+        deliveryCycle = std::max(deliveryCycle, m_lastMouseButtonCycle + inputDebounceCycles);
+        m_lastMouseButtonCycle = deliveryCycle;
+    }
+    m_scheduler.schedule(deliveryCycle, [this, event]() { applyInput(event); });
+}
+
+void MacPlusMachine::applyInput(const core::GuestInputEvent& event)
+{
+    switch (event.type) {
+    case core::GuestInputEvent::Type::MousePosition:
+        setMousePosition(static_cast<std::int16_t>(event.first), static_cast<std::int16_t>(event.second));
+        break;
+    case core::GuestInputEvent::Type::MouseDelta:
+        moveMouse(static_cast<std::int16_t>(event.first), static_cast<std::int16_t>(event.second));
+        break;
+    case core::GuestInputEvent::Type::MouseButton:
+        setMouseButton(event.pressed);
+        break;
+    case core::GuestInputEvent::Type::Key:
+        setKeyState(static_cast<std::uint8_t>(event.first), event.pressed);
+        break;
+    case core::GuestInputEvent::Type::ResetKeyboard:
+        resetKeyboard();
+        break;
+    }
 }
 
 bool MacPlusMachine::runUntilPc(std::uint32_t address, int maxCycles)

@@ -24,6 +24,7 @@
 #include <set>
 
 #include "cutemac/config/Configuration.h"
+#include "cutemac/core/EmulationSession.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 
 namespace {
@@ -798,32 +799,23 @@ private:
 
     void reloadMachine()
     {
-        m_machine = std::make_unique<cutemac::machines::macplus::MacPlusMachine>(
-            static_cast<std::size_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024);
+        m_session = std::make_unique<cutemac::core::EmulationSession>(m_configuration);
+        m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(m_session->debugMachine(QStringLiteral("mac-plus")));
+        if (m_machine == nullptr) {
+            m_out << "debug support is unavailable for machine " << m_configuration.machineId << '\n';
+            m_romLoaded = false;
+            return;
+        }
         m_machine->setBusTraceEnabled(true);
         m_machine->setSoundCaptureEnabled(true);
         m_gdbStub = std::make_unique<GdbStub>(*m_machine, m_breakpoints);
         m_gdbStub->setEnabled(m_gdbEnabled);
         m_gdbStub->setPort(m_gdbPort);
 
-        m_romLoaded = !m_configuration.romPath.isEmpty()
-            && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
-        if (!m_configuration.diskPath.isEmpty()) {
-            if (m_machine->loadDiskImage(m_configuration.diskPath)) {
-                m_out << "disk loaded: " << displayPath(m_configuration.diskPath) << '\n';
-            } else {
-                m_out << "disk failed: " << displayPath(m_configuration.diskPath) << '\n';
-            }
-        }
-        if (!m_configuration.floppyPath.isEmpty()) {
-            if (m_machine->loadFloppyImage(m_configuration.floppyPath)) {
-                m_out << "floppy loaded: " << displayPath(m_configuration.floppyPath) << '\n';
-            } else {
-                m_out << "floppy failed: " << displayPath(m_configuration.floppyPath) << '\n';
-            }
-        }
+        m_romLoaded = m_session->initialize();
+        if (!m_configuration.diskPath.isEmpty()) m_out << "disk loaded: " << displayPath(m_configuration.diskPath) << '\n';
+        if (!m_configuration.floppyPath.isEmpty()) m_out << "floppy loaded: " << displayPath(m_configuration.floppyPath) << '\n';
         if (m_romLoaded) {
-            m_machine->reset();
             m_out << "machine reset: pc=" << hexValue(m_machine->programCounter()) << '\n';
         } else {
             const auto patchError = m_machine->romInfo().patchError;
@@ -2005,7 +1997,8 @@ private:
     }
 
     cutemac::config::Configuration m_configuration;
-    std::unique_ptr<cutemac::machines::macplus::MacPlusMachine> m_machine;
+    std::unique_ptr<cutemac::core::EmulationSession> m_session;
+    cutemac::machines::macplus::MacPlusMachine* m_machine = nullptr;
     std::unique_ptr<GdbStub> m_gdbStub;
     QTextStream m_out { stdout };
     bool m_romLoaded = false;

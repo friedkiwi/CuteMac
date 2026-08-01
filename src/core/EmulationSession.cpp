@@ -1,0 +1,197 @@
+#include "cutemac/core/EmulationSession.h"
+
+#include <algorithm>
+
+#include "cutemac/machines/macplus/MacPlusMachine.h"
+
+namespace cutemac::core {
+
+EmulationSession::EmulationSession(config::Configuration configuration)
+    : m_configuration(std::move(configuration))
+    , m_machine(createMachine(m_configuration))
+{
+}
+
+EmulationSession::~EmulationSession() = default;
+
+std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configuration& configuration)
+{
+    if (configuration.machineId == QStringLiteral("mac-plus")) {
+        return std::make_unique<machines::macplus::MacPlusMachine>(
+            static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024);
+    }
+    return {};
+}
+
+bool EmulationSession::initialize()
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_machine) {
+        return false;
+    }
+    m_romLoaded = !m_configuration.romPath.isEmpty()
+        && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
+    if (!m_configuration.diskPath.isEmpty()) {
+        (void)m_machine->loadDiskImage(m_configuration.diskPath);
+    }
+    if (!m_configuration.floppyPath.isEmpty()) {
+        (void)m_machine->loadFloppyImage(m_configuration.floppyPath);
+    }
+    if (m_romLoaded) {
+        m_machine->reset();
+    }
+    m_paused = !m_romLoaded;
+    return m_romLoaded;
+}
+
+bool EmulationSession::reconfigure(config::Configuration configuration)
+{
+    std::lock_guard lock(m_mutex);
+    m_configuration = std::move(configuration);
+    m_machine = createMachine(m_configuration);
+    m_romLoaded = false;
+    m_paused = true;
+    if (!m_machine) {
+        return false;
+    }
+    m_romLoaded = !m_configuration.romPath.isEmpty()
+        && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
+    if (!m_configuration.diskPath.isEmpty()) {
+        (void)m_machine->loadDiskImage(m_configuration.diskPath);
+    }
+    if (!m_configuration.floppyPath.isEmpty()) {
+        (void)m_machine->loadFloppyImage(m_configuration.floppyPath);
+    }
+    if (m_romLoaded) {
+        m_machine->reset();
+        m_paused = false;
+    }
+    return m_romLoaded;
+}
+
+void EmulationSession::reset()
+{
+    std::lock_guard lock(m_mutex);
+    if (m_machine && m_romLoaded) {
+        m_machine->reset();
+    }
+}
+
+int EmulationSession::runCycles(int cycles)
+{
+    std::lock_guard lock(m_mutex);
+    return !m_machine || m_paused ? 0 : m_machine->runCycles(cycles);
+}
+
+void EmulationSession::setPaused(bool paused)
+{
+    std::lock_guard lock(m_mutex);
+    m_paused = paused || !m_romLoaded;
+}
+
+bool EmulationSession::paused() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_paused;
+}
+
+EmulationSession::Status EmulationSession::status() const
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_machine) {
+        return { m_configuration.machineId, 0, 0, false, false, true };
+    }
+    return { m_machine->machineId(), m_machine->programCounter(), m_machine->cycleCount(),
+        m_machine->overlayEnabled(), m_romLoaded, m_paused };
+}
+
+QByteArray EmulationSession::framebufferBytes() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_machine ? m_machine->framebufferBytes() : QByteArray {};
+}
+
+config::Configuration EmulationSession::configuration() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_configuration;
+}
+
+void EmulationSession::queueInput(GuestInputEvent event)
+{
+    std::lock_guard lock(m_mutex);
+    if (m_machine) {
+        m_machine->queueInput(event, m_machine->cycleCount());
+    }
+}
+
+void EmulationSession::queueMousePosition(std::int16_t x, std::int16_t y)
+{
+    queueInput({ GuestInputEvent::Type::MousePosition, x, y, false });
+}
+
+void EmulationSession::queueMouseDelta(std::int16_t dx, std::int16_t dy)
+{
+    queueInput({ GuestInputEvent::Type::MouseDelta, dx, dy, false });
+}
+
+void EmulationSession::queueMouseButton(bool pressed)
+{
+    queueInput({ GuestInputEvent::Type::MouseButton, 0, 0, pressed });
+}
+
+void EmulationSession::queueKey(std::uint8_t keyCode, bool pressed)
+{
+    queueInput({ GuestInputEvent::Type::Key, keyCode, 0, pressed });
+}
+
+void EmulationSession::queueKeyboardReset()
+{
+    queueInput({ GuestInputEvent::Type::ResetKeyboard, 0, 0, false });
+}
+
+bool EmulationSession::insertDisk(const QString& path)
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_machine || !m_machine->loadDiskImage(path)) {
+        return false;
+    }
+    m_configuration.diskPath = path;
+    return true;
+}
+
+void EmulationSession::ejectDisk()
+{
+    std::lock_guard lock(m_mutex);
+    if (m_machine) {
+        m_machine->ejectDiskImage();
+    }
+    m_configuration.diskPath.clear();
+}
+
+bool EmulationSession::insertFloppy(const QString& path)
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_machine || !m_machine->loadFloppyImage(path)) {
+        return false;
+    }
+    m_configuration.floppyPath = path;
+    return true;
+}
+
+void EmulationSession::ejectFloppy()
+{
+    std::lock_guard lock(m_mutex);
+    if (m_machine) {
+        m_machine->ejectFloppyImage();
+    }
+    m_configuration.floppyPath.clear();
+}
+
+void* EmulationSession::debugMachine(const QString& machineId)
+{
+    std::lock_guard lock(m_mutex);
+    return m_machine && m_machine->machineId() == machineId ? m_machine.get() : nullptr;
+}
+
+} // namespace cutemac::core
