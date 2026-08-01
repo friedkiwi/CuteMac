@@ -47,7 +47,6 @@ int main(int argc, char* argv[])
     out << "iwm_reads=" << summary.iwmReads << " iwm_writes=" << summary.iwmWrites << '\n';
     out << "scsi_reads=" << summary.scsiReads << " scsi_writes=" << summary.scsiWrites << '\n';
     out << "configuration_reads=" << summary.configurationReads << '\n';
-    out << "synthetic_tick_reads=" << summary.syntheticTickReads << '\n';
     out << "unmapped_reads=" << summary.unmappedReads << " unmapped_writes=" << summary.unmappedWrites << '\n';
 
     for (const auto& event : machine.eventLog()) {

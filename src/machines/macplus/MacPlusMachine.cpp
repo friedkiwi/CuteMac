@@ -270,13 +270,6 @@ std::uint16_t MacPlusMachine::read16(std::uint32_t address)
 std::uint32_t MacPlusMachine::read32(std::uint32_t address)
 {
     address &= 0x00ffffff;
-    if (!m_overlayEnabled && address == lowMemoryTicks && regionFor(address) == Region::Ram) {
-        ++m_accessSummary.syntheticTickReads;
-        incrementLowMemoryTicks();
-        m_accessSummary.ramReads += 4;
-        return readRam32Direct(address);
-    }
-
     return (static_cast<std::uint32_t>(read16(address)) << 16) | read16(address + 2);
 }
 
@@ -703,15 +696,6 @@ MacPlusMachine::RomInfo MacPlusMachine::romInfo() const
         m_romPatchError,
         m_romLoaded,
     };
-}
-
-void MacPlusMachine::incrementLowMemoryTicks()
-{
-    const auto value = readRam32Direct(lowMemoryTicks) + 1;
-    m_ram[lowMemoryTicks] = static_cast<std::uint8_t>(value >> 24);
-    m_ram[lowMemoryTicks + 1] = static_cast<std::uint8_t>(value >> 16);
-    m_ram[lowMemoryTicks + 2] = static_cast<std::uint8_t>(value >> 8);
-    m_ram[lowMemoryTicks + 3] = static_cast<std::uint8_t>(value);
 }
 
 void MacPlusMachine::updateInterrupts()

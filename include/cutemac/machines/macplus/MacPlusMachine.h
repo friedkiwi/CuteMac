@@ -42,7 +42,6 @@ public:
         std::uint64_t scsiReads = 0;
         std::uint64_t scsiWrites = 0;
         std::uint64_t configurationReads = 0;
-        std::uint64_t syntheticTickReads = 0;
         std::uint64_t unmappedReads = 0;
         std::uint64_t unmappedWrites = 0;
     };
@@ -147,7 +146,6 @@ private:
     [[nodiscard]] std::uint8_t readDevice8(std::uint32_t address, Region region);
     void writeDevice8(std::uint32_t address, Region region, std::uint8_t value);
 
-    void incrementLowMemoryTicks();
     void updateInterrupts();
     [[nodiscard]] std::uint32_t readRam32Direct(std::uint32_t address) const;
     [[nodiscard]] std::uint8_t readRam8Direct(std::uint32_t address) const;

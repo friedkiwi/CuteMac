@@ -915,7 +915,6 @@ private:
         m_out << "ram_reads=" << summary.ramReads << " ram_writes=" << summary.ramWrites << '\n';
         m_out << "rom_reads=" << summary.romReads << '\n';
         m_out << "configuration_reads=" << summary.configurationReads << '\n';
-        m_out << "synthetic_tick_reads=" << summary.syntheticTickReads << '\n';
         m_out << "unmapped_reads=" << summary.unmappedReads << " unmapped_writes=" << summary.unmappedWrites << '\n';
     }
 
