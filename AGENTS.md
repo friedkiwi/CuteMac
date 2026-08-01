@@ -49,7 +49,7 @@
 - Machine RAM sizes are catalog-defined discrete configurations, stored in KiB so fractional-MiB hardware configurations remain representable. The GUI, TOML loader/saver, and machine factory must use the same catalog validation; retain migration support for legacy `ram_size_mib` profiles.
 - Keep managed floppy, CD-ROM, and hard-disk images in the shared disk-image catalog. Configuration and live insertion flows use the common media-type-filtered disk picker, and blank floppy/hard-disk creation shares the same image creation path.
 - Keep host key mapping, capture policy, and framebuffer conversion in session frontend adapters. Wayland/wasm remain on the no-warp absolute-pointer path.
-- Emulator windows scale the framebuffer to the available client area while preserving its aspect ratio and letterboxing as needed. Do not expose fixed-size View menu actions; a 512-pixel-wide display opens at 2x by default.
+- Emulator windows provide Display → Zoom choices for 1x, 1.5x, 2x, and Custom, with a 512-pixel-wide display opening at 2x by default. Preset selection requests the matching window size; manual resize selects Custom. Preserve aspect ratio and center with letterboxing when the host cannot honor the requested size.
 - Session management commands use newline-delimited JSON over a loopback-only control socket. Keep networking compiled out at runtime on wasm.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.

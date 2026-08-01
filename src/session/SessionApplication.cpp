@@ -17,6 +17,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTimer>
@@ -118,6 +119,12 @@ public:
     }
 
     [[nodiscard]] QSize framebufferSize() const { return m_image.size(); }
+
+    void setZoomFactor(double factor)
+    {
+        m_zoomFactor = factor;
+        update();
+    }
 
     void setMouseCallback(std::function<void(int, int, bool)> callback)
     {
@@ -240,8 +247,9 @@ private:
     [[nodiscard]] QRect displayRect() const
     {
         const QSize baseSize = m_image.size().isEmpty() ? QSize(512, 342) : m_image.size();
-        const auto scale = std::min(static_cast<double>(width()) / baseSize.width(),
+        const auto availableScale = std::min(static_cast<double>(width()) / baseSize.width(),
             static_cast<double>(height()) / baseSize.height());
+        const auto scale = m_zoomFactor > 0.0 ? std::min(m_zoomFactor, availableScale) : availableScale;
         const QSize scaled(std::max(1, static_cast<int>(baseSize.width() * scale)),
             std::max(1, static_cast<int>(baseSize.height() * scale)));
         return QRect(QPoint((width() - scaled.width()) / 2, (height() - scaled.height()) / 2), scaled);
@@ -356,6 +364,7 @@ private:
     }
 
     bool m_running = false;
+    double m_zoomFactor = 0.0;
     bool m_pointerInsideDisplay = false;
     bool m_leftButtonPressed = false;
     QPoint m_lastGuestPoint;
@@ -411,13 +420,9 @@ public:
         connect(&m_frameTimer, &QTimer::timeout, this, [this]() { runFrame(); });
 
         loadAndReset();
-        const auto framebufferSize = m_display->framebufferSize();
-        const auto initialScale = framebufferSize.width() == 512 ? 2 : 1;
-        const QSize desiredDisplaySize(framebufferSize.width() * initialScale, framebufferSize.height() * initialScale);
-        resize(desiredDisplaySize);
-        QTimer::singleShot(0, this, [this, desiredDisplaySize]() {
-            resize(size() + desiredDisplaySize - m_display->size());
-        });
+        const auto initialScale = m_display->framebufferSize().width() == 512 ? 2.0 : 1.0;
+        setZoom(initialScale);
+        QTimer::singleShot(0, this, [this, initialScale]() { setZoom(initialScale); });
         m_runner.start();
         if (m_controlServer.listen()) {
             qInfo("CuteMac session control listening on 127.0.0.1:%u", m_controlServer.port());
@@ -426,6 +431,17 @@ public:
     }
 
     ~EmulatorWindow() override { m_runner.stop(); }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override
+    {
+        QMainWindow::resizeEvent(event);
+        if (m_zoomResizePending) {
+            m_zoomResizePending = false;
+            return;
+        }
+        setCustomZoom();
+    }
 
 private:
     void updateInteractiveInputState()
@@ -454,6 +470,18 @@ private:
         machineMenu->addSeparator();
         machineMenu->addAction(QStringLiteral("Close"), this, &QWidget::close);
 
+        auto* displayMenu = menuBar()->addMenu(QStringLiteral("Display"));
+        auto* zoomMenu = displayMenu->addMenu(QStringLiteral("Zoom"));
+        auto* zoomGroup = new QActionGroup(this);
+        zoomGroup->setExclusive(true);
+        m_zoom1xAction = addZoomAction(zoomMenu, zoomGroup, QStringLiteral("1x"), 1.0);
+        m_zoom15xAction = addZoomAction(zoomMenu, zoomGroup, QStringLiteral("1.5x"), 1.5);
+        m_zoom2xAction = addZoomAction(zoomMenu, zoomGroup, QStringLiteral("2x"), 2.0);
+        m_zoomCustomAction = zoomMenu->addAction(QStringLiteral("Custom"));
+        m_zoomCustomAction->setActionGroup(zoomGroup);
+        m_zoomCustomAction->setCheckable(true);
+        connect(m_zoomCustomAction, &QAction::triggered, this, [this]() { setCustomZoom(); });
+
         auto* mediaMenu = menuBar()->addMenu(QStringLiteral("Media"));
         mediaMenu->addAction(QStringLiteral("Insert Floppy Image"), this, [this]() {
             const auto path = cutemac::ui::DiskImagePickerDialog::getImage(cutemac::storage::DiskImageType::Floppy,
@@ -477,6 +505,35 @@ private:
             updateStatus();
         });
 
+    }
+
+    QAction* addZoomAction(QMenu* menu, QActionGroup* group, const QString& text, double factor)
+    {
+        auto* action = menu->addAction(text);
+        action->setActionGroup(group);
+        action->setCheckable(true);
+        connect(action, &QAction::triggered, this, [this, factor]() { setZoom(factor); });
+        return action;
+    }
+
+    void setZoom(double factor)
+    {
+        m_display->setZoomFactor(factor);
+        if (factor == 1.0) m_zoom1xAction->setChecked(true);
+        else if (factor == 1.5) m_zoom15xAction->setChecked(true);
+        else if (factor == 2.0) m_zoom2xAction->setChecked(true);
+
+        const auto framebuffer = m_display->framebufferSize();
+        const QSize desiredDisplaySize(qRound(framebuffer.width() * factor), qRound(framebuffer.height() * factor));
+        m_zoomResizePending = true;
+        resize(size() + desiredDisplaySize - m_display->size());
+        QTimer::singleShot(0, this, [this]() { m_zoomResizePending = false; });
+    }
+
+    void setCustomZoom()
+    {
+        m_display->setZoomFactor(0.0);
+        if (m_zoomCustomAction != nullptr) m_zoomCustomAction->setChecked(true);
     }
 
     void buildToolbar()
@@ -713,6 +770,10 @@ private:
     QLabel* m_status = nullptr;
     QAction* m_realtimeSpeedAction = nullptr;
     QAction* m_unlimitedSpeedAction = nullptr;
+    QAction* m_zoom1xAction = nullptr;
+    QAction* m_zoom15xAction = nullptr;
+    QAction* m_zoom2xAction = nullptr;
+    QAction* m_zoomCustomAction = nullptr;
     QSet<int> m_pressedInputKeys;
     bool m_mouseInputPressed = false;
     QTimer m_frameTimer;
@@ -720,6 +781,7 @@ private:
     QAction* m_pauseAction = nullptr;
     bool m_romLoaded = false;
     bool m_paused = true;
+    bool m_zoomResizePending = false;
     quint64 m_frames = 0;
 };
 
