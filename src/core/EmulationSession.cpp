@@ -4,6 +4,7 @@
 
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/rom/RomCatalog.h"
@@ -20,13 +21,16 @@ EmulationSession::~EmulationSession() = default;
 
 std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configuration& configuration)
 {
+    if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
+        return {};
+    }
     if (configuration.machineId == QStringLiteral("mac-plus")) {
         return std::make_unique<machines::macplus::MacPlusMachine>(
-            static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024, configuration.nvramPath);
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024, configuration.nvramPath);
     }
     if (configuration.machineId == QStringLiteral("mac-iicx")) {
         auto machine = std::make_unique<machines::maciicx::MacIIcxMachine>(
-            static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024,
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024,
             configuration.nvramPath);
         for (const auto& device : configuration.nubusDevices) {
             if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {

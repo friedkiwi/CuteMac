@@ -718,7 +718,7 @@ private:
         m_out << "rom=" << displayPath(m_configuration.romPath) << '\n';
         m_out << "disk=" << displayPath(m_configuration.diskPath) << '\n';
         m_out << "floppy=" << displayPath(m_configuration.floppyPath) << '\n';
-        m_out << "ram_size_mib=" << m_configuration.ramSizeMiB << '\n';
+        m_out << "ram_size_mib=" << (m_configuration.ramSizeKiB / 1024.0) << '\n';
         m_out << "cycles_per_frame=" << m_configuration.cyclesPerFrame << '\n';
         m_out << "skip_ram_pattern_test=" << (m_configuration.skipRamPatternTest ? "true" : "false") << '\n';
     }
@@ -755,7 +755,7 @@ private:
         } else if (key == QStringLiteral("cycles_per_frame")) {
             m_configuration.cyclesPerFrame = value.toInt();
         } else if (key == QStringLiteral("ram_size_mib")) {
-            m_configuration.ramSizeMiB = value.toInt();
+            m_configuration.ramSizeKiB = qRound(value.toDouble() * 1024.0);
             reloadMachine();
         } else if (key == QStringLiteral("skip_ram_pattern_test")) {
             m_configuration.skipRamPatternTest = value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
@@ -979,7 +979,7 @@ private:
             return;
         }
         const auto start = parts.size() >= 3 ? parseAddress(parts[2]).value_or(0) : 0U;
-        const auto defaultLength = static_cast<std::uint32_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024;
+        const auto defaultLength = static_cast<std::uint32_t>(std::max(1, m_configuration.ramSizeKiB)) * 1024;
         const auto length = parts.size() >= 4 ? parseNumber(parts[3]).value_or(defaultLength) : defaultLength;
         int hits = 0;
         for (std::uint32_t address = start; address + static_cast<std::uint32_t>(needle.size()) <= start + length; ++address) {
@@ -1726,7 +1726,7 @@ private:
 
     void findNeedleInRam(const QByteArray& needle, const QString& label)
     {
-        const auto length = static_cast<std::uint32_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024;
+        const auto length = static_cast<std::uint32_t>(std::max(1, m_configuration.ramSizeKiB)) * 1024;
         int hits = 0;
         for (std::uint32_t address = 0; address + static_cast<std::uint32_t>(needle.size()) <= length; ++address) {
             bool match = true;

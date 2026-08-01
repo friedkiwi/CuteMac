@@ -9,6 +9,8 @@
 
 #include <sstream>
 
+#include "cutemac/machines/MachineCatalog.h"
+
 namespace cutemac::config {
 
 namespace {
@@ -95,7 +97,7 @@ Configuration ConfigurationManager::defaultMacPlusConfiguration()
     Configuration configuration;
     configuration.profileName = QStringLiteral("Mac Plus");
     configuration.machineId = QStringLiteral("mac-plus");
-    configuration.ramSizeMiB = 4;
+    configuration.ramSizeKiB = 4096;
     configuration.cyclesPerFrame = 130560;
     configuration.iwmDevices.append(IwmDeviceConfiguration {});
     return configuration;
@@ -148,7 +150,18 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         configuration.nvramPath = fromTomlString(document["storage"]["nvram_path"].value_or<std::string>(""));
         configuration.diskPath = fromTomlString(document["storage"]["disk_path"].value_or<std::string>(""));
         configuration.floppyPath = fromTomlString(document["storage"]["floppy_path"].value_or<std::string>(""));
-        configuration.ramSizeMiB = static_cast<int>(document["machine"]["ram_size_mib"].value_or<std::int64_t>(configuration.ramSizeMiB));
+        if (const auto sizeKiB = document["machine"]["ram_size_kib"].value<std::int64_t>()) {
+            configuration.ramSizeKiB = static_cast<int>(*sizeKiB);
+        } else if (const auto sizeMiB = document["machine"]["ram_size_mib"].value<std::int64_t>()) {
+            configuration.ramSizeKiB = static_cast<int>(*sizeMiB) * 1024;
+        } else if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
+            const auto machine = machines::MachineCatalog::find(configuration.machineId);
+            if (!machine || machine->supportedRamSizesKiB.isEmpty()) return std::nullopt;
+            configuration.ramSizeKiB = machine->supportedRamSizesKiB.first();
+        }
+        if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
+            return std::nullopt;
+        }
         configuration.cyclesPerFrame = static_cast<int>(document["machine"]["cycles_per_frame"].value_or<std::int64_t>(configuration.cyclesPerFrame));
         configuration.runtimeSpeed = runtimeSpeedFromName(fromTomlString(document["runtime"]["speed"].value_or<std::string>("unlimited")));
         configuration.skipRamPatternTest = document["rom_patches"]["skip_ram_pattern_test"].value_or(false);
@@ -219,6 +232,9 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
 
 bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration& configuration) const
 {
+    if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
+        return false;
+    }
     (void)ensureDirectories();
 
     QFile file(path);
@@ -257,10 +273,10 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
 
     toml::table document {
         { "name", toTomlString(configuration.profileName) },
-        { "version", 2 },
+        { "version", 3 },
         { "machine", toml::table {
                          { "id", toTomlString(configuration.machineId) },
-                         { "ram_size_mib", configuration.ramSizeMiB },
+                         { "ram_size_kib", configuration.ramSizeKiB },
                          { "cycles_per_frame", configuration.cyclesPerFrame },
                      } },
         { "storage", toml::table {

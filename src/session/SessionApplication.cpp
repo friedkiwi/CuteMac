@@ -83,7 +83,7 @@ bool requiresMachineReset(const cutemac::config::Configuration& current, const c
 {
     return current.machineId != proposed.machineId || current.romPath != proposed.romPath
         || current.nvramPath != proposed.nvramPath
-        || current.ramSizeMiB != proposed.ramSizeMiB || current.skipRamPatternTest != proposed.skipRamPatternTest
+        || current.ramSizeKiB != proposed.ramSizeKiB || current.skipRamPatternTest != proposed.skipRamPatternTest
         || !sameIwmDevices(current.iwmDevices, proposed.iwmDevices)
         || !sameScsiDevices(current.scsiDevices, proposed.scsiDevices)
         || !sameNuBusDevices(current.nubusDevices, proposed.nubusDevices);

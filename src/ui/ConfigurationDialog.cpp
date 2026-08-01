@@ -33,7 +33,7 @@ public:
     QComboBox* machine = nullptr;
     QLineEdit* nvram = nullptr;
     bool nvramZapped = false;
-    QSpinBox* ram = nullptr;
+    QComboBox* ram = nullptr;
     QComboBox* speed = nullptr;
     QCheckBox* skipRamTest = nullptr;
     QTabWidget* tabs = nullptr;
@@ -154,8 +154,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     nvramRow->addWidget(nvramNew);
     nvramRow->addWidget(nvramZap);
     form->addRow(QStringLiteral("NVRAM image"), nvramRow);
-    m_impl->ram = new QSpinBox;
-    m_impl->ram->setSuffix(QStringLiteral(" MiB"));
+    m_impl->ram = new QComboBox;
     form->addRow(QStringLiteral("RAM"), m_impl->ram);
     m_impl->speed = new QComboBox;
     m_impl->speed->addItem(QStringLiteral("Unlimited"), static_cast<int>(config::RuntimeSpeed::Unlimited));
@@ -270,14 +269,18 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->iwmTab), iwm);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->scsiTab), scsi);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->nubusTab), nubus);
-        if (machineId == QStringLiteral("mac-plus")) {
-            m_impl->ram->setRange(1, 4);
-        } else if (machineId == QStringLiteral("powermac-8100")) {
-            m_impl->ram->setRange(8, 264);
-        } else {
-            m_impl->ram->setRange(1, 256);
+        m_impl->ram->clear();
+        if (it != profiles.cend()) {
+            for (const auto sizeKiB : it->supportedRamSizesKiB) {
+                const auto label = sizeKiB % 1024 == 0
+                    ? QStringLiteral("%1 MiB").arg(sizeKiB / 1024)
+                    : QStringLiteral("%1 MiB").arg(sizeKiB / 1024.0, 0, 'f', 1);
+                m_impl->ram->addItem(label, sizeKiB);
+            }
         }
-        m_impl->ram->setValue(qBound(m_impl->ram->minimum(), m_impl->original.ramSizeMiB, m_impl->ram->maximum()));
+        auto ramIndex = m_impl->ram->findData(m_impl->original.ramSizeKiB);
+        if (ramIndex < 0) ramIndex = 0;
+        m_impl->ram->setCurrentIndex(ramIndex);
     };
 
     connect(m_impl->machine, &QComboBox::currentIndexChanged, this, updateCapabilities);
@@ -419,7 +422,7 @@ config::Configuration ConfigurationDialog::configuration() const
     result.machineId = m_impl->machine->currentData().toString();
     result.romPath.clear();
     result.nvramPath = m_impl->nvram->text().trimmed();
-    result.ramSizeMiB = m_impl->ram->value();
+    result.ramSizeKiB = m_impl->ram->currentData().toInt();
     result.runtimeSpeed = static_cast<config::RuntimeSpeed>(m_impl->speed->currentData().toInt());
     result.skipRamPatternTest = m_impl->skipRamTest->isChecked();
     result.iwmDevices = { { m_impl->floppy->text().trimmed(), m_impl->floppyReadOnly->isChecked() } };

@@ -1,5 +1,7 @@
 #include "cutemac/machines/MachineCatalog.h"
 
+#include <algorithm>
+
 namespace cutemac::machines {
 
 QVector<MachineProfile> MachineCatalog::supportedMachines()
@@ -19,6 +21,7 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
                 QStringLiteral("device.audio.compact-mac"),
                 QStringLiteral("device.rtc.pram"),
             },
+            { 1024, 2560, 4096 },
         },
         {
             QStringLiteral("mac-iicx"),
@@ -36,6 +39,7 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
                 QStringLiteral("device.audio.asc"),
                 QStringLiteral("device.rtc.pram"),
             },
+            { 1024, 2048, 4096, 5120, 8192, 16384, 17408, 20480, 32768, 65536, 66560, 69632, 81920, 131072 },
         },
         {
             QStringLiteral("quadra-800"),
@@ -47,6 +51,7 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
                 QStringLiteral("device.scsi.bus"),
                 QStringLiteral("device.video"),
             },
+            { 8192, 12288, 24576, 40960, 73728, 139264 },
         },
         {
             QStringLiteral("powermac-8100"),
@@ -59,8 +64,24 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
                 QStringLiteral("device.nubus"),
                 QStringLiteral("device.video"),
             },
+            { 8192, 16384, 24576, 40960, 73728, 139264, 270336 },
         },
     };
+}
+
+std::optional<MachineProfile> MachineCatalog::find(const QString& machineId)
+{
+    const auto machines = supportedMachines();
+    const auto it = std::find_if(machines.cbegin(), machines.cend(), [&](const auto& machine) {
+        return machine.id == machineId;
+    });
+    return it == machines.cend() ? std::nullopt : std::optional<MachineProfile>(*it);
+}
+
+bool MachineCatalog::isValidRamSize(const QString& machineId, int sizeKiB)
+{
+    const auto machine = find(machineId);
+    return machine && machine->supportedRamSizesKiB.contains(sizeKiB);
 }
 
 } // namespace cutemac::machines

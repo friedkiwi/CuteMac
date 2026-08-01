@@ -60,7 +60,7 @@ public:
     QVector<IwmDeviceConfiguration> iwmDevices;
     QVector<ScsiDeviceConfiguration> scsiDevices;
     QVector<NuBusDeviceConfiguration> nubusDevices;
-    int ramSizeMiB = 4;
+    int ramSizeKiB = 4096;
     int cyclesPerFrame = 130560;
     RuntimeSpeed runtimeSpeed = RuntimeSpeed::Unlimited;
     bool skipRamPatternTest = false;

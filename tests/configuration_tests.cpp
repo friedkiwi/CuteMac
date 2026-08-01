@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "cutemac/config/Configuration.h"
+#include "cutemac/machines/MachineCatalog.h"
 
 namespace {
 
@@ -27,7 +28,7 @@ int main()
     configuration.profileName = QStringLiteral("Quoted \"Plus\"");
     configuration.machineId = QStringLiteral("mac-plus");
     configuration.nvramPath = QStringLiteral("/tmp/mac-plus.nvram");
-    configuration.ramSizeMiB = 4;
+    configuration.ramSizeKiB = 4096;
     configuration.cyclesPerFrame = 130560;
     configuration.runtimeSpeed = cutemac::config::RuntimeSpeed::Unlimited;
     configuration.iwmDevices.append({ QStringLiteral("/tmp/system.dsk"), true });
@@ -74,6 +75,31 @@ int main()
     const auto migratedPowerMac = manager.loadTomlFile(path);
     ok &= expect(migratedPowerMac.has_value() && migratedPowerMac->machineId == QStringLiteral("powermac-8100"),
         "legacy Power Macintosh 6100 target must migrate to the 8100 target");
+    ok &= expect(migratedPowerMac && migratedPowerMac->ramSizeKiB == 8192,
+        "a legacy Power Macintosh profile must receive a valid default RAM size");
+
+    QFile invalidRam(path);
+    ok &= expect(invalidRam.open(QIODevice::WriteOnly | QIODevice::Truncate), "invalid RAM fixture open failed");
+    invalidRam.write("name = \"Invalid Plus\"\n[machine]\nid = \"mac-plus\"\nram_size_mib = 3\n");
+    invalidRam.close();
+    ok &= expect(!manager.loadTomlFile(path).has_value(), "unsupported RAM size in TOML must be rejected");
+
+    QFile validFractionalRam(path);
+    ok &= expect(validFractionalRam.open(QIODevice::WriteOnly | QIODevice::Truncate), "fractional RAM fixture open failed");
+    validFractionalRam.write("name = \"2.5 MiB Plus\"\n[machine]\nid = \"mac-plus\"\nram_size_kib = 2560\n");
+    validFractionalRam.close();
+    const auto fractionalPlus = manager.loadTomlFile(path);
+    ok &= expect(fractionalPlus && fractionalPlus->ramSizeKiB == 2560,
+        "the Macintosh Plus 2.5 MiB configuration must be supported");
+
+    auto invalidConfiguration = configuration;
+    invalidConfiguration.ramSizeKiB = 3072;
+    ok &= expect(!manager.saveTomlFile(path, invalidConfiguration), "saving unsupported RAM must fail");
+
+    ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-iicx"), 20480),
+        "catalog must accept a valid IIcx bank configuration");
+    ok &= expect(!cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-iicx"), 24576),
+        "catalog must reject an invalid IIcx bank configuration");
 
     QFile malformed(path);
     ok &= expect(malformed.open(QIODevice::WriteOnly | QIODevice::Truncate), "malformed fixture open failed");

@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 namespace cutemac::machines {
 
@@ -17,6 +18,7 @@ public:
     CpuFamily cpuFamily = CpuFamily::M68k;
     QString cpuModel;
     QStringList reusableDevices;
+    QVector<int> supportedRamSizesKiB;
 };
 
 } // namespace cutemac::machines
