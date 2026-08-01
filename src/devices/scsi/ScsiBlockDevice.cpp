@@ -82,6 +82,8 @@ ScsiCommandResult ScsiBlockDevice::executeCommand(const QByteArray& cdb, const Q
     switch (opcode) {
     case 0x00:
         return good();
+    case 0x01:
+        return good();
     case 0x04:
         // The backing image is already a fixed-size block medium; formatting is completed by subsequent writes.
         return good();
@@ -107,6 +109,8 @@ ScsiCommandResult ScsiBlockDevice::executeCommand(const QByteArray& cdb, const Q
             | static_cast<std::uint8_t>(cdb[3]);
         return writeBlocks(lba, dataOut) ? good() : checkCondition(senseIllegalRequest);
     }
+    case 0x0b:
+        return good();
     case 0x12:
         return inquiry(
             cdb.size() > 1 ? (static_cast<std::uint8_t>(cdb[1]) & 0x01) != 0 : false,
@@ -121,6 +125,30 @@ ScsiCommandResult ScsiBlockDevice::executeCommand(const QByteArray& cdb, const Q
             cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 4);
     case 0x25:
         return readCapacity();
+    case 0x2b:
+    case 0x35:
+        return good();
+    case 0x2f: {
+        if (cdb.size() < 10 || (static_cast<std::uint8_t>(cdb[1]) & 0x02) != 0) {
+            return checkCondition(senseIllegalRequest);
+        }
+        const auto lba = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[2])) << 24)
+            | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[3])) << 16)
+            | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[4])) << 8)
+            | static_cast<std::uint8_t>(cdb[5]);
+        const auto blocks = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[7])) << 8)
+            | static_cast<std::uint8_t>(cdb[8]);
+        return lba <= blockCount() && blocks <= blockCount() - lba ? good() : checkCondition(senseIllegalRequest);
+    }
+    case 0x37: {
+        if (cdb.size() < 10) return checkCondition(senseIllegalRequest);
+        const auto allocationLength = (static_cast<int>(static_cast<std::uint8_t>(cdb[7])) << 8)
+            | static_cast<std::uint8_t>(cdb[8]);
+        QByteArray data(4, '\0');
+        data[1] = cdb[2];
+        data.truncate(std::min<qsizetype>(allocationLength, data.size()));
+        return good(data);
+    }
     default:
         return checkCondition(senseIllegalRequest);
     }
@@ -262,13 +290,52 @@ ScsiCommandResult ScsiBlockDevice::modeSense(std::uint8_t pageCode, std::uint8_t
 {
     QByteArray data(4, '\0');
     data[2] = m_readOnly ? static_cast<char>(0x80) : static_cast<char>(0x00);
+    bool pageFound = pageCode == 0x00;
+    if (pageCode == 0x03 || pageCode == 0x3f) {
+        pageFound = true;
+        QByteArray page(24, '\0');
+        page[0] = static_cast<char>(0x83);
+        page[1] = 0x16;
+        page[10] = 0x00;
+        page[11] = 0x20; // 32 sectors per track.
+        page[12] = 0x02;
+        page[13] = 0x00;
+        page[15] = 0x01;
+        page[20] = static_cast<char>(0xc0);
+        data.append(page);
+    }
+    if (pageCode == 0x04 || pageCode == 0x3f) {
+        pageFound = true;
+        constexpr std::uint32_t heads = 16;
+        constexpr std::uint32_t sectorsPerTrack = 32;
+        const auto cylinders = std::max<std::uint32_t>(1, (blockCount() + heads * sectorsPerTrack - 1) / (heads * sectorsPerTrack));
+        QByteArray page(24, '\0');
+        page[0] = 0x04;
+        page[1] = 0x16;
+        page[2] = static_cast<char>(cylinders >> 16);
+        page[3] = static_cast<char>(cylinders >> 8);
+        page[4] = static_cast<char>(cylinders);
+        page[5] = static_cast<char>(heads);
+        page[6] = page[2];
+        page[7] = page[3];
+        page[8] = page[4];
+        page[9] = page[2];
+        page[10] = page[3];
+        page[11] = page[4];
+        page[13] = 0x01;
+        page[20] = static_cast<char>(5400 >> 8);
+        page[21] = static_cast<char>(5400);
+        data.append(page);
+    }
     if (pageCode == 0x30 || pageCode == 0x3f) {
+        pageFound = true;
         data.append(static_cast<char>(0x30));
         data.append(static_cast<char>(0x24));
         QByteArray page(0x24, '\0');
         page.replace(8, 22, QByteArrayLiteral("APPLE COMPUTER, INC   "));
         data.append(page);
-    } else if (pageCode != 0x00) {
+    }
+    if (!pageFound) {
         return checkCondition(senseIllegalRequest);
     }
 

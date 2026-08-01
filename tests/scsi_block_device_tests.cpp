@@ -66,8 +66,19 @@ int main()
     const auto modeSelect = disk.executeCommand(QByteArray::fromHex("150000000c00"), QByteArray(12, '\0'));
     ok &= expect(modeSelect.status == 0, "MODE SELECT failed");
 
+    const auto formatPage = disk.executeCommand(QByteArray::fromHex("1a000300ff00"), {});
+    ok &= expect(formatPage.status == 0 && formatPage.data.size() == 28 && static_cast<std::uint8_t>(formatPage.data[4]) == 0x83,
+        "format-device mode page is wrong");
+    const auto geometryPage = disk.executeCommand(QByteArray::fromHex("1a000400ff00"), {});
+    ok &= expect(geometryPage.status == 0 && geometryPage.data.size() == 28 && static_cast<std::uint8_t>(geometryPage.data[4]) == 0x04,
+        "rigid-disk geometry mode page is wrong");
+
     const auto format = disk.executeCommand(QByteArray::fromHex("040000000000"), {});
     ok &= expect(format.status == 0, "FORMAT UNIT failed");
+    const auto verify = disk.executeCommand(QByteArray::fromHex("2f000000000000000100"), {});
+    ok &= expect(verify.status == 0, "VERIFY(10) failed");
+    const auto defects = disk.executeCommand(QByteArray::fromHex("37000000000000000400"), {});
+    ok &= expect(defects.status == 0 && defects.data == QByteArray::fromHex("00000000"), "READ DEFECT DATA failed");
 
     const QByteArray marker(512, static_cast<char>(0x5a));
     const auto write = disk.executeCommand(QByteArray::fromHex("0a0000000100"), marker);
