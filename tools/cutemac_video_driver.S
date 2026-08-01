@@ -17,12 +17,32 @@ driver_start:
         .even
 
 open:
+        lea     driver_storage(%pc),%a0 | locked with this loaded DRVR instance
+        clr.l   (%a0)
+        clr.l   4(%a0)
+        clr.l   8(%a0)
+        clr.l   12(%a0)
+        clr.w   16(%a0)
+        clr.w   18(%a0)
+        move.l  %a0,20(%a1)            | dCtlStorage
+        move.w  #6,4(%a0)              | sIQType
+        clr.w   6(%a0)                 | queue priority
+        lea     slot_interrupt(%pc),%a2
+        move.l  %a2,8(%a0)             | SQAddr
+        move.l  %a1,12(%a0)            | SQParm: DCE pointer
+        bsr.w   enable_interrupts
+        beq.s   open_done
+        clr.l   20(%a1)
+        rts
+open_done:
         moveq   #0,%d0
         rts
 prime:
         moveq   #-1,%d0
         bra.w   complete
 close:
+        bsr.w   disable_interrupts
+        clr.l   20(%a1)
         moveq   #0,%d0
         rts
 
@@ -44,10 +64,10 @@ set_mode:
         subi.w  #0x80,%d1
         cmpi.w  #5,%d1
         bhi.w   param_error
-        movea.l 42(%a1),%a2
-        adda.l  #0x00800000,%a2
+        bsr.w   card_base
+        move.l  %a2,36(%a0)
+        adda.l  #0x00080000,%a2
         move.b  %d1,(%a2)
-        move.l  42(%a1),36(%a0)
         moveq   #0,%d0
         bra.w   complete
 
@@ -59,8 +79,8 @@ set_entries:
         beq.w   param_error
         cmpi.w  #255,%d2
         bhi.w   param_error
-        movea.l 42(%a1),%a2
-        adda.l  #0x00800002,%a2
+        bsr.w   card_base
+        adda.l  #0x00080002,%a2
 set_entries_loop:
         cmpi.w  #-1,%d3
         bne.s   set_entries_sequential
@@ -80,15 +100,107 @@ set_entries_index_ready:
         bra.w   complete
 
 set_interrupt:
-        movea.l 42(%a1),%a2
-        adda.l  #0x00800001,%a2
-        move.b  28(%a0),(%a2)
-        moveq   #0,%d0
+        move.l  %a0,-(%sp)
+        tst.b   28(%a0)
+        bne.s   set_interrupt_disable
+        bsr.w   enable_interrupts
+        bra.s   set_interrupt_done
+set_interrupt_disable:
+        bsr.w   disable_interrupts
+set_interrupt_done:
+        movea.l (%sp)+,%a0
         bra.w   complete
+
+enable_interrupts:
+        movea.l 20(%a1),%a0
+        tst.l   %a0
+        beq.s   interrupt_storage_error
+        tst.b   16(%a0)
+        bne.s   interrupt_enable_hardware
+        moveq   #0,%d0
+        move.b  40(%a1),%d0            | dCtlSlot
+        move.l  %a1,-(%sp)             | Slot Manager traps do not preserve the DCE
+        .word   0xa075                  | _SIntInstall
+        movea.l (%sp)+,%a1
+        tst.w   %d0
+        bne.s   interrupt_done
+        movea.l 20(%a1),%a0
+        st      16(%a0)
+interrupt_enable_hardware:
+        bsr.w   card_base
+        adda.l  #0x00080001,%a2
+        clr.b   (%a2)                   | enable and acknowledge VBL
+        moveq   #0,%d0
+interrupt_done:
+        rts
+interrupt_storage_error:
+        moveq   #-50,%d0
+        rts
+
+disable_interrupts:
+        bsr.w   card_base
+        adda.l  #0x00080001,%a2
+        move.b  #1,(%a2)
+        movea.l 20(%a1),%a0
+        tst.l   %a0
+        beq.s   interrupt_disabled
+        tst.b   16(%a0)
+        beq.s   interrupt_disabled
+        moveq   #0,%d0
+        move.b  40(%a1),%d0
+        move.l  %a1,-(%sp)
+        .word   0xa076                  | _SIntRemove
+        movea.l (%sp)+,%a1
+        movea.l 20(%a1),%a0
+        clr.b   16(%a0)
+interrupt_disabled:
+        moveq   #0,%d0
+        rts
+
+slot_interrupt:
+        bsr.s   card_base
+        adda.l  #0x00080001,%a2
+        clr.b   (%a2)                   | acknowledge while remaining enabled
+        bsr.s   card_base
+        adda.l  #0x00090018,%a2
+        btst    #0,(%a2)                | host absolute pointer is valid
+        beq.s   slot_cursor_task
+        move.b  1(%a2),%d1
+        movea.l 20(%a1),%a0
+        cmp.b   18(%a0),%d1
+        beq.s   slot_cursor_task
+        move.b  %d1,18(%a0)
+        move.w  4(%a2),0x0828           | MTemp vertical
+        move.w  2(%a2),0x082a           | MTemp horizontal
+        move.w  4(%a2),0x082c           | RawMouse vertical
+        move.w  2(%a2),0x082e           | RawMouse horizontal
+        move.w  4(%a2),0x0830           | Mouse vertical
+        move.w  2(%a2),0x0832           | Mouse horizontal
+        st      0x08ce                   | CrsrNew
+slot_cursor_task:
+        moveq   #0,%d0
+        move.b  40(%a1),%d0
+        movea.l 0x0d28,%a0             | JVBLTask
+        jsr     (%a0)
+        moveq   #1,%d0                 | interrupt serviced
+        rts
+
+card_base:
+        moveq   #0,%d0
+        move.b  40(%a1),%d0            | dCtlSlot
+        lsl.l   #8,%d0
+        lsl.l   #8,%d0
+        lsl.l   #4,%d0                 | 24-bit standard-slot window, $s00000
+        movea.l %d0,%a2
+        rts
 
 install_guest_helpers:
         lea     service_base(%pc),%a2
-        move.l  42(%a1),(%a2)
+        move.l  %a2,-(%sp)
+        bsr.w   card_base
+        movea.l (%sp)+,%a0
+        move.l  %a2,(%a0)
+        movea.l %a0,%a2
         tst.b   4(%a2)
         bne.s   helpers_installed
         st      4(%a2)
@@ -122,15 +234,15 @@ status:
         bra.w   complete
 
 get_mode:
-        movea.l 42(%a1),%a2
-        adda.l  #0x00800000,%a2
+        bsr.w   card_base
+        move.l  %a2,36(%a0)
+        adda.l  #0x00080000,%a2
         moveq   #0,%d1
         move.b  (%a2),%d1
         andi.w  #7,%d1
         addi.w  #0x80,%d1
         move.w  %d1,28(%a0)
         clr.w   34(%a0)
-        move.l  42(%a1),36(%a0)
         moveq   #0,%d0
         bra.w   complete
 
@@ -142,8 +254,8 @@ get_entries:
         beq.w   param_error
         cmpi.w  #255,%d2
         bhi.w   param_error
-        movea.l 42(%a1),%a2
-        adda.l  #0x00800002,%a2
+        bsr.w   card_base
+        adda.l  #0x00080002,%a2
 get_entries_loop:
         cmpi.w  #-1,%d3
         bne.s   get_entries_sequential
@@ -176,7 +288,8 @@ get_pages:
 get_base:
         tst.w   34(%a0)
         bne.w   param_error
-        move.l  42(%a1),36(%a0)
+        bsr.w   card_base
+        move.l  %a2,36(%a0)
         moveq   #0,%d0
         bra.w   complete
 get_gray:
@@ -184,8 +297,8 @@ get_gray:
         moveq   #0,%d0
         bra.w   complete
 get_interrupt:
-        movea.l 42(%a1),%a2
-        adda.l  #0x00800001,%a2
+        bsr.w   card_base
+        adda.l  #0x00080001,%a2
         move.b  (%a2),28(%a0)
         moveq   #0,%d0
 
@@ -203,7 +316,7 @@ shutdown_callback:
         bhi.s   shutdown_done
         addq.b  #1,%d0                 | mailbox commands are 1 and 2
         movea.l service_base(%pc),%a0
-        adda.l  #0x00900010,%a0
+        adda.l  #0x00090010,%a0
         move.b  %d0,(%a0)
 shutdown_done:
         movem.l (%sp)+,%d0-%d1/%a0-%a1
@@ -214,3 +327,5 @@ service_base:
 shutdown_installed:
         .byte   0
         .even
+driver_storage:
+        .space  20

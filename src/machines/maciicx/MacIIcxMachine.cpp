@@ -1,4 +1,5 @@
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/rom/RomPatcher.h"
 
 #include <QFile>
@@ -57,7 +58,14 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
         if (asserted) m_nubusIrqState &= static_cast<std::uint8_t>(~mask);
         else m_nubusIrqState |= mask;
         updateViaInputs();
-        m_via2.setCa1(!asserted);
+        if (asserted) {
+            // Match MAME's missed-ack handling: every slot reassertion must
+            // create a new falling CA1 edge even if the line was already low.
+            m_via2.setCa1(true);
+            m_via2.setCa1(false);
+        } else {
+            m_via2.setCa1(true);
+        }
         updateInterrupts();
     });
     updateViaInputs();
@@ -138,6 +146,7 @@ void MacIIcxMachine::reset()
     std::fill(m_ram.begin(), m_ram.end(), 0);
     m_nubusIrqState = 0x3f;
     m_adbIrqPending = false;
+    m_hostMousePositionValid = false;
     m_glueRamSize = 0;
     m_viaCycleRemainder = 0;
     m_ioStatistics = {};
@@ -475,9 +484,26 @@ void MacIIcxMachine::applyInput(const core::GuestInputEvent& event)
         break;
     case core::GuestInputEvent::Type::ResetKeyboard:
         m_adbTransceiver.resetInput();
+        m_hostMousePositionValid = false;
         break;
-    case core::GuestInputEvent::Type::MousePosition:
+    case core::GuestInputEvent::Type::MousePosition: {
+        const auto x = static_cast<std::int16_t>(event.first);
+        const auto y = static_cast<std::int16_t>(event.second);
+        std::shared_ptr<devices::video::nubus::CuteMacVideoCard> integratedVideo;
+        for (int slot = 9; slot <= 14 && !integratedVideo; ++slot) {
+            integratedVideo = std::dynamic_pointer_cast<devices::video::nubus::CuteMacVideoCard>(m_nubus.card(slot));
+        }
+        if (integratedVideo && integratedVideo->absolutePointerEnabled()) {
+            integratedVideo->setHostPointerPosition(x, y);
+        } else if (m_hostMousePositionValid) {
+            m_adbTransceiver.moveMouse(static_cast<std::int16_t>(x - m_hostMouseX),
+                static_cast<std::int16_t>(y - m_hostMouseY));
+        }
+        m_hostMouseX = x;
+        m_hostMouseY = y;
+        m_hostMousePositionValid = true;
         break;
+    }
     }
 }
 

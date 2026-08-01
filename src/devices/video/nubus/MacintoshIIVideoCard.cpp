@@ -10,7 +10,11 @@ namespace {
 
 constexpr std::uint32_t localMask = 0x000fffff;
 constexpr std::uint32_t declarationRomBase = 0x00ffc000;
-constexpr std::uint64_t cyclesPerVbl = 260608;
+// IIcx CPU clock (15.6672 MHz) scaled to the card's MAME timing:
+// 25.175 MHz pixel clock, 800 pixels x 525 lines per frame.
+constexpr std::uint64_t cyclesPerVbl = 261379;
+constexpr std::uint64_t vblankDurationCycles = (cyclesPerVbl * 45) / 525;
+constexpr std::uint64_t vblankStartDelayCycles = cyclesPerVbl / 525;
 
 int strideForMode(int mode)
 {
@@ -76,15 +80,34 @@ void MacintoshIIVideoCard::reset()
     m_height = 480;
     m_vblEnabled = false;
     m_vblCycles = cyclesPerVbl;
+    m_vblankCycles = 0;
+    m_vblankStartCycles = 0;
+    m_vblStatusReads = 0;
+    m_vblAcks = 0;
+    m_vblAssertions = 0;
     setIrq(false);
 }
 
 void MacintoshIIVideoCard::tick(std::uint64_t cycles)
 {
+    m_vblankCycles = cycles >= m_vblankCycles ? 0 : m_vblankCycles - cycles;
+    if (m_vblankStartCycles != 0) {
+        if (cycles >= m_vblankStartCycles) {
+            const auto remainder = cycles - m_vblankStartCycles;
+            m_vblankStartCycles = 0;
+            m_vblankCycles = remainder >= vblankDurationCycles ? 0 : vblankDurationCycles - remainder;
+        } else {
+            m_vblankStartCycles -= cycles;
+        }
+    }
     if (cycles >= m_vblCycles) {
         const auto remainder = cycles - m_vblCycles;
         m_vblCycles = cyclesPerVbl - (remainder % cyclesPerVbl);
-        if (m_vblEnabled) setIrq(true);
+        m_vblankStartCycles = vblankStartDelayCycles;
+        if (m_vblEnabled) {
+            ++m_vblAssertions;
+            setIrq(true);
+        }
     } else {
         m_vblCycles -= cycles;
     }
@@ -98,7 +121,12 @@ std::uint8_t MacintoshIIVideoCard::read8(std::uint32_t offset)
     const auto local = offset & localMask;
     if (local < 0x80000) return static_cast<std::uint8_t>(m_vram[static_cast<qsizetype>(local)]) ^ 0xffU;
     if (local >= 0x90000 && local < 0x90020) return readRamdac((local - 0x90000) >> 2);
-    if (local >= 0xd0000 && local < 0xe0000) return m_vblCycles < (cyclesPerVbl / 12) ? 0x00 : 0xff;
+    if (local >= 0xd0000 && local < 0xe0000) {
+        ++m_vblStatusReads;
+        // MAME maps vbl_r on the low byte of the 32-bit NuBus word only.
+        if ((local & 3) != 3) return 0xff;
+        return m_vblankCycles != 0 ? 0x00 : 0xff;
+    }
     return 0xff;
 }
 
@@ -109,17 +137,42 @@ void MacintoshIIVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         m_vram[static_cast<qsizetype>(local)] = static_cast<char>(value ^ 0xffU);
     } else if (local >= 0x80000 && local < 0x90000) {
         const auto index = static_cast<std::size_t>(((local - 0x80000) >> 2) & 0x0f);
+        // TFB is a 32-bit handler in the original card. For byte/word cycles,
+        // undriven low data lanes read high before the board-wide inversion.
+        // Preserve that behavior even though the machine bus decomposes wider
+        // transfers into byte callbacks.
+        if ((local & 3) == 1 || (local & 3) == 2) value = 0x00;
         m_tfbRegisters[index] = value ^ 0xffU;
         if (index == 15) updateMode();
     } else if (local >= 0x90000 && local < 0x90020) {
-        writeRamdac((local - 0x90000) >> 2, value);
+        // Bt453 is physically connected to NuBus byte lane 0 only.
+        if ((local & 3) == 0) writeRamdac((local - 0x90000) >> 2, value);
     } else if (local >= 0xa0000 && local < 0xb0000) {
         if ((local & 0x10) != 0) {
             m_vblEnabled = false;
         } else {
             m_vblEnabled = true;
+            ++m_vblAcks;
             setIrq(false);
         }
+    }
+}
+
+void MacintoshIIVideoCard::write32(std::uint32_t offset, std::uint32_t value)
+{
+    const auto local = offset & localMask;
+    if (local < 0x80000) {
+        for (int lane = 0; lane < 4; ++lane) {
+            m_vram[static_cast<qsizetype>(local + lane)] = static_cast<char>((value >> (24 - lane * 8)) ^ 0xffU);
+        }
+    } else if (local >= 0x80000 && local < 0x90000) {
+        const auto index = static_cast<std::size_t>(((local - 0x80000) >> 2) & 0x0f);
+        m_tfbRegisters[index] = static_cast<std::uint8_t>(value ^ 0xffffffffU);
+        if (index == 15) updateMode();
+    } else if (local >= 0x90000 && local < 0x90020) {
+        writeRamdac((local - 0x90000) >> 2, static_cast<std::uint8_t>(value >> 24));
+    } else if (local >= 0xa0000 && local < 0xb0000) {
+        write8(local, static_cast<std::uint8_t>(value >> 24));
     }
 }
 
@@ -170,22 +223,31 @@ void MacintoshIIVideoCard::writeRamdac(std::uint32_t offset, std::uint8_t value)
     }
 }
 
-std::uint8_t MacintoshIIVideoCard::readRamdac(std::uint32_t offset) const
+std::uint8_t MacintoshIIVideoCard::readRamdac(std::uint32_t offset)
 {
     if ((offset & 3) == 1 || (offset & 3) == 3) return static_cast<std::uint8_t>(m_paletteAddress) ^ 0xffU;
+    if ((offset & 3) == 2) {
+        const auto color = m_palette[m_paletteAddress];
+        const auto shift = 16 - (m_paletteComponent * 8);
+        const auto value = static_cast<std::uint8_t>(color >> shift);
+        if (++m_paletteComponent == 3) {
+            m_paletteComponent = 0;
+            m_paletteAddress = (m_paletteAddress + 1) & 0xff;
+        }
+        return value ^ 0xffU;
+    }
     return 0xff;
 }
 
 void MacintoshIIVideoCard::updateMode()
 {
     m_mode = (m_tfbRegisters[15] >> 4) & 3;
-    const auto halfline = (m_tfbRegisters[12] | ((m_tfbRegisters[11] >> 7) << 8)) + 2;
-    const auto hpixels = ((m_tfbRegisters[14] << 2) | ((m_tfbRegisters[13] >> 6) & 3)) + 2;
-    const auto vlines = ((m_tfbRegisters[6] << 3) | ((m_tfbRegisters[5] >> 5) & 7)) + 1;
-    const auto width = (halfline + hpixels) * (16 >> m_mode);
-    const auto height = vlines / 2;
-    if (width >= 320 && width <= 2048) m_width = width;
-    if (height >= 200 && height <= 1200) m_height = height;
+    // The 630-0153 is a fixed 640x480 card. The TFB timing registers describe
+    // blanking and pixel-clock timing as well as the visible raster; treating
+    // arbitrary intermediate register programming as a new framebuffer size
+    // makes Finder's depth switch publish a transient, garbled 1412x808 frame.
+    m_width = 640;
+    m_height = 480;
 }
 
 } // namespace cutemac::devices::video::nubus

@@ -11,10 +11,11 @@ namespace cutemac::devices::video::nubus {
 
 class CuteMacVideoCard final : public devices::nubus::NuBusCard {
 public:
-    static constexpr std::uint32_t guestServicesBase = 0x00900000;
+    static constexpr std::uint32_t guestServicesBase = 0x00090000;
     static constexpr std::uint32_t guestServicesCommand = guestServicesBase + 0x10;
+    static constexpr std::uint32_t guestPointerBase = guestServicesBase + 0x18;
 
-    CuteMacVideoCard(int width, int height, int depth, int vramMiB, bool acceleration);
+    CuteMacVideoCard(int width, int height, int depth, int vramMiB, bool acceleration, bool absolutePointer = true);
 
     [[nodiscard]] QString id() const override;
     void reset() override;
@@ -24,6 +25,8 @@ public:
     [[nodiscard]] VideoFrame videoFrame() const override;
     [[nodiscard]] core::GuestPowerRequest takePowerRequest() override;
     [[nodiscard]] const QByteArray& declarationRom() const { return m_declarationRom; }
+    [[nodiscard]] bool absolutePointerEnabled() const { return m_absolutePointer; }
+    void setHostPointerPosition(std::int16_t x, std::int16_t y);
 
 private:
     [[nodiscard]] static QByteArray buildDeclarationRom(int width, int height, int vramBytes, int maximumDepth);
@@ -36,6 +39,7 @@ private:
     int m_depth;
     int m_maximumDepth;
     bool m_acceleration;
+    bool m_absolutePointer;
     QByteArray m_vram;
     QByteArray m_declarationRom;
     QVector<std::uint32_t> m_palette;
@@ -43,6 +47,10 @@ private:
     std::array<std::uint8_t, 3> m_paletteLatch {};
     bool m_vblEnabled = false;
     std::uint64_t m_vblCycles = 0;
+    std::int16_t m_hostPointerX = 0;
+    std::int16_t m_hostPointerY = 0;
+    std::uint8_t m_hostPointerSequence = 0;
+    bool m_hostPointerValid = false;
     core::GuestPowerRequest m_powerRequest = core::GuestPowerRequest::None;
 };
 

@@ -118,6 +118,9 @@ private:
     bool m_romLoaded = false;
     bool m_overlay = true;
     bool m_adbIrqPending = false;
+    bool m_hostMousePositionValid = false;
+    std::int16_t m_hostMouseX = 0;
+    std::int16_t m_hostMouseY = 0;
     std::uint8_t m_nubusIrqState = 0x3f;
     std::uint8_t m_glueRamSize = 0;
     int m_viaCycleRemainder = 0;

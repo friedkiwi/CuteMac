@@ -151,6 +151,9 @@ M68kCpuCore::RegisterSnapshot M68kCpuCore::registers() const
     snapshot.isp = m68k_get_reg(nullptr, M68K_REG_ISP);
     snapshot.msp = m68k_get_reg(nullptr, M68K_REG_MSP);
     snapshot.vbr = m68k_get_reg(nullptr, M68K_REG_VBR);
+    snapshot.pmmuEnabled = m68k_get_pmmu_enabled() != 0;
+    snapshot.pmmuTc = m68k_get_pmmu_tc();
+    snapshot.physicalPc = m68k_translate_address(snapshot.pc);
     return snapshot;
 }
 

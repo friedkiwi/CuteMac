@@ -19,6 +19,9 @@ public:
         std::uint32_t isp = 0;
         std::uint32_t msp = 0;
         std::uint32_t vbr = 0;
+        bool pmmuEnabled = false;
+        std::uint32_t pmmuTc = 0;
+        std::uint32_t physicalPc = 0;
     };
 
     enum class Model {

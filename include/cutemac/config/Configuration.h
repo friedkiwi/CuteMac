@@ -44,6 +44,7 @@ struct NuBusDeviceConfiguration {
     int depth = 8;
     int vramMiB = 4;
     bool acceleration = true;
+    bool absolutePointer = true;
 };
 
 [[nodiscard]] QString runtimeSpeedName(RuntimeSpeed speed);

@@ -20,6 +20,8 @@ public:
     void tick(std::uint64_t cycles);
     [[nodiscard]] std::uint8_t read8(std::uint32_t address);
     void write8(std::uint32_t address, std::uint8_t value);
+    void write16(std::uint32_t address, std::uint16_t value);
+    void write32(std::uint32_t address, std::uint32_t value);
     void setSlotIrqCallback(SlotIrqCallback callback) { m_slotIrqCallback = std::move(callback); }
 
     [[nodiscard]] static int standardSlot(std::uint32_t address);

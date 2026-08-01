@@ -40,8 +40,9 @@ void NuBusBus::tick(std::uint64_t cycles)
 
 int NuBusBus::standardSlot(std::uint32_t address)
 {
-    if ((address & 0xf0000000U) != 0xf0000000U) return -1;
-    const auto slot = static_cast<int>((address >> 24) & 0x0f);
+    int slot = -1;
+    if ((address & 0xf0000000U) == 0xf0000000U) slot = static_cast<int>((address >> 24) & 0x0f);
+    else if (address >= 0x00900000U && address <= 0x00efffffU) slot = static_cast<int>((address >> 20) & 0x0f);
     return slot >= 9 && slot <= 14 ? slot : -1;
 }
 
@@ -49,14 +50,31 @@ std::uint8_t NuBusBus::read8(std::uint32_t address)
 {
     const auto slot = standardSlot(address);
     const auto target = card(slot);
-    return target ? target->read8(address & 0x00ffffffU) : 0xff;
+    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    return target ? target->read8(offset) : 0xff;
 }
 
 void NuBusBus::write8(std::uint32_t address, std::uint8_t value)
 {
     const auto slot = standardSlot(address);
     const auto target = card(slot);
-    if (target) target->write8(address & 0x00ffffffU, value);
+    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    if (target) target->write8(offset, value);
 }
+
+void NuBusBus::write16(std::uint32_t address, std::uint16_t value)
+{
+    const auto target = card(standardSlot(address));
+    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    if (target) target->write16(offset, value);
+}
+
+void NuBusBus::write32(std::uint32_t address, std::uint32_t value)
+{
+    const auto target = card(standardSlot(address));
+    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    if (target) target->write32(offset, value);
+}
+
 
 } // namespace cutemac::devices::nubus

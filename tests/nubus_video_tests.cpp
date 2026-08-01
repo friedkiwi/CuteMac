@@ -26,40 +26,60 @@ int main()
     CuteMacVideoCard virtualCard(832, 624, 8, 4, true);
     ok &= expect(virtualCard.declarationRom().size() == 4096, "CuteMac declaration ROM size");
     ok &= expect(virtualCard.declarationRom().mid(4090, 4).toHex() == QByteArray("5a932bc7"), "CuteMac declaration ROM test pattern");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc00800002")),
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc00080002")),
         "CuteMac declaration ROM driver must expose palette operations");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray(".CuteMac\0", 9))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a895")),
         "CuteMac declaration ROM must advertise guest services and install its shutdown callback");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("70004e7570ff")),
-        "CuteMac video Open must not call system traps during primary initialization");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("a075"))
+            && virtualCard.declarationRom().contains(QByteArray::fromHex("a076"))
+            && virtualCard.declarationRom().contains(QByteArray::fromHex("20780d284e90")),
+        "CuteMac video driver must install, remove, and dispatch its slot VBL interrupt");
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
         "CuteMac video must reset to one-bit indexed mode");
     ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
         "CuteMac one-bit mode must span the hardware color table");
-    virtualCard.write8(0x00800000, 3);
+    virtualCard.write8(0x00080000, 3);
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must select eight-bit indexed mode");
-    virtualCard.write8(0x00800000, 4);
+    virtualCard.write8(0x00080000, 4);
     ok &= expect(virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must reject depths above the configured maximum");
-    virtualCard.write8(0x00800002, 0x2a);
-    virtualCard.write8(0x00800003, 0x12);
-    virtualCard.write8(0x00800004, 0x34);
-    virtualCard.write8(0x00800005, 0x56);
+    virtualCard.write8(0x00080002, 0x2a);
+    virtualCard.write8(0x00080003, 0x12);
+    virtualCard.write8(0x00080004, 0x34);
+    virtualCard.write8(0x00080005, 0x56);
     ok &= expect(virtualCard.videoFrame().colorTable[0x2a] == 0xff123456U,
         "CuteMac RAMDAC must publish guest-programmed indexed color");
-    virtualCard.write8(0x00800002, 0x2a);
-    ok &= expect(virtualCard.read8(0x00800003) == 0x12 && virtualCard.read8(0x00800004) == 0x34
-            && virtualCard.read8(0x00800005) == 0x56,
+    virtualCard.write8(0x00080002, 0x2a);
+    ok &= expect(virtualCard.read8(0x00080003) == 0x12 && virtualCard.read8(0x00080004) == 0x34
+            && virtualCard.read8(0x00080005) == 0x56,
         "CuteMac RAMDAC palette entries must be readable by GetEntries");
     ok &= expect(virtualCard.read8(CuteMacVideoCard::guestServicesBase) == 'C'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 1) == 'T'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 2) == 'M'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 3) == 'C'
-            && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 4) == 1
-            && (virtualCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 1) != 0,
-        "CuteMac guest-services mailbox identity and clean-shutdown capability");
+            && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 4) == 2
+            && (virtualCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 3) == 3,
+        "CuteMac guest-services mailbox identity, shutdown, and absolute-pointer capabilities");
+    virtualCard.setHostPointerPosition(900, -20);
+    ok &= expect(virtualCard.read8(CuteMacVideoCard::guestPointerBase) == 1
+            && virtualCard.read8(CuteMacVideoCard::guestPointerBase + 1) == 1
+            && virtualCard.read8(CuteMacVideoCard::guestPointerBase + 2) == 0x03
+            && virtualCard.read8(CuteMacVideoCard::guestPointerBase + 3) == 0x3f
+            && virtualCard.read8(CuteMacVideoCard::guestPointerBase + 4) == 0x00
+            && virtualCard.read8(CuteMacVideoCard::guestPointerBase + 5) == 0x00,
+        "CuteMac absolute pointer mailbox must clamp and expose big-endian coordinates");
+    virtualCard.setHostPointerPosition(900, -20);
+    ok &= expect(virtualCard.read8(CuteMacVideoCard::guestPointerBase + 1) == 1,
+        "stationary absolute pointer updates must not retrigger the guest cursor task");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31ea0004082831ea0002082a")),
+        "CuteMac video slot VBL must copy absolute pointer coordinates into MTemp");
+    CuteMacVideoCard relativeCard(640, 480, 8, 4, true, false);
+    relativeCard.setHostPointerPosition(100, 120);
+    ok &= expect((relativeCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 2) == 0
+            && relativeCard.read8(CuteMacVideoCard::guestPointerBase) == 0,
+        "disabled absolute-pointer integration must not advertise or publish host coordinates");
     virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 1);
     ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::PowerOff
             && virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
@@ -92,6 +112,32 @@ int main()
     authenticCard.write8(0x0008003c, 0xcf);
     ok &= expect(authenticCard.videoFrame().storage == PixelStorage::Indexed && authenticCard.videoFrame().bitsPerPixel == 8,
         "authentic TFB mode register");
+    authenticCard.write8(0x00080030, 0x00);
+    authenticCard.write8(0x00080038, 0x00);
+    authenticCard.write8(0x00080018, 0x00);
+    authenticCard.write8(0x0008003c, 0xdf);
+    ok &= expect(authenticCard.videoFrame().width == 640 && authenticCard.videoFrame().height == 480
+            && authenticCard.videoFrame().bitsPerPixel == 4,
+        "authentic card depth changes must preserve its fixed 640x480 raster");
+    authenticCard.write8(0x00090004, 0xf5);
+    authenticCard.write8(0x00090008, 0xed);
+    authenticCard.write8(0x00090008, 0xcb);
+    authenticCard.write8(0x00090008, 0xa9);
+    authenticCard.write8(0x00090004, 0xf5);
+    ok &= expect(authenticCard.read8(0x00090008) == 0xed
+            && authenticCard.read8(0x00090008) == 0xcb
+            && authenticCard.read8(0x00090008) == 0xa9,
+        "authentic Bt453 palette entries must be readable by GetEntries");
+    authenticCard.tick(261379);
+    ok &= expect(authenticCard.read8(0x000d0000) == 0xff
+            && authenticCard.read8(0x000d0003) == 0xff,
+        "authentic VBL IRQ must lead the active-low status by one scanline");
+    authenticCard.tick(261379 / 525);
+    ok &= expect(authenticCard.read8(0x000d0003) == 0x00,
+        "authentic VBL status must become active after the scanline lead");
+    authenticCard.tick((261379 * 45) / 525);
+    ok &= expect(authenticCard.read8(0x000d0003) == 0xff,
+        "authentic VBL status must clear after the blanking interval");
 
     return ok ? 0 : 1;
 }

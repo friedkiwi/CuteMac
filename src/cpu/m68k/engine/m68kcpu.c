@@ -732,6 +732,33 @@ void m68k_set_reg(m68k_register_t regnum, unsigned int value)
 	}
 }
 
+unsigned int m68k_get_pmmu_enabled(void)
+{
+#if M68K_EMULATE_PMMU
+	return PMMU_ENABLED ? 1 : 0;
+#else
+	return 0;
+#endif
+}
+
+unsigned int m68k_get_pmmu_tc(void)
+{
+#if M68K_EMULATE_PMMU
+	return m68ki_cpu.mmu_tc;
+#else
+	return 0;
+#endif
+}
+
+unsigned int m68k_translate_address(unsigned int address)
+{
+#if M68K_EMULATE_PMMU
+	if (PMMU_ENABLED)
+		return pmmu_translate_addr(address);
+#endif
+	return ADDRESS_68K(address);
+}
+
 /* Set the callbacks */
 void m68k_set_int_ack_callback(int  (*callback)(int int_level))
 {

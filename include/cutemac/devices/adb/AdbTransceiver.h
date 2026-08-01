@@ -15,6 +15,10 @@ public:
         int transferCycles;
         bool commandPending;
         bool transmittingFromVia;
+        int pendingMouseDx;
+        int pendingMouseDy;
+        std::uint8_t keyboardAddress;
+        std::uint8_t mouseAddress;
     };
     using ReceiveByteCallback = std::function<void(std::uint8_t)>;
     using IrqCallback = std::function<void(bool)>;
@@ -35,6 +39,8 @@ public:
 
 private:
     void prepareResponse(std::uint8_t command);
+    void completeListen();
+    void requestAutoPoll();
     void transferByte();
 
     ReceiveByteCallback m_receiveByte;
@@ -46,7 +52,16 @@ private:
     int m_transferCycles = 0;
     bool m_commandPending = false;
     bool m_transmittingFromVia = false;
+    bool m_receivingListenByte = false;
+    bool m_autoWakePending = false;
+    std::uint8_t m_listenAddress = 0;
+    std::deque<std::uint8_t> m_listenBytes;
+    std::uint8_t m_keyboardAddress = 2;
+    std::uint8_t m_mouseAddress = 3;
+    std::uint8_t m_keyboardHandler = 0x22;
+    std::uint8_t m_mouseHandler = 0x23;
     std::deque<std::uint8_t> m_keyEvents;
+    std::deque<bool> m_mouseButtonEvents;
     int m_mouseDx = 0;
     int m_mouseDy = 0;
     bool m_mouseButton = false;

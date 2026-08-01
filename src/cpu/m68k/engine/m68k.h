@@ -384,6 +384,11 @@ unsigned int m68k_get_reg(void* context, m68k_register_t reg);
 /* Poke values into the internals of the currently running CPU context */
 void m68k_set_reg(m68k_register_t reg, unsigned int value);
 
+/* 68030 PMMU inspection for debugger frontends. */
+unsigned int m68k_get_pmmu_enabled(void);
+unsigned int m68k_get_pmmu_tc(void);
+unsigned int m68k_translate_address(unsigned int address);
+
 /* Check if an instruction is valid for the specified CPU type */
 unsigned int m68k_is_valid_instruction(unsigned int instruction, unsigned int cpu_type);
 
