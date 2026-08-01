@@ -1,0 +1,13 @@
+build*/
+cmake-build-*/
+.cache/
+.qt/
+
+# Local scratch space for experiments, notes, downloaded manuals, and research.
+work/
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

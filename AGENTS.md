@@ -1,0 +1,34 @@
+# CuteMac Agent Instructions
+
+## Project Direction
+
+- Build CuteMac as a modular classic Macintosh emulator using Qt 6 and CMake.
+- Keep WebAssembly support in mind for all design choices; avoid platform-specific assumptions unless isolated behind small adapters.
+- Primary development happens on WSL2, with intended targets of Windows, macOS on Intel/aarch64, Linux, and wasm.
+- Target machines are 68000-era Macs, Macintosh SE/30, Macintosh Quadra 800, and Power Macintosh 6100.
+- Support original, unmodified ROM files supplied by users. Do not embed copyrighted ROM content.
+- Configuration files should use TOML syntax and should evolve toward a WinUAE/VMware Workstation style configuration workflow.
+
+## Repository Practices
+
+- Keep `README.md` concise and update it when setup or project direction materially changes.
+- Maintain this `AGENTS.md` with persistent project instructions as decisions are made.
+- Use the ignored `work/` directory for experiments, temporary docs, research artifacts, downloaded references, and throwaway notes.
+- Do not commit contents of `work/`.
+- Push git changes to `git@github.com:friedkiwi/CuteMac.git` after each completed change set when credentials/network allow it.
+
+## Architecture Guidelines
+
+- Separate CPU emulation cores from machine definitions and reusable hardware devices.
+- Compose machine models from reusable devices where practical, for example SCSI, ADB, VIA, SCC, video, sound, memory, storage, and bus glue.
+- Keep machine-specific behavior in machine profile or chipset modules rather than spreading conditionals through shared device code.
+- Prefer clear interfaces between emulator core, devices, machine profiles, configuration, and Qt UI.
+- Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
+- Avoid starting emulator implementation before the scaffold, build system, and source organization are in place.
+
+## Build And Portability
+
+- Use modern CMake targets and Qt 6 CMake integration.
+- Avoid native-only APIs in shared code paths. Put host-specific code behind platform adapters.
+- Keep wasm compatibility in mind when adding threading, filesystem, networking, timers, OpenGL/graphics, or JIT-related code.
+- Verify changes with CMake builds when possible.
