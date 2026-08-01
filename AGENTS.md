@@ -28,7 +28,8 @@
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.
 - Keep debug-only interactive tools in `CuteMacDebugSession` so normal emulator sessions stay lean.
-- `CuteMacDebugSession` owns bringup tooling: register/memory/disassembly commands, framebuffer export, Mac Plus sound-buffer capture export, bus logs, and the current minimal GDB remote stub.
+- `CuteMacDebugSession` owns bringup tooling: register/memory/disassembly commands, framebuffer export/probing, Mac Plus sound-buffer capture export, bus logs, trace rings, and the current minimal GDB remote stub. It uses libreadline for history and tab completion.
+- Prefer the debug trace framework over ad hoc prints. Useful probes include `trace pc|irq|trap|driver|lowmem|iwm|floppy|timeline on`, `pc-trace`, `irq-trace`, `trap-trace`, `driver-trace`, `timeline`, `lowmem watch <name>`, `mem-find`, `mem-snapshot`, `memory-diff`, `bootblock verify`, `floppy last-window`, and `floppy export-window`.
 - The GDB stub is intentionally minimal: it supports m68k register reads, memory read/write, single-step, continue, and software breakpoints. Full register writes and PC mutation are still future work.
 - Use `QStandardPaths` for cross-platform profile, ROM, and disk-image defaults.
 - Mac Plus bringup currently reaches the missing-floppy screen with the included user-supplied ROM profile. The startup sound can be exported from captured writes to the ROM sound buffer; live audio hardware emulation is still not complete.

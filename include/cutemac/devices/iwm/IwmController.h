@@ -3,7 +3,9 @@
 #include <array>
 #include <cstdint>
 
+#include <QByteArray>
 #include <QString>
+#include <QStringList>
 
 #include "cutemac/devices/floppy/FloppyDiskImage.h"
 
@@ -46,6 +48,10 @@ public:
     [[nodiscard]] DebugState debugState() const;
     [[nodiscard]] QByteArray currentTrackBytesForDebug() const;
     [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
+    void setTraceEnabled(bool enabled);
+    void clearTrace();
+    [[nodiscard]] QStringList traceEvents() const;
+    [[nodiscard]] QByteArray lastNibblesForDebug() const;
 
     [[nodiscard]] bool q6() const;
     [[nodiscard]] bool q7() const;
@@ -72,6 +78,7 @@ private:
     [[nodiscard]] std::uint8_t lineMask() const;
     [[nodiscard]] floppy::FloppyDiskImage& selectedDrive();
     [[nodiscard]] const floppy::FloppyDiskImage& selectedDrive() const;
+    void appendTraceEvent(const QString& event);
 
     std::array<bool, 8> m_lines {};
     floppy::FloppyDiskImage m_internalDrive;
@@ -86,6 +93,8 @@ private:
     std::uint64_t m_statusReads = 0;
     std::uint64_t m_handshakeReads = 0;
     std::uint64_t m_dataWrites = 0;
+    bool m_traceEnabled = false;
+    QStringList m_traceEvents;
 };
 
 } // namespace cutemac::devices::iwm

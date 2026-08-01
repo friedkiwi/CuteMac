@@ -574,6 +574,26 @@ QByteArray MacPlusMachine::floppyTrackBytesForDebug(int track, int side) const
     return m_iwm.trackBytesForDebug(track, side);
 }
 
+void MacPlusMachine::setIwmTraceEnabled(bool enabled)
+{
+    m_iwm.setTraceEnabled(enabled);
+}
+
+void MacPlusMachine::clearIwmTrace()
+{
+    m_iwm.clearTrace();
+}
+
+QStringList MacPlusMachine::iwmTraceEvents() const
+{
+    return m_iwm.traceEvents();
+}
+
+QByteArray MacPlusMachine::iwmLastNibblesForDebug() const
+{
+    return m_iwm.lastNibblesForDebug();
+}
+
 devices::via6522::Via6522::DebugState MacPlusMachine::viaDebugState() const
 {
     return m_via.debugState();

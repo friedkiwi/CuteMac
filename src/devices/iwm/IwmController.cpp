@@ -2,6 +2,12 @@
 
 namespace cutemac::devices::iwm {
 
+namespace {
+
+constexpr qsizetype maxTraceEvents = 4096;
+
+} // namespace
+
 void IwmController::reset()
 {
     m_lines.fill(false);
@@ -102,6 +108,33 @@ QByteArray IwmController::trackBytesForDebug(int track, int side) const
     return selectedDrive().trackBytesForDebug(track, side);
 }
 
+void IwmController::setTraceEnabled(bool enabled)
+{
+    m_traceEnabled = enabled;
+    m_internalDrive.setTraceEnabled(enabled);
+    m_externalDrive.setTraceEnabled(enabled);
+}
+
+void IwmController::clearTrace()
+{
+    m_traceEvents.clear();
+    m_internalDrive.clearTrace();
+    m_externalDrive.clearTrace();
+}
+
+QStringList IwmController::traceEvents() const
+{
+    auto events = m_traceEvents;
+    events.append(m_internalDrive.traceEvents());
+    events.append(m_externalDrive.traceEvents());
+    return events;
+}
+
+QByteArray IwmController::lastNibblesForDebug() const
+{
+    return selectedDrive().lastNibblesForDebug();
+}
+
 bool IwmController::q6() const
 {
     return m_lines[Q6];
@@ -118,12 +151,25 @@ std::uint8_t IwmController::readRegister()
     switch (selector) {
     case 0x00:
         ++m_dataReads;
+        if (m_traceEnabled && (m_dataReads <= 32 || (m_dataReads % 256) == 0)) {
+            appendTraceEvent(QStringLiteral("iwm data-read count=%1 track=%2 side=%3 drive=%4")
+                                 .arg(m_dataReads)
+                                 .arg(selectedDrive().currentTrack())
+                                 .arg(selectedDrive().currentSide())
+                                 .arg(m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal")));
+        }
         return selectedDrive().nextNibble();
     case 0x02: {
         ++m_statusReads;
         const auto modeBits = static_cast<std::uint8_t>(m_mode & 0x3f);
         const auto sense = driveSenseHigh() ? 0x80 : 0x00;
         m_status = static_cast<std::uint8_t>(sense | modeBits);
+        if (m_traceEnabled) {
+            appendTraceEvent(QStringLiteral("iwm status-read reg=0x%1 value=0x%2 drive=%3")
+                                 .arg(m_selectedDriveRegister, 2, 16, QLatin1Char('0'))
+                                 .arg(m_status, 2, 16, QLatin1Char('0'))
+                                 .arg(m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal")));
+        }
         return m_status;
     }
     case 0x01:
@@ -154,6 +200,7 @@ void IwmController::setLine(std::uint8_t line, bool on)
 
     if (line == Motor) {
         selectedDrive().setMotorOn(on);
+        appendTraceEvent(QStringLiteral("iwm motor=%1 drive=%2").arg(on ? QStringLiteral("on") : QStringLiteral("off"), m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal")));
     } else if (line == Ca0 || line == Ca1 || line == Ca2 || line == SelectDrive) {
         updateSelectedDriveRegister();
     } else if (line == Lstrb && wasOn && !on) {
@@ -166,10 +213,17 @@ void IwmController::updateSelectedDriveRegister()
     m_selectedDriveRegister = selectedDriveRegister();
     selectedDrive().setMotorOn(m_lines[Motor]);
     selectedDrive().setCurrentSide(m_sideSelect ? 1 : 0);
+    appendTraceEvent(QStringLiteral("iwm select reg=0x%1 drive=%2 side=%3")
+                         .arg(m_selectedDriveRegister, 2, 16, QLatin1Char('0'))
+                         .arg(m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal"))
+                         .arg(m_sideSelect ? 1 : 0));
 }
 
 void IwmController::applyDriveStrobe()
 {
+    appendTraceEvent(QStringLiteral("iwm strobe reg=0x%1 drive=%2")
+                         .arg(m_selectedDriveRegister, 2, 16, QLatin1Char('0'))
+                         .arg(m_lines[SelectDrive] ? QStringLiteral("external") : QStringLiteral("internal")));
     switch (m_selectedDriveRegister) {
     case 0x00:
         m_stepTowardTrackZero = false;
@@ -238,6 +292,17 @@ floppy::FloppyDiskImage& IwmController::selectedDrive()
 const floppy::FloppyDiskImage& IwmController::selectedDrive() const
 {
     return m_lines[SelectDrive] ? m_externalDrive : m_internalDrive;
+}
+
+void IwmController::appendTraceEvent(const QString& event)
+{
+    if (!m_traceEnabled) {
+        return;
+    }
+    if (m_traceEvents.size() == maxTraceEvents) {
+        m_traceEvents.removeFirst();
+    }
+    m_traceEvents.append(event);
 }
 
 std::uint8_t IwmController::lineMask() const

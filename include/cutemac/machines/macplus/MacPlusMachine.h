@@ -98,6 +98,10 @@ public:
     [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const;
     [[nodiscard]] devices::iwm::IwmController::DebugState iwmDebugState() const;
     [[nodiscard]] QByteArray floppyTrackBytesForDebug(int track, int side) const;
+    void setIwmTraceEnabled(bool enabled);
+    void clearIwmTrace();
+    [[nodiscard]] QStringList iwmTraceEvents() const;
+    [[nodiscard]] QByteArray iwmLastNibblesForDebug() const;
     [[nodiscard]] devices::via6522::Via6522::DebugState viaDebugState() const;
 
     void setMousePosition(std::int16_t x, std::int16_t y);

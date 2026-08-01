@@ -16,6 +16,8 @@ constexpr int encodedPayloadBytes = bytesPerSector + tagBytesPerSector;
 constexpr int tracksPerSide = 80;
 constexpr int raw400KBytes = 400 * 1024;
 constexpr int raw800KBytes = 800 * 1024;
+constexpr qsizetype maxTraceEvents = 4096;
+constexpr qsizetype maxLastNibbles = 4096;
 
 constexpr std::array<std::uint8_t, 64> gcrEncodeTable {
     0x96, 0x97, 0x9a, 0x9b, 0x9d, 0x9e, 0x9f, 0xa6,
@@ -249,6 +251,26 @@ std::uint8_t FloppyDiskImage::nextNibble()
 
     const auto value = static_cast<std::uint8_t>(m_trackCache.bytes[m_trackCache.cursor]);
     m_trackCache.cursor = (m_trackCache.cursor + 1) % m_trackCache.bytes.size();
+    if (m_traceEnabled) {
+        m_lastNibbles.append(static_cast<char>(value));
+        if (m_lastNibbles.size() > maxLastNibbles) {
+            m_lastNibbles.remove(0, m_lastNibbles.size() - maxLastNibbles);
+        }
+        m_traceShift = ((m_traceShift << 8) | value) & 0x00ffffff;
+        if (m_traceShift == 0x00d5aa96 || m_traceShift == 0x00d5aaad || m_traceShift == 0x00deaaff) {
+            if (m_traceEvents.size() == maxTraceEvents) {
+                m_traceEvents.removeFirst();
+            }
+            const auto mark = m_traceShift == 0x00d5aa96 ? QStringLiteral("addr")
+                : m_traceShift == 0x00d5aaad              ? QStringLiteral("data")
+                                                          : QStringLiteral("trailer");
+            m_traceEvents.append(QStringLiteral("floppy mark=%1 track=%2 side=%3 cursor=%4")
+                                     .arg(mark)
+                                     .arg(m_currentTrack)
+                                     .arg(m_currentSide)
+                                     .arg(m_trackCache.cursor));
+        }
+    }
     return value;
 }
 
@@ -276,6 +298,28 @@ FloppyDiskImage::DebugState FloppyDiskImage::debugState() const
 QByteArray FloppyDiskImage::trackBytesForDebug(int track, int side) const
 {
     return buildTrackBytes(std::clamp(track, 0, tracksPerSide - 1), m_doubleSided ? std::clamp(side, 0, 1) : 0);
+}
+
+void FloppyDiskImage::setTraceEnabled(bool enabled)
+{
+    m_traceEnabled = enabled;
+}
+
+void FloppyDiskImage::clearTrace()
+{
+    m_traceShift = 0;
+    m_traceEvents.clear();
+    m_lastNibbles.clear();
+}
+
+QStringList FloppyDiskImage::traceEvents() const
+{
+    return m_traceEvents;
+}
+
+QByteArray FloppyDiskImage::lastNibblesForDebug() const
+{
+    return m_lastNibbles;
 }
 
 bool FloppyDiskImage::loadRaw(const QString& path, const QByteArray& bytes, Kind kind)

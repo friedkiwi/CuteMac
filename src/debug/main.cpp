@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QMap>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStringList>
 #include <QTcpServer>
@@ -15,6 +16,8 @@
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -27,6 +30,38 @@ namespace {
 
 constexpr std::uint32_t macPlusScreenWidth = 512;
 constexpr std::uint32_t macPlusScreenHeight = 342;
+constexpr qsizetype maxDebugTraceEntries = 8192;
+
+QStringList g_completionWords;
+
+char* completionGenerator(const char* text, int state)
+{
+    static QStringList matches;
+    static qsizetype index = 0;
+    if (state == 0) {
+        matches.clear();
+        index = 0;
+        const auto prefix = QString::fromLocal8Bit(text).toLower();
+        for (const auto& word : g_completionWords) {
+            if (word.startsWith(prefix)) {
+                matches.append(word);
+            }
+        }
+    }
+    if (index >= matches.size()) {
+        return nullptr;
+    }
+    return ::strdup(matches[index++].toLocal8Bit().constData());
+}
+
+char** commandCompletion(const char* text, int start, int)
+{
+    rl_attempted_completion_over = 1;
+    if (start == 0) {
+        return rl_completion_matches(text, completionGenerator);
+    }
+    return rl_completion_matches(text, completionGenerator);
+}
 
 std::optional<std::uint32_t> parseNumber(const QString& text)
 {
@@ -90,6 +125,17 @@ QByteArray hexToBytes(const QString& hex)
         bytes.append(static_cast<char>(value));
     }
     return bytes;
+}
+
+std::uint32_t readBe32FromBytes(const QByteArray& bytes, qsizetype offset)
+{
+    if (offset + 4 > bytes.size()) {
+        return 0;
+    }
+    return (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset])) << 24)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 1])) << 16)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 2])) << 8)
+        | static_cast<std::uint8_t>(bytes[offset + 3]);
 }
 
 void appendBe32(QByteArray& bytes, std::uint32_t value)
@@ -396,6 +442,7 @@ public:
 
     int run()
     {
+        installCompletion();
         printBanner();
         while (true) {
             const std::unique_ptr<char, decltype(&std::free)> input(readline("cutemac-debug> "), &std::free);
@@ -417,6 +464,68 @@ public:
     }
 
 private:
+    struct TraceOptions {
+        bool pc = false;
+        bool irq = false;
+        bool trap = false;
+        bool driver = false;
+        bool lowmem = false;
+        bool screen = false;
+        bool sound = false;
+        bool iwm = false;
+        bool floppy = false;
+        bool timeline = false;
+    };
+
+    struct MemorySnapshot {
+        std::uint32_t address = 0;
+        QByteArray bytes;
+    };
+
+    static QStringList commandWords()
+    {
+        return {
+            QStringLiteral("regs"), QStringLiteral("state"), QStringLiteral("devices"),
+            QStringLiteral("step"), QStringLiteral("run"), QStringLiteral("run-until"),
+            QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("mem-find"),
+            QStringLiteral("mem-snapshot"), QStringLiteral("memory-diff"),
+            QStringLiteral("write8"), QStringLiteral("write16"), QStringLiteral("write32"),
+            QStringLiteral("break"), QStringLiteral("delete"), QStringLiteral("breaks"),
+            QStringLiteral("watch"), QStringLiteral("lowmem"), QStringLiteral("bus"),
+            QStringLiteral("vectors"), QStringLiteral("globals"), QStringLiteral("rom"),
+            QStringLiteral("rom-symbols"), QStringLiteral("screen"), QStringLiteral("sound"),
+            QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("disk"),
+            QStringLiteral("floppy"), QStringLiteral("mouse"), QStringLiteral("key"),
+            QStringLiteral("trace"), QStringLiteral("pc-trace"), QStringLiteral("trap-trace"),
+            QStringLiteral("irq-trace"), QStringLiteral("driver-trace"), QStringLiteral("timeline"),
+            QStringLiteral("bootblock"), QStringLiteral("gdb"), QStringLiteral("script"),
+            QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit"),
+            QStringLiteral("on"), QStringLiteral("off"), QStringLiteral("status"),
+            QStringLiteral("dump"), QStringLiteral("clear"), QStringLiteral("save"),
+            QStringLiteral("export"), QStringLiteral("export-track"), QStringLiteral("export-window"),
+            QStringLiteral("scan"), QStringLiteral("last-window"), QStringLiteral("verify"),
+            QStringLiteral("probe"), QStringLiteral("hash"), QStringLiteral("capture-hash"),
+            QStringLiteral("capture-export"), QStringLiteral("clear-capture"),
+            QStringLiteral("insert"), QStringLiteral("eject"), QStringLiteral("read"),
+            QStringLiteral("write"), QStringLiteral("rw"), QStringLiteral("all"),
+            QStringLiteral("symbols"), QStringLiteral("load-symbols"),
+        };
+    }
+
+    void installCompletion()
+    {
+        g_completionWords = commandWords();
+        for (auto it = m_lowMemoryNames.cbegin(); it != m_lowMemoryNames.cend(); ++it) {
+            g_completionWords.append(it.key());
+        }
+        for (auto it = m_symbols.cbegin(); it != m_symbols.cend(); ++it) {
+            g_completionWords.append(it.key());
+        }
+        g_completionWords.removeDuplicates();
+        g_completionWords.sort();
+        rl_attempted_completion_function = commandCompletion;
+    }
+
     void printBanner()
     {
         m_out << "CuteMacDebugSession\n";
@@ -458,6 +567,12 @@ private:
             disassemble(parts);
         } else if (command == QStringLiteral("mem")) {
             dumpMemory(parts);
+        } else if (command == QStringLiteral("mem-find")) {
+            findMemory(parts);
+        } else if (command == QStringLiteral("mem-snapshot")) {
+            snapshotMemory(parts);
+        } else if (command == QStringLiteral("memory-diff")) {
+            diffMemory(parts);
         } else if (command.startsWith(QStringLiteral("write"))) {
             writeMemory(command, parts);
         } else if (command == QStringLiteral("break")) {
@@ -476,6 +591,8 @@ private:
             printVectors();
         } else if (command == QStringLiteral("globals")) {
             printGlobals();
+        } else if (command == QStringLiteral("lowmem")) {
+            handleLowMemory(parts);
         } else if (command == QStringLiteral("screen")) {
             handleScreen(parts);
         } else if (command == QStringLiteral("sound")) {
@@ -492,12 +609,26 @@ private:
             handleKey(parts);
         } else if (command == QStringLiteral("trace")) {
             configureTrace(parts);
+        } else if (command == QStringLiteral("pc-trace")) {
+            dumpTraceRing(QStringLiteral("pc"), m_pcTrace, parts);
+        } else if (command == QStringLiteral("trap-trace")) {
+            dumpTraceRing(QStringLiteral("trap"), m_trapTrace, parts);
+        } else if (command == QStringLiteral("irq-trace")) {
+            dumpTraceRing(QStringLiteral("irq"), m_irqTrace, parts);
+        } else if (command == QStringLiteral("driver-trace")) {
+            dumpTraceRing(QStringLiteral("driver"), m_driverTrace, parts);
+        } else if (command == QStringLiteral("timeline")) {
+            dumpTraceRing(QStringLiteral("timeline"), m_timeline, parts);
+        } else if (command == QStringLiteral("bootblock")) {
+            handleBootBlock(parts);
         } else if (command == QStringLiteral("log")) {
             handleLog(parts);
         } else if (command == QStringLiteral("script")) {
             runScript(parts);
         } else if (command == QStringLiteral("gdb")) {
             configureGdb(parts);
+        } else if (command == QStringLiteral("rom-symbols")) {
+            handleSymbols(parts);
         } else if (command == QStringLiteral("paths")) {
             printPaths();
         } else {
@@ -540,19 +671,22 @@ private:
         m_out << "  regs | state | devices [via|iwm|scc|scsi]\n";
         m_out << "  step [count] | run [cycles] | run-until <addr> [max-cycles]\n";
         m_out << "  disasm [addr|pc] [count] | mem <addr> [len]\n";
+        m_out << "  mem-find <hex> [start len] | mem-snapshot <name> <addr> <len> | memory-diff <name>\n";
         m_out << "  write8|write16|write32 <addr> <value>\n";
         m_out << "  break <addr> | delete <addr|all> | breaks\n";
         m_out << "  watch read|write|rw <addr> [size]\n";
         m_out << "  bus [last [count]|clear|filter <region>]\n";
-        m_out << "  vectors | globals | rom info\n";
-        m_out << "  screen hash | screen export <file.png>\n";
+        m_out << "  vectors | globals | lowmem [watch|unwatch|status] [name]\n";
+        m_out << "  rom info | rom-symbols [load <file>|list]\n";
+        m_out << "  screen hash | screen probe | screen export <file.png>\n";
         m_out << "  sound hash | sound export <file.wav> | sound capture-hash | sound capture-export <file.wav> | sound clear-capture\n";
         m_out << "  profile [set <key> <value>|save] | load <profile.toml>\n";
         m_out << "  disk insert <path> | disk eject | disk status\n";
         m_out << "  floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side]\n";
         m_out << "  mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
-        m_out << "  trace [category on|off] | log save <file.jsonl>\n";
+        m_out << "  trace [category on|off|dump|clear|save <file>] | pc-trace|trap-trace|irq-trace|driver-trace|timeline [count]\n";
+        m_out << "  bootblock verify | floppy last-window | floppy export-window <file>\n";
         m_out << "  gdb [enable|disable|port N|start|stop|status]\n";
         m_out << "  script <file> | paths | quit\n";
     }
@@ -692,7 +826,7 @@ private:
             return;
         }
         const auto cycles = parts.size() >= 2 ? parts[1].toInt() : m_configuration.cyclesPerFrame;
-        const auto cyclesRun = m_machine->runCycles(cycles);
+        const auto cyclesRun = tracingRequiresStepping() ? runCyclesWithTracing(cycles) : m_machine->runCycles(cycles);
         m_out << "cycles_run=" << cyclesRun << " pc=" << hexValue(m_machine->programCounter()) << '\n';
     }
 
@@ -706,7 +840,9 @@ private:
             if (m_breakpoints.count(m_machine->programCounter()) != 0 && i != 0) {
                 break;
             }
+            sampleBeforeStep();
             (void)m_machine->stepInstruction();
+            sampleAfterStep();
         }
         m_out << "pc=" << hexValue(m_machine->programCounter()) << ' ' << m_machine->disassemble(m_machine->programCounter()) << '\n';
     }
@@ -784,7 +920,7 @@ private:
             m_out << "usage: mem <addr> [len]\n";
             return;
         }
-        const auto address = parseNumber(parts[1]);
+        const auto address = parseAddress(parts[1]);
         if (!address.has_value()) {
             m_out << "invalid address\n";
             return;
@@ -796,6 +932,88 @@ private:
                 m_out << byteToHex(m_machine->debugRead8(*address + offset + i)) << ' ';
             }
             m_out << '\n';
+        }
+    }
+
+    void findMemory(const QStringList& parts)
+    {
+        if (parts.size() < 2) {
+            m_out << "usage: mem-find <hex> [start len]\n";
+            return;
+        }
+        const auto needle = hexToBytes(parts[1]);
+        if (needle.isEmpty()) {
+            m_out << "invalid hex pattern\n";
+            return;
+        }
+        const auto start = parts.size() >= 3 ? parseAddress(parts[2]).value_or(0) : 0U;
+        const auto defaultLength = static_cast<std::uint32_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024;
+        const auto length = parts.size() >= 4 ? parseNumber(parts[3]).value_or(defaultLength) : defaultLength;
+        int hits = 0;
+        for (std::uint32_t address = start; address + static_cast<std::uint32_t>(needle.size()) <= start + length; ++address) {
+            bool match = true;
+            for (qsizetype i = 0; i < needle.size(); ++i) {
+                if (m_machine->debugRead8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(needle[i])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                m_out << "match " << hexValue(address) << '\n';
+                if (++hits >= 32) {
+                    m_out << "stopped after 32 matches\n";
+                    break;
+                }
+            }
+        }
+        if (hits == 0) {
+            m_out << "no matches\n";
+        }
+    }
+
+    void snapshotMemory(const QStringList& parts)
+    {
+        if (parts.size() < 4) {
+            m_out << "usage: mem-snapshot <name> <addr> <len>\n";
+            return;
+        }
+        const auto address = parseAddress(parts[2]);
+        const auto length = parseNumber(parts[3]);
+        if (!address || !length) {
+            m_out << "invalid address/length\n";
+            return;
+        }
+        QByteArray bytes;
+        bytes.resize(static_cast<qsizetype>(*length));
+        for (std::uint32_t i = 0; i < *length; ++i) {
+            bytes[static_cast<qsizetype>(i)] = static_cast<char>(m_machine->debugRead8(*address + i));
+        }
+        m_memorySnapshots[parts[1]] = { *address, bytes };
+        m_out << "snapshot " << parts[1] << " bytes=" << bytes.size() << '\n';
+    }
+
+    void diffMemory(const QStringList& parts)
+    {
+        if (parts.size() < 2 || !m_memorySnapshots.contains(parts[1])) {
+            m_out << "usage: memory-diff <name>\n";
+            return;
+        }
+        const auto snapshot = m_memorySnapshots[parts[1]];
+        int changes = 0;
+        for (qsizetype i = 0; i < snapshot.bytes.size(); ++i) {
+            const auto now = m_machine->debugRead8(snapshot.address + static_cast<std::uint32_t>(i));
+            const auto was = static_cast<std::uint8_t>(snapshot.bytes[i]);
+            if (now != was) {
+                m_out << hexValue(snapshot.address + static_cast<std::uint32_t>(i)) << ' '
+                      << byteToHex(was) << " -> " << byteToHex(now) << '\n';
+                if (++changes >= 128) {
+                    m_out << "stopped after 128 changes\n";
+                    break;
+                }
+            }
+        }
+        if (changes == 0) {
+            m_out << "no changes\n";
         }
     }
 
@@ -995,11 +1213,29 @@ private:
             m_out << "screen_hash=" << hexValue(m_machine->framebufferHash()) << '\n';
             return;
         }
+        if (parts.size() >= 2 && parts[1] == QStringLiteral("probe")) {
+            const auto bytes = m_machine->framebufferBytes();
+            auto black = 0;
+            auto white = 0;
+            for (const auto byte : bytes) {
+                const auto value = static_cast<std::uint8_t>(byte);
+                for (int bit = 0; bit < 8; ++bit) {
+                    ((value & (1 << bit)) != 0 ? black : white)++;
+                }
+            }
+            const auto hash = m_machine->framebufferHash();
+            const auto label = black == 0 ? QStringLiteral("blank-white")
+                : white == 0          ? QStringLiteral("blank-black")
+                                      : QStringLiteral("nonblank");
+            appendTimeline(QStringLiteral("screen %1 hash=%2 black=%3 white=%4").arg(label, hexValue(hash)).arg(black).arg(white));
+            m_out << "screen=" << label << " hash=" << hexValue(hash) << " black=" << black << " white=" << white << '\n';
+            return;
+        }
         if (parts.size() >= 3 && parts[1] == QStringLiteral("export")) {
             exportScreen(parts[2]);
             return;
         }
-        m_out << "usage: screen hash | screen export <file.png>\n";
+        m_out << "usage: screen hash | screen probe | screen export <file.png>\n";
     }
 
     void exportScreen(const QString& path)
@@ -1157,8 +1393,22 @@ private:
                 return;
             }
             m_out << "floppy track exported: " << parts[2] << " bytes=" << bytes.size() << '\n';
+        } else if (parts.size() >= 2 && parts[1] == QStringLiteral("last-window")) {
+            const auto bytes = m_machine->iwmLastNibblesForDebug();
+            m_out << "floppy_window_bytes=" << bytes.size()
+                  << " addr_marks=" << countPattern(bytes, QByteArray::fromHex("d5aa96"))
+                  << " data_marks=" << countPattern(bytes, QByteArray::fromHex("d5aaad"))
+                  << " trailers=" << countPattern(bytes, QByteArray::fromHex("deaa")) << '\n';
+        } else if (parts.size() >= 3 && parts[1] == QStringLiteral("export-window")) {
+            QSaveFile file(parts[2]);
+            if (!file.open(QIODevice::WriteOnly)) {
+                m_out << "floppy window export failed: " << parts[2] << '\n';
+                return;
+            }
+            file.write(m_machine->iwmLastNibblesForDebug());
+            m_out << (file.commit() ? "floppy window exported: " : "floppy window export failed: ") << parts[2] << '\n';
         } else {
-            m_out << "usage: floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side]\n";
+            m_out << "usage: floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side] | floppy last-window | floppy export-window <file>\n";
         }
     }
 
@@ -1223,20 +1473,155 @@ private:
     void configureTrace(const QStringList& parts)
     {
         if (parts.size() == 1) {
-            m_out << "trace categories:";
-            for (auto it = m_traceCategories.cbegin(); it != m_traceCategories.cend(); ++it) {
-                m_out << ' ' << it.key() << '=' << (it.value() ? "on" : "off");
+            printTraceStatus();
+            return;
+        }
+        if (parts.size() >= 2 && parts[1] == QStringLiteral("clear")) {
+            clearTraces();
+            m_out << "traces cleared\n";
+            return;
+        }
+        if (parts.size() >= 2 && parts[1] == QStringLiteral("dump")) {
+            dumpTraceRing(QStringLiteral("timeline"), m_timeline, parts);
+            return;
+        }
+        if (parts.size() >= 3 && parts[1] == QStringLiteral("save")) {
+            saveTrace(parts[2]);
+            return;
+        }
+        if (parts.size() != 3) {
+            m_out << "usage: trace [category on|off|dump|clear|save <file>]\n";
+            return;
+        }
+        setTraceCategory(parts[1].toLower(), parts[2].compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0);
+    }
+
+    void printTraceStatus()
+    {
+        m_out << "trace pc=" << onOff(m_trace.pc)
+              << " irq=" << onOff(m_trace.irq)
+              << " trap=" << onOff(m_trace.trap)
+              << " driver=" << onOff(m_trace.driver)
+              << " lowmem=" << onOff(m_trace.lowmem)
+              << " screen=" << onOff(m_trace.screen)
+              << " sound=" << onOff(m_trace.sound)
+              << " iwm=" << onOff(m_trace.iwm)
+              << " floppy=" << onOff(m_trace.floppy)
+              << " timeline=" << onOff(m_trace.timeline) << '\n';
+    }
+
+    void setTraceCategory(const QString& category, bool enabled)
+    {
+        if (category == QStringLiteral("pc")) {
+            m_trace.pc = enabled;
+        } else if (category == QStringLiteral("irq")) {
+            m_trace.irq = enabled;
+        } else if (category == QStringLiteral("trap")) {
+            m_trace.trap = enabled;
+        } else if (category == QStringLiteral("driver")) {
+            m_trace.driver = enabled;
+        } else if (category == QStringLiteral("lowmem")) {
+            m_trace.lowmem = enabled;
+        } else if (category == QStringLiteral("screen")) {
+            m_trace.screen = enabled;
+        } else if (category == QStringLiteral("sound")) {
+            m_trace.sound = enabled;
+        } else if (category == QStringLiteral("iwm")) {
+            m_trace.iwm = enabled;
+            m_machine->setIwmTraceEnabled(m_trace.iwm || m_trace.floppy);
+        } else if (category == QStringLiteral("floppy")) {
+            m_trace.floppy = enabled;
+            m_machine->setIwmTraceEnabled(m_trace.iwm || m_trace.floppy);
+        } else if (category == QStringLiteral("timeline")) {
+            m_trace.timeline = enabled;
+        } else if (category == QStringLiteral("all")) {
+            m_trace = { enabled, enabled, enabled, enabled, enabled, enabled, enabled, enabled, enabled, enabled };
+            m_machine->setIwmTraceEnabled(enabled);
+        } else {
+            m_out << "unknown trace category: " << category << '\n';
+            return;
+        }
+        m_out << "trace " << category << '=' << (enabled ? "on" : "off") << '\n';
+    }
+
+    void dumpTraceRing(const QString& name, const QStringList& ring, const QStringList& parts)
+    {
+        const auto count = parts.size() >= 2 ? std::max(1, parts.last().toInt()) : 64;
+        const auto start = std::max<qsizetype>(0, ring.size() - count);
+        for (qsizetype i = start; i < ring.size(); ++i) {
+            m_out << name << ": " << ring[i] << '\n';
+        }
+        if (name == QStringLiteral("timeline") || name == QStringLiteral("iwm")) {
+            for (const auto& event : m_machine->iwmTraceEvents()) {
+                m_out << "iwm: " << event << '\n';
+            }
+        }
+    }
+
+    void clearTraces()
+    {
+        m_pcTrace.clear();
+        m_irqTrace.clear();
+        m_trapTrace.clear();
+        m_driverTrace.clear();
+        m_timeline.clear();
+        m_machine->clearIwmTrace();
+    }
+
+    void saveTrace(const QString& path)
+    {
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            m_out << "failed to open trace file\n";
+            return;
+        }
+        QTextStream stream(&file);
+        for (const auto& event : m_timeline) {
+            stream << "{\"category\":\"timeline\",\"event\":\"" << event << "\"}\n";
+        }
+        for (const auto& event : m_pcTrace) {
+            stream << "{\"category\":\"pc\",\"event\":\"" << event << "\"}\n";
+        }
+        for (const auto& event : m_irqTrace) {
+            stream << "{\"category\":\"irq\",\"event\":\"" << event << "\"}\n";
+        }
+        for (const auto& event : m_trapTrace) {
+            stream << "{\"category\":\"trap\",\"event\":\"" << event << "\"}\n";
+        }
+        for (const auto& event : m_driverTrace) {
+            stream << "{\"category\":\"driver\",\"event\":\"" << event << "\"}\n";
+        }
+        for (const auto& event : m_machine->iwmTraceEvents()) {
+            stream << "{\"category\":\"iwm\",\"event\":\"" << event << "\"}\n";
+        }
+        m_out << (file.commit() ? "saved " : "failed ") << path << '\n';
+    }
+
+    void handleLowMemory(const QStringList& parts)
+    {
+        if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
+            for (auto it = m_lowMemoryNames.cbegin(); it != m_lowMemoryNames.cend(); ++it) {
+                m_out << it.key() << ' ' << hexValue(it.value(), 4) << " = " << hexValue(m_machine->debugRead32(it.value())) << '\n';
             }
             m_out << '\n';
             return;
         }
-        if (parts.size() != 3) {
-            m_out << "usage: trace [category on|off]\n";
+        if (parts.size() >= 3 && parts[1] == QStringLiteral("watch")) {
+            const auto address = parseAddress(parts[2]);
+            if (!address) {
+                m_out << "unknown lowmem name/address\n";
+                return;
+            }
+            m_lowMemoryWatchValues[parts[2]] = m_machine->debugRead32(*address);
+            m_out << "lowmem watch " << parts[2] << '\n';
             return;
         }
-        const auto enabled = parts[2].compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0;
-        m_traceCategories[parts[1].toLower()] = enabled;
-        m_out << "trace " << parts[1].toLower() << '=' << (enabled ? "on" : "off") << '\n';
+        if (parts.size() >= 3 && parts[1] == QStringLiteral("unwatch")) {
+            m_lowMemoryWatchValues.remove(parts[2]);
+            m_out << "lowmem unwatch " << parts[2] << '\n';
+            return;
+        }
+        m_out << "usage: lowmem [status|watch <name|addr>|unwatch <name|addr>]\n";
     }
 
     void handleLog(const QStringList& parts)
@@ -1257,6 +1642,95 @@ private:
                    << ",\"size\":" << access.size << "}\n";
         }
         m_out << (file.commit() ? "saved " : "failed ") << parts[2] << '\n';
+    }
+
+    void handleBootBlock(const QStringList& parts)
+    {
+        if (parts.size() < 2 || parts[1] != QStringLiteral("verify")) {
+            m_out << "usage: bootblock verify\n";
+            return;
+        }
+        QFile file(m_configuration.floppyPath);
+        if (!file.open(QIODevice::ReadOnly)) {
+            m_out << "no readable floppy image configured\n";
+            return;
+        }
+        const auto image = file.readAll();
+        QByteArray data;
+        if (image.size() >= 84 && (readBe32FromBytes(image, 64) == 400 * 1024 || readBe32FromBytes(image, 64) == 800 * 1024)) {
+            data = image.mid(84, 1024);
+        } else {
+            data = image.left(1024);
+        }
+        if (data.size() < 1024) {
+            m_out << "floppy image does not contain boot blocks\n";
+            return;
+        }
+        const auto block0 = data.left(512);
+        const auto block1 = data.mid(512, 512);
+        const auto block0Needle = block0.left(32).toHex();
+        const auto block1Needle = block1.left(32).toHex();
+        m_out << "bootblock0 first32=" << block0Needle << '\n';
+        findNeedleInRam(QByteArray::fromHex(block0Needle), QStringLiteral("bootblock0"));
+        m_out << "bootblock1 first32=" << block1Needle << '\n';
+        findNeedleInRam(QByteArray::fromHex(block1Needle), QStringLiteral("bootblock1"));
+    }
+
+    void findNeedleInRam(const QByteArray& needle, const QString& label)
+    {
+        const auto length = static_cast<std::uint32_t>(std::max(1, m_configuration.ramSizeMiB)) * 1024 * 1024;
+        int hits = 0;
+        for (std::uint32_t address = 0; address + static_cast<std::uint32_t>(needle.size()) <= length; ++address) {
+            bool match = true;
+            for (qsizetype i = 0; i < needle.size(); ++i) {
+                if (m_machine->debugRead8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(needle[i])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                m_out << label << " loaded_at=" << hexValue(address) << '\n';
+                ++hits;
+            }
+        }
+        if (hits == 0) {
+            m_out << label << " not found in RAM\n";
+        }
+    }
+
+    void handleSymbols(const QStringList& parts)
+    {
+        if (parts.size() == 1 || parts[1] == QStringLiteral("list")) {
+            for (auto it = m_symbols.cbegin(); it != m_symbols.cend(); ++it) {
+                m_out << it.key() << ' ' << hexValue(it.value()) << '\n';
+            }
+            return;
+        }
+        if (parts.size() >= 3 && parts[1] == QStringLiteral("load")) {
+            QFile file(parts[2]);
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                m_out << "failed to open symbols\n";
+                return;
+            }
+            QRegularExpression linePattern(QStringLiteral("^\\s*([A-Za-z_.$][A-Za-z0-9_.$]*)\\s+(0x[0-9A-Fa-f]+|\\$[0-9A-Fa-f]+|[0-9]+)"));
+            int loaded = 0;
+            while (!file.atEnd()) {
+                const auto line = QString::fromUtf8(file.readLine());
+                const auto match = linePattern.match(line);
+                if (!match.hasMatch()) {
+                    continue;
+                }
+                const auto address = parseNumber(match.captured(2));
+                if (address) {
+                    m_symbols[match.captured(1)] = *address & 0x00ffffff;
+                    ++loaded;
+                }
+            }
+            installCompletion();
+            m_out << "symbols loaded=" << loaded << '\n';
+            return;
+        }
+        m_out << "usage: rom-symbols [load <file>|list]\n";
     }
 
     void runScript(const QStringList& parts)
@@ -1343,6 +1817,125 @@ private:
         return path.isEmpty() ? QStringLiteral("(not set)") : QFileInfo(path).absoluteFilePath();
     }
 
+    [[nodiscard]] std::optional<std::uint32_t> parseAddress(const QString& text) const
+    {
+        if (const auto numeric = parseNumber(text); numeric.has_value()) {
+            return *numeric;
+        }
+        if (m_symbols.contains(text)) {
+            return m_symbols[text];
+        }
+        if (m_lowMemoryNames.contains(text)) {
+            return m_lowMemoryNames[text];
+        }
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool tracingRequiresStepping() const
+    {
+        return m_trace.pc || m_trace.irq || m_trace.trap || m_trace.driver || m_trace.lowmem || m_trace.screen || m_trace.sound || m_trace.timeline;
+    }
+
+    int runCyclesWithTracing(int cycles)
+    {
+        int cyclesRun = 0;
+        while (cyclesRun < cycles) {
+            if (m_breakpoints.count(m_machine->programCounter()) != 0 && cyclesRun != 0) {
+                break;
+            }
+            sampleBeforeStep();
+            cyclesRun += std::max(1, m_machine->stepInstruction());
+            sampleAfterStep();
+        }
+        return cyclesRun;
+    }
+
+    void sampleBeforeStep()
+    {
+        const auto pc = m_machine->programCounter();
+        if (m_trace.pc) {
+            appendRing(m_pcTrace, QStringLiteral("%1 %2").arg(hexValue(pc), symbolFor(pc)));
+        }
+        if (m_trace.trap) {
+            const auto opcode = m_machine->debugRead16(pc);
+            if ((opcode & 0xf000) == 0xa000) {
+                appendRing(m_trapTrace, QStringLiteral("pc=%1 trap=0x%2").arg(hexValue(pc), QString::number(opcode, 16)));
+                appendTimeline(QStringLiteral("trap pc=%1 opcode=0x%2").arg(hexValue(pc), QString::number(opcode, 16)));
+            }
+        }
+        if (m_trace.driver) {
+            if (m_sonyProbePcs.contains(pc)) {
+                const auto regs = m_machine->cpuRegisters();
+                const auto event = QStringLiteral("%1 pc=%2 d0=%3 d1=%4 d2=%5 a0=%6")
+                    .arg(m_sonyProbePcs[pc], hexValue(pc), hexValue(regs.d[0]), hexValue(regs.d[1]), hexValue(regs.d[2]), hexValue(regs.a[0]));
+                appendRing(m_driverTrace, event);
+                appendTimeline(QStringLiteral("driver ") + event);
+            }
+        }
+    }
+
+    void sampleAfterStep()
+    {
+        if (m_trace.irq) {
+            const auto via = m_machine->viaDebugState();
+            const auto active = via.interruptActive;
+            if (!m_irqInitialized || active != m_lastIrqActive || via.interruptFlags != m_lastIrqFlags || via.interruptEnable != m_lastIrqEnable) {
+                m_irqInitialized = true;
+                m_lastIrqActive = active;
+                m_lastIrqFlags = via.interruptFlags;
+                m_lastIrqEnable = via.interruptEnable;
+                const auto event = QStringLiteral("pc=%1 irq=%2 ifr=%3 ier=%4")
+                    .arg(hexValue(m_machine->programCounter()), active ? QStringLiteral("on") : QStringLiteral("off"), hexValue(via.interruptFlags, 2), hexValue(via.interruptEnable, 2));
+                appendRing(m_irqTrace, event);
+                appendTimeline(QStringLiteral("irq ") + event);
+            }
+        }
+        if (m_trace.lowmem) {
+            for (auto it = m_lowMemoryWatchValues.begin(); it != m_lowMemoryWatchValues.end(); ++it) {
+                const auto address = parseAddress(it.key());
+                if (!address) {
+                    continue;
+                }
+                const auto now = m_machine->debugRead32(*address);
+                if (now != it.value()) {
+                    const auto event = QStringLiteral("%1 %2 -> %3 pc=%4").arg(it.key(), hexValue(it.value()), hexValue(now), hexValue(m_machine->programCounter()));
+                    it.value() = now;
+                    appendTimeline(QStringLiteral("lowmem ") + event);
+                }
+            }
+        }
+    }
+
+    void appendTimeline(const QString& event)
+    {
+        if (m_trace.timeline || m_trace.screen || m_trace.irq || m_trace.trap || m_trace.driver || m_trace.lowmem) {
+            appendRing(m_timeline, event);
+        }
+    }
+
+    static void appendRing(QStringList& ring, const QString& event)
+    {
+        if (ring.size() == maxDebugTraceEntries) {
+            ring.removeFirst();
+        }
+        ring.append(event);
+    }
+
+    [[nodiscard]] QString symbolFor(std::uint32_t address) const
+    {
+        for (auto it = m_symbols.cbegin(); it != m_symbols.cend(); ++it) {
+            if (it.value() == address) {
+                return it.key();
+            }
+        }
+        return m_sonyProbePcs.value(address, QString());
+    }
+
+    static const char* onOff(bool value)
+    {
+        return value ? "on" : "off";
+    }
+
     cutemac::config::Configuration m_configuration;
     std::unique_ptr<cutemac::machines::macplus::MacPlusMachine> m_machine;
     std::unique_ptr<GdbStub> m_gdbStub;
@@ -1352,12 +1945,45 @@ private:
     quint16 m_gdbPort = 1234;
     std::set<std::uint32_t> m_breakpoints;
     QStringList m_watches;
-    QMap<QString, bool> m_traceCategories {
-        { QStringLiteral("bus"), false },
-        { QStringLiteral("cpu"), false },
-        { QStringLiteral("devices"), false },
-        { QStringLiteral("video"), false },
+    TraceOptions m_trace;
+    QStringList m_pcTrace;
+    QStringList m_irqTrace;
+    QStringList m_trapTrace;
+    QStringList m_driverTrace;
+    QStringList m_timeline;
+    QMap<QString, MemorySnapshot> m_memorySnapshots;
+    QMap<QString, std::uint32_t> m_symbols {
+        { QStringLiteral("ROMBootSpin"), 0x004007ba },
+        { QStringLiteral("Sony_RdData"), 0x00402174 },
+        { QStringLiteral("Sony_EjectOrSwitchDisk"), 0x0040016e },
     };
+    QMap<std::uint32_t, QString> m_sonyProbePcs {
+        { 0x004007ba, QStringLiteral("ROMBootSpin") },
+        { 0x00402174, QStringLiteral("Sony_RdData") },
+        { 0x0040016e, QStringLiteral("Sony_EjectOrSwitchDisk") },
+    };
+    QMap<QString, std::uint32_t> m_lowMemoryNames {
+        { QStringLiteral("MemTop"), 0x0108 },
+        { QStringLiteral("BufPtr"), 0x010c },
+        { QStringLiteral("BootDrive"), 0x0210 },
+        { QStringLiteral("DSAlertTab"), 0x02ba },
+        { QStringLiteral("TagData"), 0x02fa },
+        { QStringLiteral("TagData_1"), 0x02fb },
+        { QStringLiteral("BufTgFNum"), 0x02fc },
+        { QStringLiteral("BufTgFFlg"), 0x0300 },
+        { QStringLiteral("BufTgFBkNum"), 0x0302 },
+        { QStringLiteral("BufTgDate"), 0x0304 },
+        { QStringLiteral("BufTgHD20"), 0x038a },
+        { QStringLiteral("BufTgHD20_1"), 0x038e },
+        { QStringLiteral("Ticks"), 0x016a },
+        { QStringLiteral("VIA"), 0x01d4 },
+        { QStringLiteral("IWM"), 0x01e0 },
+    };
+    QMap<QString, std::uint32_t> m_lowMemoryWatchValues;
+    bool m_irqInitialized = false;
+    bool m_lastIrqActive = false;
+    std::uint8_t m_lastIrqFlags = 0;
+    std::uint8_t m_lastIrqEnable = 0;
 };
 
 } // namespace

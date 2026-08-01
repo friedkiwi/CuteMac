@@ -4,6 +4,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace cutemac::devices::floppy {
@@ -55,6 +56,10 @@ public:
     void invalidateTrackCache();
     [[nodiscard]] DebugState debugState() const;
     [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
+    void setTraceEnabled(bool enabled);
+    void clearTrace();
+    [[nodiscard]] QStringList traceEvents() const;
+    [[nodiscard]] QByteArray lastNibblesForDebug() const;
 
 private:
     struct TrackCache {
@@ -81,6 +86,10 @@ private:
     int m_currentTrack = 0;
     int m_currentSide = 0;
     TrackCache m_trackCache;
+    bool m_traceEnabled = false;
+    std::uint32_t m_traceShift = 0;
+    QStringList m_traceEvents;
+    QByteArray m_lastNibbles;
 };
 
 } // namespace cutemac::devices::floppy
