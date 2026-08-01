@@ -1,0 +1,75 @@
+name: Windows Win64
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-win64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Install toml++
+        shell: pwsh
+        run: vcpkg install tomlplusplus:x64-windows
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT "scripts/buildsystems/vcpkg.cmake"
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Assemble portable folder
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:GITHUB_WORKSPACE "package/CuteMac-win64"
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+
+          Copy-Item "build/CuteMac.exe" $package
+          Copy-Item "build/CuteMacSession.exe" $package
+          Copy-Item "build/CuteMacMacPlusSmoke.exe" $package
+          Copy-Item "README.md" $package
+          Copy-Item "licenses" $package -Recurse
+
+          windeployqt --release --no-translations --compiler-runtime --dir $package "$package/CuteMac.exe"
+          windeployqt --release --no-translations --compiler-runtime --dir $package "$package/CuteMacSession.exe"
+
+          $vcpkgBin = Join-Path $env:VCPKG_INSTALLATION_ROOT "installed/x64-windows/bin"
+          if (Test-Path $vcpkgBin) {
+            Get-ChildItem $vcpkgBin -Filter *.dll | Copy-Item -Destination $package
+          }
+
+      - name: Upload portable Win64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: CuteMac-win64
+          path: package/CuteMac-win64
+          if-no-files-found: error
+          retention-days: 14

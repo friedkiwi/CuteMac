@@ -30,6 +30,8 @@ cmake --build build
 
 The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, `CuteMacDebugSession` for a readline debug console, and `CuteMacMacPlusSmoke` for headless ROM verification.
 
+Every push also runs the Windows Win64 workflow. Its `CuteMac-win64` artifact is a portable folder containing the release executables and their Qt 6 runtime dependencies.
+
 `CuteMacSession` and `CuteMacDebugSession` share the machine-neutral `EmulationSession` facade. Desktop sessions run emulation off the Qt event thread; WebAssembly uses a single-threaded frame runner. Debug-only concrete machine access is kept behind an optional debug interface.
 
 ## Run
