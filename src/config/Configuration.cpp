@@ -132,6 +132,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     configuration.machineId = tomlStringValue(contents, QStringLiteral("id"));
     configuration.romPath = tomlStringValue(contents, QStringLiteral("rom_path"));
     configuration.diskPath = tomlStringValue(contents, QStringLiteral("disk_path"));
+    configuration.floppyPath = tomlStringValue(contents, QStringLiteral("floppy_path"));
     configuration.ramSizeMiB = tomlIntValue(contents, QStringLiteral("ram_size_mib"), configuration.ramSizeMiB);
     configuration.cyclesPerFrame = tomlIntValue(contents, QStringLiteral("cycles_per_frame"), configuration.cyclesPerFrame);
 
@@ -164,6 +165,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
     stream << "[storage]\n";
     stream << "rom_path = \"" << tomlEscape(configuration.romPath) << "\"\n";
     stream << "disk_path = \"" << tomlEscape(configuration.diskPath) << "\"\n";
+    stream << "floppy_path = \"" << tomlEscape(configuration.floppyPath) << "\"\n";
     return true;
 }
 

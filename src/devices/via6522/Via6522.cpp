@@ -7,6 +7,8 @@ namespace {
 constexpr std::uint8_t registerB = 0;
 constexpr std::uint8_t dataDirectionB = 2;
 constexpr std::uint8_t dataDirectionA = 3;
+constexpr std::uint8_t timer2CounterLow = 8;
+constexpr std::uint8_t timer2CounterHigh = 9;
 constexpr std::uint8_t interruptFlag = 13;
 constexpr std::uint8_t interruptEnable = 14;
 constexpr std::uint8_t registerA = 15;
@@ -16,6 +18,8 @@ constexpr std::uint8_t initialPortB = 0x8f;
 constexpr std::uint8_t initialDdrA = 0x7f;
 constexpr std::uint8_t initialDdrB = 0x87;
 constexpr std::uint8_t overlayBit = 0x10;
+constexpr std::uint8_t timer1InterruptBit = 0x02;
+constexpr std::uint8_t timer2InterruptBit = 0x20;
 
 } // namespace
 
@@ -27,6 +31,8 @@ void Via6522::reset()
     m_registers[dataDirectionA] = initialDdrA;
     m_registers[dataDirectionB] = initialDdrB;
     m_interruptEnable = 0;
+    m_timer2Counter = 0;
+    m_timer2Running = false;
     notifyPortAChanged();
 }
 
@@ -34,7 +40,7 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
 {
     index &= 0x0f;
     if (index == interruptFlag) {
-        m_registers[interruptFlag] |= 0x02;
+        m_registers[interruptFlag] |= timer1InterruptBit;
         return interruptFlagRegister();
     }
     if (index == interruptEnable) {
@@ -60,10 +66,44 @@ void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
         return;
     }
 
+    if (index == timer2CounterLow) {
+        m_registers[index] = value;
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer2InterruptBit);
+        return;
+    }
+    if (index == timer2CounterHigh) {
+        m_registers[index] = value;
+        m_timer2Counter = (static_cast<int>(m_registers[timer2CounterHigh]) << 8) | m_registers[timer2CounterLow];
+        m_timer2Running = true;
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer2InterruptBit);
+        return;
+    }
+
     m_registers[index] = value;
     if (index == registerA) {
         notifyPortAChanged();
     }
+}
+
+void Via6522::tick(int cycles)
+{
+    if (!m_timer2Running || cycles <= 0) {
+        return;
+    }
+
+    m_timer2Counter -= cycles;
+    if (m_timer2Counter > 0) {
+        const auto counter = static_cast<std::uint16_t>(m_timer2Counter);
+        m_registers[timer2CounterLow] = static_cast<std::uint8_t>(counter);
+        m_registers[timer2CounterHigh] = static_cast<std::uint8_t>(counter >> 8);
+        return;
+    }
+
+    m_timer2Counter = 0;
+    m_timer2Running = false;
+    m_registers[timer2CounterLow] = 0;
+    m_registers[timer2CounterHigh] = 0;
+    m_registers[interruptFlag] |= timer2InterruptBit;
 }
 
 void Via6522::setPortAChangedCallback(PortAChangedCallback callback)
@@ -98,6 +138,22 @@ void Via6522::setPortBInputBit(std::uint8_t bit, bool high)
 bool Via6522::overlayEnabled() const
 {
     return (portA() & overlayBit) != 0;
+}
+
+bool Via6522::interruptActive() const
+{
+    return (m_registers[interruptFlag] & m_interruptEnable) != 0;
+}
+
+Via6522::DebugState Via6522::debugState() const
+{
+    return {
+        m_registers[interruptFlag],
+        m_interruptEnable,
+        m_timer2Counter,
+        m_timer2Running,
+        interruptActive(),
+    };
 }
 
 void Via6522::notifyPortAChanged()

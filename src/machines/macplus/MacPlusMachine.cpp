@@ -61,25 +61,7 @@ MacPlusMachine::MacPlusMachine(std::size_t ramSize)
 
     m_via.setPortAChangedCallback([this](std::uint8_t portA) {
         setOverlayEnabled((portA & viaOverlayBit) != 0);
-    });
-    m_iwm.setDiskSenseProvider([this](std::uint8_t caLines) {
-        const auto sel = (m_via.portA() & viaDiskSelectBit) != 0;
-        switch (caLines & 0x07) {
-        case 0x0:
-            return !sel; // DIRTN high; CSTIN low means no disk inserted.
-        case 0x1: // STEP
-        case 0x3: // WRTPRT
-        case 0x4: // MOTORON
-        case 0x5: // TKO
-            return true;
-        case 0x6:
-            return !sel; // SIDES low for double-sided; RDDATA0 idle high.
-        case 0x7:
-            return sel; // DRVIN high, TACH low while no disk is spinning.
-        case 0x2:
-        default:
-            return true;
-        }
+        m_iwm.setSideSelect((portA & viaDiskSelectBit) != 0);
     });
 }
 
@@ -124,6 +106,16 @@ void MacPlusMachine::ejectDiskImage()
     m_diskImagePath.clear();
 }
 
+bool MacPlusMachine::loadFloppyImage(const QString& path)
+{
+    return m_iwm.loadFloppyImage(path);
+}
+
+void MacPlusMachine::ejectFloppyImage()
+{
+    m_iwm.ejectFloppyImage();
+}
+
 void MacPlusMachine::reset()
 {
     m_accessSummary = {};
@@ -149,12 +141,25 @@ void MacPlusMachine::reset()
 
 int MacPlusMachine::runCycles(int cycles)
 {
-    return m_cpu.execute(cycles);
+    int cyclesRun = 0;
+    while (cyclesRun < cycles) {
+        updateInterrupts();
+        const auto slice = std::min(20000, cycles - cyclesRun);
+        const auto used = std::max(1, m_cpu.execute(slice));
+        cyclesRun += used;
+        m_via.tick(used);
+        updateInterrupts();
+    }
+    return cyclesRun;
 }
 
 int MacPlusMachine::stepInstruction()
 {
-    return m_cpu.stepInstruction();
+    updateInterrupts();
+    const auto cycles = m_cpu.stepInstruction();
+    m_via.tick(std::max(1, cycles));
+    updateInterrupts();
+    return cycles;
 }
 
 bool MacPlusMachine::runUntilPc(std::uint32_t address, int maxCycles)
@@ -410,7 +415,7 @@ void MacPlusMachine::writeDevice8(std::uint32_t address, Region region, std::uin
     case Region::Iwm: {
         ++m_accessSummary.iwmWrites;
         const auto registerIndex = static_cast<std::uint8_t>(((address - iwmBase) >> 9) & 0x0f);
-        (void)m_iwm.access(registerIndex);
+        (void)m_iwm.access(registerIndex, value, true);
         return;
     }
     case Region::Via: {
@@ -549,9 +554,24 @@ QString MacPlusMachine::diskImagePath() const
     return m_diskImagePath;
 }
 
+QString MacPlusMachine::floppyImagePath() const
+{
+    return m_iwm.floppyImagePath();
+}
+
 devices::scsi::ncr5380::Ncr5380::DebugState MacPlusMachine::scsiDebugState() const
 {
     return m_scsi.debugState();
+}
+
+devices::iwm::IwmController::DebugState MacPlusMachine::iwmDebugState() const
+{
+    return m_iwm.debugState();
+}
+
+devices::via6522::Via6522::DebugState MacPlusMachine::viaDebugState() const
+{
+    return m_via.debugState();
 }
 
 void MacPlusMachine::setMousePosition(std::int16_t x, std::int16_t y)
@@ -643,6 +663,11 @@ void MacPlusMachine::incrementLowMemoryTicks()
     m_ram[lowMemoryTicks + 1] = static_cast<std::uint8_t>(value >> 16);
     m_ram[lowMemoryTicks + 2] = static_cast<std::uint8_t>(value >> 8);
     m_ram[lowMemoryTicks + 3] = static_cast<std::uint8_t>(value);
+}
+
+void MacPlusMachine::updateInterrupts()
+{
+    m_cpu.setIrqLevel(m_via.interruptActive() ? 1 : 0);
 }
 
 std::uint32_t MacPlusMachine::readRam32Direct(std::uint32_t address) const

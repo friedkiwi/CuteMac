@@ -62,6 +62,12 @@ public:
         diskLayout->addWidget(m_diskPath, 1);
         diskLayout->addWidget(diskBrowse);
 
+        m_floppyPath = new QLineEdit(m_configuration.floppyPath);
+        auto* floppyBrowse = new QPushButton(QStringLiteral("Browse..."));
+        auto* floppyLayout = new QHBoxLayout;
+        floppyLayout->addWidget(m_floppyPath, 1);
+        floppyLayout->addWidget(floppyBrowse);
+
         m_ramSize = new QSpinBox;
         m_ramSize->setRange(1, 4);
         m_ramSize->setSuffix(QStringLiteral(" MiB"));
@@ -76,6 +82,7 @@ public:
         form->addRow(QStringLiteral("Machine"), m_machine);
         form->addRow(QStringLiteral("ROM"), romLayout);
         form->addRow(QStringLiteral("Disk image"), diskLayout);
+        form->addRow(QStringLiteral("Floppy image"), floppyLayout);
         form->addRow(QStringLiteral("RAM"), m_ramSize);
         form->addRow(QStringLiteral("Cycles/frame"), m_cyclesPerFrame);
         layout->addLayout(form);
@@ -101,6 +108,15 @@ public:
                 m_diskPath->setText(path);
             }
         });
+        connect(floppyBrowse, &QPushButton::clicked, this, [this]() {
+            const auto path = QFileDialog::getOpenFileName(this,
+                QStringLiteral("Select floppy image"),
+                cutemac::config::ConfigurationManager::diskImageDirectoryPath(),
+                QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
+            if (!path.isEmpty()) {
+                m_floppyPath->setText(path);
+            }
+        });
         connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
             if (m_name->text().trimmed().isEmpty()) {
                 QMessageBox::warning(this, QStringLiteral("Profile"), QStringLiteral("Profile name is required."));
@@ -118,6 +134,7 @@ public:
         configuration.machineId = m_machine->currentData().toString();
         configuration.romPath = m_romPath->text().trimmed();
         configuration.diskPath = m_diskPath->text().trimmed();
+        configuration.floppyPath = m_floppyPath->text().trimmed();
         configuration.ramSizeMiB = m_ramSize->value();
         configuration.cyclesPerFrame = m_cyclesPerFrame->value();
         return configuration;
@@ -129,6 +146,7 @@ private:
     QComboBox* m_machine = nullptr;
     QLineEdit* m_romPath = nullptr;
     QLineEdit* m_diskPath = nullptr;
+    QLineEdit* m_floppyPath = nullptr;
     QSpinBox* m_ramSize = nullptr;
     QSpinBox* m_cyclesPerFrame = nullptr;
 };
@@ -168,12 +186,13 @@ private:
         layout->addLayout(headerLayout);
 
         m_table = new QTableWidget;
-        m_table->setColumnCount(5);
+        m_table->setColumnCount(6);
         m_table->setHorizontalHeaderLabels({
             QStringLiteral("Name"),
             QStringLiteral("Machine"),
             QStringLiteral("ROM"),
             QStringLiteral("Disk"),
+            QStringLiteral("Floppy"),
             QStringLiteral("Profile file"),
         });
         m_table->horizontalHeader()->setStretchLastSection(true);
@@ -252,7 +271,8 @@ private:
             setItem(row, 1, profile.configuration.machineId);
             setItem(row, 2, compactPath(profile.configuration.romPath));
             setItem(row, 3, compactPath(profile.configuration.diskPath));
-            setItem(row, 4, profile.path);
+            setItem(row, 4, compactPath(profile.configuration.floppyPath));
+            setItem(row, 5, profile.path);
         }
         m_table->resizeColumnsToContents();
         if (!m_profiles.isEmpty()) {

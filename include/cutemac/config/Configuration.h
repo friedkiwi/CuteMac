@@ -13,6 +13,7 @@ public:
     QString machineId;
     QString romPath;
     QString diskPath;
+    QString floppyPath;
     int ramSizeMiB = 4;
     int cyclesPerFrame = 200000;
 };

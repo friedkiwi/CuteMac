@@ -26,6 +26,7 @@ add_library(CuteMacCore
     src/cpu/m68k/engine/softfloat/softfloat.c
     src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
+    src/devices/floppy/FloppyDiskImage.cpp
     src/devices/iwm/IwmController.cpp
     src/devices/scsi/ScsiBlockDevice.cpp
     src/devices/scsi/ScsiBus.cpp

@@ -469,6 +469,8 @@ private:
             handleRom(parts);
         } else if (command == QStringLiteral("disk")) {
             handleDisk(parts);
+        } else if (command == QStringLiteral("floppy")) {
+            handleFloppy(parts);
         } else if (command == QStringLiteral("mouse")) {
             handleMouse(parts);
         } else if (command == QStringLiteral("key")) {
@@ -532,6 +534,7 @@ private:
         m_out << "  sound hash | sound export <file.wav> | sound capture-hash | sound capture-export <file.wav> | sound clear-capture\n";
         m_out << "  profile [set <key> <value>|save] | load <profile.toml>\n";
         m_out << "  disk insert <path> | disk eject | disk status\n";
+        m_out << "  floppy insert <path> | floppy eject | floppy status\n";
         m_out << "  mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
         m_out << "  trace [category on|off] | log save <file.jsonl>\n";
@@ -562,6 +565,7 @@ private:
         m_out << "machine=" << m_configuration.machineId << '\n';
         m_out << "rom=" << displayPath(m_configuration.romPath) << '\n';
         m_out << "disk=" << displayPath(m_configuration.diskPath) << '\n';
+        m_out << "floppy=" << displayPath(m_configuration.floppyPath) << '\n';
         m_out << "ram_size_mib=" << m_configuration.ramSizeMiB << '\n';
         m_out << "cycles_per_frame=" << m_configuration.cyclesPerFrame << '\n';
     }
@@ -583,6 +587,17 @@ private:
                 }
             } else {
                 m_machine->ejectDiskImage();
+            }
+        } else if (key == QStringLiteral("floppy_path")) {
+            m_configuration.floppyPath = value;
+            if (!value.isEmpty()) {
+                if (m_machine->loadFloppyImage(value)) {
+                    m_out << "floppy loaded: " << displayPath(value) << '\n';
+                } else {
+                    m_out << "floppy failed: " << displayPath(value) << '\n';
+                }
+            } else {
+                m_machine->ejectFloppyImage();
             }
         } else if (key == QStringLiteral("cycles_per_frame")) {
             m_configuration.cyclesPerFrame = value.toInt();
@@ -639,6 +654,13 @@ private:
                 m_out << "disk loaded: " << displayPath(m_configuration.diskPath) << '\n';
             } else {
                 m_out << "disk failed: " << displayPath(m_configuration.diskPath) << '\n';
+            }
+        }
+        if (!m_configuration.floppyPath.isEmpty()) {
+            if (m_machine->loadFloppyImage(m_configuration.floppyPath)) {
+                m_out << "floppy loaded: " << displayPath(m_configuration.floppyPath) << '\n';
+            } else {
+                m_out << "floppy failed: " << displayPath(m_configuration.floppyPath) << '\n';
             }
         }
         if (m_romLoaded) {
@@ -866,12 +888,36 @@ private:
         const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
         if (device.isEmpty() || device == QStringLiteral("via")) {
             m_out << "via_reads=" << summary.viaReads << " via_writes=" << summary.viaWrites << '\n';
+            const auto via = m_machine->viaDebugState();
+            m_out << "via_ifr=" << hexValue(via.interruptFlags, 2)
+                  << " ier=" << hexValue(via.interruptEnable, 2)
+                  << " irq=" << (via.interruptActive ? "yes" : "no")
+                  << " t2=" << via.timer2Counter
+                  << " t2_running=" << (via.timer2Running ? "yes" : "no") << '\n';
         }
         if (device.isEmpty() || device == QStringLiteral("scc")) {
             m_out << "scc_reads=" << summary.sccReads << " scc_writes=" << summary.sccWrites << '\n';
         }
         if (device.isEmpty() || device == QStringLiteral("iwm")) {
             m_out << "iwm_reads=" << summary.iwmReads << " iwm_writes=" << summary.iwmWrites << '\n';
+            const auto iwm = m_machine->iwmDebugState();
+            m_out << "iwm_lines=" << hexValue(iwm.lines, 2)
+                  << " mode=" << hexValue(iwm.mode, 2)
+                  << " status=" << hexValue(iwm.status, 2)
+                  << " reg=" << hexValue(iwm.selectedRegister, 2)
+                  << " motor=" << (iwm.motorOn ? "on" : "off")
+                  << " drive=" << (iwm.internalSelected ? "internal" : "external") << '\n';
+            m_out << "floppy=" << displayPath(iwm.imagePath)
+                  << " format=" << iwm.imageFormat
+                  << " inserted=" << (iwm.diskInserted ? "yes" : "no")
+                  << " writable=" << (iwm.writable ? "yes" : "no")
+                  << " sides=" << (iwm.doubleSided ? "2" : "1")
+                  << " track=" << iwm.track
+                  << " side=" << iwm.side << '\n';
+            m_out << "iwm_data_reads=" << iwm.dataReads
+                  << " status_reads=" << iwm.statusReads
+                  << " handshake_reads=" << iwm.handshakeReads
+                  << " data_writes=" << iwm.dataWrites << '\n';
         }
         if (device.isEmpty() || device == QStringLiteral("scsi")) {
             m_out << "scsi_reads=" << summary.scsiReads << " scsi_writes=" << summary.scsiWrites << '\n';
@@ -1041,6 +1087,32 @@ private:
             m_out << "disk=" << displayPath(m_machine->diskImagePath()) << '\n';
         } else {
             m_out << "usage: disk insert <path> | disk eject | disk status\n";
+        }
+    }
+
+    void handleFloppy(const QStringList& parts)
+    {
+        if (parts.size() >= 3 && parts[1] == QStringLiteral("insert")) {
+            m_configuration.floppyPath = parts[2];
+            if (m_machine->loadFloppyImage(m_configuration.floppyPath)) {
+                m_out << "floppy inserted: " << displayPath(m_configuration.floppyPath) << '\n';
+            } else {
+                m_out << "floppy insert failed: " << displayPath(m_configuration.floppyPath) << '\n';
+            }
+        } else if (parts.size() >= 2 && parts[1] == QStringLiteral("eject")) {
+            m_configuration.floppyPath.clear();
+            m_machine->ejectFloppyImage();
+            m_out << "floppy ejected\n";
+        } else if (parts.size() >= 2 && parts[1] == QStringLiteral("status")) {
+            const auto iwm = m_machine->iwmDebugState();
+            m_out << "floppy=" << displayPath(iwm.imagePath)
+                  << " format=" << iwm.imageFormat
+                  << " inserted=" << (iwm.diskInserted ? "yes" : "no")
+                  << " track=" << iwm.track
+                  << " side=" << iwm.side
+                  << " motor=" << (iwm.motorOn ? "on" : "off") << '\n';
+        } else {
+            m_out << "usage: floppy insert <path> | floppy eject | floppy status\n";
         }
     }
 

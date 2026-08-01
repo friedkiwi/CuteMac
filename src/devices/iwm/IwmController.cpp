@@ -5,40 +5,224 @@ namespace cutemac::devices::iwm {
 void IwmController::reset()
 {
     m_lines.fill(false);
+    m_mode = 0;
+    m_status = 0;
+    m_selectedDriveRegister = 0;
+    m_stepTowardTrackZero = false;
+    m_sideSelect = false;
+    m_tach = false;
+    m_dataReads = 0;
+    m_statusReads = 0;
+    m_handshakeReads = 0;
+    m_dataWrites = 0;
+    m_internalDrive.setMotorOn(false);
 }
 
 std::uint8_t IwmController::access(std::uint8_t registerIndex)
 {
-    registerIndex &= 0x0f;
-    const auto line = static_cast<std::uint8_t>(registerIndex >> 1);
-    m_lines[line] = (registerIndex & 1) != 0;
-
-    if (!q7() && q6()) {
-        const auto caLines = static_cast<std::uint8_t>((m_lines[2] ? 0x04 : 0) | (m_lines[1] ? 0x02 : 0) | (m_lines[0] ? 0x01 : 0));
-        const auto senseHigh = m_diskSenseProvider ? m_diskSenseProvider(caLines) : true;
-        return static_cast<std::uint8_t>((senseHigh ? 0x80 : 0x00) | 0x1f);
-    }
-
-    if (!q7()) {
-        return 0x80;
-    }
-
-    return 0;
+    return access(registerIndex, 0, false);
 }
 
-void IwmController::setDiskSenseProvider(DiskSenseProvider provider)
+std::uint8_t IwmController::access(std::uint8_t registerIndex, std::uint8_t value, bool write)
 {
-    m_diskSenseProvider = std::move(provider);
+    registerIndex &= 0x0f;
+    const auto line = static_cast<std::uint8_t>(registerIndex >> 1);
+    setLine(line, (registerIndex & 1) != 0);
+
+    if (write && q6() && q7()) {
+        writeRegister(value);
+    }
+
+    return readRegister();
+}
+
+bool IwmController::loadFloppyImage(const QString& path)
+{
+    return m_internalDrive.load(path);
+}
+
+void IwmController::ejectFloppyImage()
+{
+    m_internalDrive.eject();
+}
+
+void IwmController::setSideSelect(bool sideSelect)
+{
+    if (m_sideSelect == sideSelect) {
+        return;
+    }
+    m_sideSelect = sideSelect;
+    updateSelectedDriveRegister();
+}
+
+QString IwmController::floppyImagePath() const
+{
+    return m_internalDrive.path();
+}
+
+bool IwmController::floppyInserted() const
+{
+    return m_internalDrive.inserted();
+}
+
+IwmController::DebugState IwmController::debugState() const
+{
+    return {
+        lineMask(),
+        m_mode,
+        m_status,
+        m_selectedDriveRegister,
+        m_internalDrive.motorOn(),
+        !m_lines[SelectDrive],
+        m_internalDrive.inserted(),
+        m_internalDrive.doubleSided(),
+        m_internalDrive.writable(),
+        m_internalDrive.currentTrack(),
+        m_internalDrive.currentSide(),
+        m_dataReads,
+        m_statusReads,
+        m_handshakeReads,
+        m_dataWrites,
+        m_internalDrive.path(),
+        m_internalDrive.formatName(),
+    };
 }
 
 bool IwmController::q6() const
 {
-    return m_lines[6];
+    return m_lines[Q6];
 }
 
 bool IwmController::q7() const
 {
-    return m_lines[7];
+    return m_lines[Q7];
+}
+
+std::uint8_t IwmController::readRegister()
+{
+    const auto selector = static_cast<std::uint8_t>((q6() ? 0x02 : 0x00) | (q7() ? 0x01 : 0x00));
+    switch (selector) {
+    case 0x00:
+        ++m_dataReads;
+        return m_internalDrive.nextNibble();
+    case 0x02: {
+        ++m_statusReads;
+        const auto modeBits = static_cast<std::uint8_t>(m_mode & 0x3f);
+        const auto sense = driveSenseHigh() ? 0x80 : 0x00;
+        m_status = static_cast<std::uint8_t>(sense | modeBits);
+        return m_status;
+    }
+    case 0x01:
+        ++m_handshakeReads;
+        return 0xc0;
+    case 0x03:
+        return m_mode;
+    }
+    return 0;
+}
+
+void IwmController::writeRegister(std::uint8_t value)
+{
+    if (!m_lines[Motor]) {
+        m_mode = value;
+        m_status = static_cast<std::uint8_t>((m_status & 0xc0) | (m_mode & 0x3f));
+        return;
+    }
+
+    ++m_dataWrites;
+    (void)value;
+}
+
+void IwmController::setLine(std::uint8_t line, bool on)
+{
+    const auto wasOn = m_lines[line];
+    m_lines[line] = on;
+
+    if (line == Motor) {
+        m_internalDrive.setMotorOn(on);
+    } else if (line == Ca0 || line == Ca1 || line == Ca2 || line == SelectDrive) {
+        updateSelectedDriveRegister();
+    } else if (line == Lstrb && wasOn && !on) {
+        applyDriveStrobe();
+    }
+}
+
+void IwmController::updateSelectedDriveRegister()
+{
+    m_selectedDriveRegister = selectedDriveRegister();
+    m_internalDrive.setCurrentSide(m_sideSelect ? 1 : 0);
+}
+
+void IwmController::applyDriveStrobe()
+{
+    switch (m_selectedDriveRegister) {
+    case 0x00:
+        m_stepTowardTrackZero = false;
+        break;
+    case 0x01:
+        m_stepTowardTrackZero = true;
+        break;
+    case 0x04:
+        m_internalDrive.step(m_stepTowardTrackZero);
+        break;
+    case 0x08:
+        m_internalDrive.setMotorOn(true);
+        break;
+    case 0x09:
+        m_internalDrive.setMotorOn(false);
+        break;
+    case 0x0d:
+        m_internalDrive.eject();
+        break;
+    default:
+        break;
+    }
+}
+
+std::uint8_t IwmController::selectedDriveRegister() const
+{
+    return static_cast<std::uint8_t>((m_lines[Ca0] ? 0x04 : 0x00)
+        | (m_lines[Ca1] ? 0x08 : 0x00)
+        | (m_lines[Ca2] ? 0x01 : 0x00)
+        | (m_sideSelect ? 0x02 : 0x00));
+}
+
+bool IwmController::driveSenseHigh()
+{
+    switch (m_selectedDriveRegister & 0x0f) {
+    case 0x02:
+        return !m_internalDrive.inserted();
+    case 0x04:
+        return true;
+    case 0x06:
+        return !m_internalDrive.writable();
+    case 0x08:
+        return !m_internalDrive.motorOn();
+    case 0x0a:
+        return !m_internalDrive.trackZero();
+    case 0x0b:
+        return false;
+    case 0x0c:
+        return !m_internalDrive.doubleSided();
+    case 0x0d:
+        return false;
+    case 0x0e:
+        m_tach = !m_tach;
+        return m_tach;
+    default:
+        return true;
+    }
+}
+
+std::uint8_t IwmController::lineMask() const
+{
+    std::uint8_t mask = 0;
+    for (std::uint8_t i = 0; i < m_lines.size(); ++i) {
+        if (m_lines[i]) {
+            mask = static_cast<std::uint8_t>(mask | (1U << i));
+        }
+    }
+    return mask;
 }
 
 } // namespace cutemac::devices::iwm

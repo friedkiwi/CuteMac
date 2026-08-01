@@ -60,6 +60,8 @@ public:
     [[nodiscard]] bool loadRomFile(const QString& path);
     [[nodiscard]] bool loadDiskImage(const QString& path);
     void ejectDiskImage();
+    [[nodiscard]] bool loadFloppyImage(const QString& path);
+    void ejectFloppyImage();
     void reset();
 
     [[nodiscard]] int runCycles(int cycles);
@@ -92,7 +94,10 @@ public:
     void clearSoundCapture();
     [[nodiscard]] RomInfo romInfo() const;
     [[nodiscard]] QString diskImagePath() const;
+    [[nodiscard]] QString floppyImagePath() const;
     [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const;
+    [[nodiscard]] devices::iwm::IwmController::DebugState iwmDebugState() const;
+    [[nodiscard]] devices::via6522::Via6522::DebugState viaDebugState() const;
 
     void setMousePosition(std::int16_t x, std::int16_t y);
     void moveMouse(std::int16_t dx, std::int16_t dy);
@@ -132,6 +137,7 @@ private:
     void writeDevice8(std::uint32_t address, Region region, std::uint8_t value);
 
     void incrementLowMemoryTicks();
+    void updateInterrupts();
     [[nodiscard]] std::uint32_t readRam32Direct(std::uint32_t address) const;
     [[nodiscard]] std::uint8_t readRam8Direct(std::uint32_t address) const;
     [[nodiscard]] std::uint16_t readRam16Direct(std::uint32_t address) const;

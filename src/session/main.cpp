@@ -349,6 +349,25 @@ private:
             m_machine.ejectDiskImage();
             updateStatus();
         });
+        mediaMenu->addSeparator();
+        mediaMenu->addAction(QStringLiteral("Insert Floppy Image"), this, [this]() {
+            const auto path = QFileDialog::getOpenFileName(this,
+                QStringLiteral("Insert Floppy Image"),
+                cutemac::config::ConfigurationManager::diskImageDirectoryPath(),
+                QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
+            if (!path.isEmpty()) {
+                m_configuration.floppyPath = path;
+                if (!m_machine.loadFloppyImage(path)) {
+                    statusBar()->showMessage(QStringLiteral("Failed to load floppy image"), 3000);
+                }
+                updateStatus();
+            }
+        });
+        mediaMenu->addAction(QStringLiteral("Eject Floppy Image"), this, [this]() {
+            m_configuration.floppyPath.clear();
+            m_machine.ejectFloppyImage();
+            updateStatus();
+        });
 
         auto* viewMenu = menuBar()->addMenu(QStringLiteral("View"));
         viewMenu->addAction(QStringLiteral("Actual Size"), this, [this]() { resize(620, 480); });
@@ -368,6 +387,9 @@ private:
         m_romLoaded = !m_configuration.romPath.isEmpty() && m_machine.loadRomFile(m_configuration.romPath);
         if (!m_configuration.diskPath.isEmpty()) {
             (void)m_machine.loadDiskImage(m_configuration.diskPath);
+        }
+        if (!m_configuration.floppyPath.isEmpty()) {
+            (void)m_machine.loadFloppyImage(m_configuration.floppyPath);
         }
         if (m_romLoaded) {
             m_machine.reset();
@@ -429,13 +451,14 @@ private:
         }
 
         const auto& summary = m_machine.accessSummary();
-        m_status->setText(QStringLiteral("%1 | PC 0x%2 | overlay %3 | frames %4 | ROM %5 | disk %6 | unmapped %7/%8")
+        m_status->setText(QStringLiteral("%1 | PC 0x%2 | overlay %3 | frames %4 | ROM %5 | disk %6 | floppy %7 | unmapped %8/%9")
                               .arg(m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"))
                               .arg(m_machine.programCounter(), 6, 16, QLatin1Char('0'))
                               .arg(m_machine.overlayEnabled() ? QStringLiteral("on") : QStringLiteral("off"))
                               .arg(m_frames)
                               .arg(m_romLoaded ? QStringLiteral("loaded") : QStringLiteral("missing"))
                               .arg(m_configuration.diskPath.isEmpty() ? QStringLiteral("none") : QFileInfo(m_configuration.diskPath).fileName())
+                              .arg(m_configuration.floppyPath.isEmpty() ? QStringLiteral("none") : QFileInfo(m_configuration.floppyPath).fileName())
                               .arg(summary.unmappedReads)
                               .arg(summary.unmappedWrites));
     }

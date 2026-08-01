@@ -8,12 +8,21 @@ namespace cutemac::devices::via6522 {
 
 class Via6522 {
 public:
+    struct DebugState {
+        std::uint8_t interruptFlags = 0;
+        std::uint8_t interruptEnable = 0;
+        int timer2Counter = 0;
+        bool timer2Running = false;
+        bool interruptActive = false;
+    };
+
     using PortAChangedCallback = std::function<void(std::uint8_t)>;
 
     void reset();
 
     [[nodiscard]] std::uint8_t readRegister(std::uint8_t index);
     void writeRegister(std::uint8_t index, std::uint8_t value);
+    void tick(int cycles);
 
     void setPortAChangedCallback(PortAChangedCallback callback);
 
@@ -21,6 +30,8 @@ public:
     [[nodiscard]] std::uint8_t portB() const;
     void setPortBInputBit(std::uint8_t bit, bool high);
     [[nodiscard]] bool overlayEnabled() const;
+    [[nodiscard]] bool interruptActive() const;
+    [[nodiscard]] DebugState debugState() const;
 
 private:
     void notifyPortAChanged();
@@ -28,6 +39,8 @@ private:
 
     std::array<std::uint8_t, 16> m_registers {};
     std::uint8_t m_interruptEnable = 0;
+    int m_timer2Counter = 0;
+    bool m_timer2Running = false;
     PortAChangedCallback m_portAChanged;
 };
 

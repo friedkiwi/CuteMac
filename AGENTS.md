@@ -34,6 +34,8 @@
 - Mac Plus bringup currently reaches the missing-floppy screen with the included user-supplied ROM profile. The startup sound can be exported from captured writes to the ROM sound buffer; live audio hardware emulation is still not complete.
 - Mac Plus SCSI bringup can complete an NCR5380 READ(6) of the provided `work/system6withsw.dsk` image, but that image is raw HFS/Mini vMac-style media. The Plus ROM expects a SCSI disk to start with an Apple driver descriptor map (`ER`) and an Apple_Driver entry whose driver installs itself in the Unit Table. Reaching the System 6 desktop from this image requires synthesizing or generating a real Apple-compatible SCSI hard-disk wrapper and clean driver path.
 - SCSI block targets should preserve Apple compatibility behavior, including ZuluSCSI-style Apple fixed-disk inquiry strings and mode page `0x30` with the Apple vendor string, so Apple Drive Setup and older Mac OS tools can identify the device.
+- Mac Plus IWM/floppy bringup has a reusable raw 400K/800K and Disk Copy 4.2 image loader that feeds nibblized GCR track data through the IWM data register. Apple System 6.0.8 800K Disk Copy images can be downloaded/extracted under ignored `work/bringup/system608/` for testing.
+- Current floppy boot blocker: with System 6.0.8 Disk 1 inserted, the ROM reaches the `.Sony` motor/seek asynchronous wait at PC `0x402424`. VIA Timer 2 is programmed and reports `IFR=0x20`, `IER=0x27`, vector `$64 = 0x00401a42`, but the CPU is not taking the level-1 autovector/resuming the Time Manager callback yet. Fix IRQ delivery/VIA Timer 2 before changing floppy GCR encoding again.
 - The annotated ROM reference may be cloned into ignored `work/mac_rom`; do not commit it.
 
 ## Build And Portability
