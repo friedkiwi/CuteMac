@@ -142,7 +142,6 @@ public:
     QLineEdit* rom = nullptr;
     QSpinBox* ram = nullptr;
     QComboBox* speed = nullptr;
-    QSpinBox* cycles = nullptr;
     QCheckBox* skipRamTest = nullptr;
     QTabWidget* tabs = nullptr;
     QWidget* iwmTab = nullptr;
@@ -188,10 +187,6 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->speed->addItem(QStringLiteral("Realtime"), static_cast<int>(config::RuntimeSpeed::Realtime));
     m_impl->speed->setCurrentIndex(m_impl->speed->findData(static_cast<int>(m_impl->original.runtimeSpeed)));
     form->addRow(QStringLiteral("Emulation speed"), m_impl->speed);
-    m_impl->cycles = new QSpinBox;
-    m_impl->cycles->setRange(1000, 2000000);
-    m_impl->cycles->setValue(m_impl->original.cyclesPerFrame);
-    form->addRow(QStringLiteral("Cycles/frame"), m_impl->cycles);
     m_impl->skipRamTest = new QCheckBox;
     m_impl->skipRamTest->setChecked(m_impl->original.skipRamPatternTest);
     form->addRow(QStringLiteral("Skip RAM pattern test"), m_impl->skipRamTest);
@@ -219,6 +214,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->scsi->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     m_impl->scsi->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_impl->scsi->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_impl->scsi->setEditTriggers(QAbstractItemView::NoEditTriggers);
     scsiLayout->addWidget(m_impl->scsi, 1);
     auto* scsiButtons = new QHBoxLayout;
     auto* addDisk = new QPushButton(QStringLiteral("Add Hard Disk..."));
@@ -324,7 +320,6 @@ config::Configuration ConfigurationDialog::configuration() const
     result.romPath = m_impl->rom->text().trimmed();
     result.ramSizeMiB = m_impl->ram->value();
     result.runtimeSpeed = static_cast<config::RuntimeSpeed>(m_impl->speed->currentData().toInt());
-    result.cyclesPerFrame = m_impl->cycles->value();
     result.skipRamPatternTest = m_impl->skipRamTest->isChecked();
     result.iwmDevices = { { m_impl->floppy->text().trimmed(), m_impl->floppyReadOnly->isChecked() } };
     result.floppyPath = result.iwmDevices.first().imagePath;

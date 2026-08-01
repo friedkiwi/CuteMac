@@ -558,6 +558,7 @@ private:
     void configureRunningInstance()
     {
         const auto wasPaused = m_paused;
+        m_display->releaseMouseCapture();
         setPaused(true);
 
         cutemac::ui::ConfigurationDialog dialog(m_configuration, this);

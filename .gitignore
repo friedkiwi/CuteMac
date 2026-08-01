@@ -11,3 +11,6 @@ work/
 Thumbs.db
 *.swp
 *.swo
+core
+core.*
+core-*
