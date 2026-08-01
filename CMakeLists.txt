@@ -50,6 +50,7 @@ add_library(CuteMacCore
     src/machines/macplus/MacPlusMachine.cpp
     src/machines/maciicx/MacIIcxMachine.cpp
     src/rom/RomPatcher.cpp
+    src/rom/RomCatalog.cpp
     src/storage/DiskImageManager.cpp
 )
 
@@ -74,6 +75,7 @@ endif()
 add_library(CuteMacWidgets
     src/ui/ConfigurationDialog.cpp
     src/ui/DiskImageWidgets.cpp
+    src/ui/RomManagerDialog.cpp
 )
 
 target_link_libraries(CuteMacWidgets
@@ -216,6 +218,10 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME rom-patches COMMAND CuteMacRomPatchTests)
+
+    add_executable(CuteMacRomCatalogTests tests/rom_catalog_tests.cpp)
+    target_link_libraries(CuteMacRomCatalogTests PRIVATE CuteMacCore)
+    add_test(NAME rom-catalog COMMAND CuteMacRomCatalogTests)
 
     add_executable(CuteMacConfigurationTests
         tests/configuration_tests.cpp

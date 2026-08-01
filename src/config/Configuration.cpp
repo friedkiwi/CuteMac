@@ -244,7 +244,6 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
         nubusDevices.push_back(toml::table {
             { "slot", device.slot },
             { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video" : "cutemac_video" },
-            { "declaration_rom_path", toTomlString(device.declarationRomPath) },
             { "width", device.width },
             { "height", device.height },
             { "depth", device.depth },
@@ -255,14 +254,13 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
 
     toml::table document {
         { "name", toTomlString(configuration.profileName) },
-        { "version", 1 },
+        { "version", 2 },
         { "machine", toml::table {
                          { "id", toTomlString(configuration.machineId) },
                          { "ram_size_mib", configuration.ramSizeMiB },
                          { "cycles_per_frame", configuration.cyclesPerFrame },
                      } },
         { "storage", toml::table {
-                         { "rom_path", toTomlString(configuration.romPath) },
                          { "nvram_path", toTomlString(configuration.nvramPath) },
                          { "disk_path", toTomlString(configuration.diskPath) },
                          { "floppy_path", toTomlString(configuration.floppyPath) },

@@ -33,6 +33,8 @@
 #include "cutemac/config/Configuration.h"
 #include "cutemac/ui/ConfigurationDialog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
+#include "cutemac/ui/RomManagerDialog.h"
+#include "cutemac/rom/RomCatalog.h"
 
 namespace {
 
@@ -75,7 +77,7 @@ private:
         m_table->setHorizontalHeaderLabels({
             QStringLiteral("Name"),
             QStringLiteral("Machine"),
-            QStringLiteral("ROM"),
+            QStringLiteral("ROM status"),
             QStringLiteral("Disk"),
             QStringLiteral("Floppy"),
             QStringLiteral("Profile file"),
@@ -118,8 +120,10 @@ private:
             cutemac::ui::DiskImageManagerDialog dialog(this);
             dialog.exec();
         });
-        toolsMenu->addAction(QStringLiteral("Open ROM Folder"), this, []() {
-            QDesktopServices::openUrl(QUrl::fromLocalFile(cutemac::config::ConfigurationManager::romDirectoryPath()));
+        toolsMenu->addAction(QStringLiteral("ROM Manager..."), this, [this]() {
+            cutemac::ui::RomManagerDialog dialog(this);
+            dialog.exec();
+            loadProfiles();
         });
         toolsMenu->addAction(QStringLiteral("Open Disk Image Folder"), this, []() {
             QDesktopServices::openUrl(QUrl::fromLocalFile(cutemac::config::ConfigurationManager::diskImageDirectoryPath()));
@@ -158,7 +162,9 @@ private:
             const auto& profile = m_profiles[row];
             setItem(row, 0, profile.configuration.profileName);
             setItem(row, 1, profile.configuration.machineId);
-            setItem(row, 2, compactPath(profile.configuration.romPath));
+            const auto warning = cutemac::rom::RomCatalog().warningForConfiguration(profile.configuration);
+            setItem(row, 2, warning.isEmpty() ? QStringLiteral("Ready") : QStringLiteral("Needs attention"));
+            m_table->item(row, 2)->setToolTip(warning);
             setItem(row, 3, compactPath(profile.configuration.diskPath));
             setItem(row, 4, compactPath(profile.configuration.floppyPath));
             setItem(row, 5, profile.path);
@@ -264,6 +270,13 @@ private:
 #if defined(Q_OS_WASM)
         QMessageBox::information(this, QStringLiteral("Start"), QStringLiteral("Separate emulator sessions are not available in WebAssembly builds."));
 #else
+        const auto romWarning = cutemac::rom::RomCatalog().warningForConfiguration(m_profiles[row].configuration);
+        if (!romWarning.isEmpty()) {
+            const auto response = QMessageBox::warning(this, QStringLiteral("ROM Warning"), romWarning
+                    + QStringLiteral("\n\nThe machine may not start or some hardware may not work. Continue anyway?"),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (response != QMessageBox::Yes) return;
+        }
         const auto executable = sessionExecutablePath();
         if (!QFileInfo::exists(executable)) {
             QMessageBox::warning(this, QStringLiteral("Start"), QStringLiteral("Could not find emulator session executable:\n%1").arg(executable));

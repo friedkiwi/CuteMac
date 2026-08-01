@@ -26,7 +26,6 @@ int main()
     cutemac::config::Configuration configuration;
     configuration.profileName = QStringLiteral("Quoted \"Plus\"");
     configuration.machineId = QStringLiteral("mac-plus");
-    configuration.romPath = QStringLiteral("/tmp/a \\ b.rom");
     configuration.nvramPath = QStringLiteral("/tmp/mac-plus.nvram");
     configuration.ramSizeMiB = 4;
     configuration.cyclesPerFrame = 130560;
@@ -34,7 +33,7 @@ int main()
     configuration.iwmDevices.append({ QStringLiteral("/tmp/system.dsk"), true });
     configuration.scsiDevices.append({ 4, cutemac::config::ScsiDeviceType::HardDisk, QStringLiteral("/tmp/disk.hda"), false });
     configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4, true });
-    configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, QStringLiteral("/tmp/342-0008-a.bin"), 640, 480, 1, 1, false });
+    configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 1, false });
     configuration.skipRamPatternTest = true;
 
     cutemac::config::ConfigurationManager manager;
@@ -43,7 +42,7 @@ int main()
     ok &= expect(loaded.has_value(), "saved TOML must parse");
     if (loaded) {
         ok &= expect(loaded->profileName == configuration.profileName, "quoted profile name did not round-trip");
-        ok &= expect(loaded->romPath == configuration.romPath, "escaped path did not round-trip");
+        ok &= expect(loaded->romPath.isEmpty(), "new profiles must not store a per-machine ROM path");
         ok &= expect(loaded->nvramPath == configuration.nvramPath, "NVRAM path did not round-trip");
         ok &= expect(loaded->skipRamPatternTest, "ROM patch setting did not round-trip");
         ok &= expect(loaded->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "runtime speed did not round-trip");

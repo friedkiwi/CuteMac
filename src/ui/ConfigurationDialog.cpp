@@ -20,6 +20,7 @@
 #include <algorithm>
 
 #include "cutemac/machines/MachineCatalog.h"
+#include "cutemac/rom/RomCatalog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
 
 namespace cutemac::ui {
@@ -29,7 +30,6 @@ public:
     config::Configuration original;
     QLineEdit* name = nullptr;
     QComboBox* machine = nullptr;
-    QLineEdit* rom = nullptr;
     QLineEdit* nvram = nullptr;
     QSpinBox* ram = nullptr;
     QComboBox* speed = nullptr;
@@ -71,7 +71,6 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     slot->setCurrentIndex(qMax(0, slot->findData(device.slot)));
     form->addRow(QStringLiteral("Slot"), slot);
 
-    QLineEdit* declarationRom = nullptr;
     QSpinBox* width = nullptr;
     QSpinBox* height = nullptr;
     QComboBox* depth = nullptr;
@@ -99,18 +98,6 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         acceleration = new QCheckBox;
         acceleration->setChecked(device.acceleration);
         form->addRow(QStringLiteral("Acceleration"), acceleration);
-    } else {
-        declarationRom = new QLineEdit(device.declarationRomPath);
-        auto* browse = new QPushButton(QStringLiteral("Browse..."));
-        auto* romRow = new QHBoxLayout;
-        romRow->addWidget(declarationRom, 1);
-        romRow->addWidget(browse);
-        form->addRow(QStringLiteral("Declaration ROM"), romRow);
-        QObject::connect(browse, &QPushButton::clicked, &dialog, [&dialog, declarationRom]() {
-            const auto path = QFileDialog::getOpenFileName(&dialog, QStringLiteral("Select Apple 342-0008-A Declaration ROM"),
-                config::ConfigurationManager::romDirectoryPath(), QStringLiteral("ROM images (*.rom *.bin);;All files (*)"));
-            if (!path.isEmpty()) declarationRom->setText(path);
-        });
     }
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -127,8 +114,6 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         device.vramMiB = vram->value();
         device.acceleration = acceleration->isChecked();
         device.declarationRomPath.clear();
-    } else {
-        device.declarationRomPath = declarationRom->text().trimmed();
     }
     return true;
 }
@@ -157,12 +142,6 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->machine->setCurrentIndex(qMax(0, m_impl->machine->findData(m_impl->original.machineId)));
     form->addRow(QStringLiteral("Machine"), m_impl->machine);
 
-    m_impl->rom = new QLineEdit(m_impl->original.romPath);
-    auto* romBrowse = new QPushButton(QStringLiteral("Browse..."));
-    auto* romRow = new QHBoxLayout;
-    romRow->addWidget(m_impl->rom, 1);
-    romRow->addWidget(romBrowse);
-    form->addRow(QStringLiteral("ROM"), romRow);
     m_impl->nvram = new QLineEdit(m_impl->original.nvramPath);
     auto* nvramBrowse = new QPushButton(QStringLiteral("Browse..."));
     auto* nvramNew = new QPushButton(QStringLiteral("New..."));
@@ -292,10 +271,6 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     };
 
     connect(m_impl->machine, &QComboBox::currentIndexChanged, this, updateCapabilities);
-    connect(romBrowse, &QPushButton::clicked, this, [this]() {
-        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Select ROM"), config::ConfigurationManager::romDirectoryPath(), QStringLiteral("ROM images (*.rom *.bin);;All files (*)"));
-        if (!path.isEmpty()) m_impl->rom->setText(path);
-    });
     connect(nvramBrowse, &QPushButton::clicked, this, [this]() {
         const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Select NVRAM Image"),
             config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("NVRAM images (*.nvram *.pram);;All files (*)"));
@@ -379,10 +354,12 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
                 return;
             }
             occupiedSlots.insert(slot);
-            if (device.type == config::NuBusDeviceType::MacintoshIIVideo && device.declarationRomPath.trimmed().isEmpty()) {
-                QMessageBox::warning(this, windowTitle(), QStringLiteral("The Apple 630-0153 card requires its 342-0008-A declaration ROM."));
-                return;
-            }
+        }
+        auto prospective = this->configuration();
+        const auto romWarning = rom::RomCatalog().warningForConfiguration(prospective);
+        if (!romWarning.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("ROMs Missing or Discouraged"), romWarning
+                + QStringLiteral("\n\nYou can still save this profile. Add ROMs using Tools → ROM Manager."));
         }
         accept();
     });
@@ -396,7 +373,7 @@ config::Configuration ConfigurationDialog::configuration() const
     auto result = m_impl->original;
     result.profileName = m_impl->name->text().trimmed();
     result.machineId = m_impl->machine->currentData().toString();
-    result.romPath = m_impl->rom->text().trimmed();
+    result.romPath.clear();
     result.nvramPath = m_impl->nvram->text().trimmed();
     result.ramSizeMiB = m_impl->ram->value();
     result.runtimeSpeed = static_cast<config::RuntimeSpeed>(m_impl->speed->currentData().toInt());
@@ -413,6 +390,7 @@ config::Configuration ConfigurationDialog::configuration() const
         });
     }
     result.nubusDevices = m_impl->nubusDevices;
+    for (auto& device : result.nubusDevices) device.declarationRomPath.clear();
     result.diskPath = result.scsiDevices.isEmpty() ? QString() : result.scsiDevices.first().imagePath;
     return result;
 }

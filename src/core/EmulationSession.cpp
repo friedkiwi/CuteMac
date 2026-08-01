@@ -6,6 +6,7 @@
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
+#include "cutemac/rom/RomCatalog.h"
 
 namespace cutemac::core {
 
@@ -30,7 +31,8 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
         for (const auto& device : configuration.nubusDevices) {
             if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {
                 auto card = std::make_shared<devices::video::nubus::MacintoshIIVideoCard>();
-                if (device.declarationRomPath.isEmpty() || !card->loadDeclarationRom(device.declarationRomPath)) continue;
+                const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_m2_video"));
+                if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
                 (void)machine->installNuBusCard(device.slot, card);
             } else {
                 (void)machine->installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
@@ -48,8 +50,8 @@ bool EmulationSession::initialize()
     if (!m_machine) {
         return false;
     }
-    m_romLoaded = !m_configuration.romPath.isEmpty()
-        && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
+    const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
+    m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
         if (device.type == config::ScsiDeviceType::HardDisk && !device.imagePath.isEmpty()) {
             (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
@@ -79,8 +81,8 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     if (!m_machine) {
         return false;
     }
-    m_romLoaded = !m_configuration.romPath.isEmpty()
-        && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
+    const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
+    m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
         if (device.type == config::ScsiDeviceType::HardDisk && !device.imagePath.isEmpty()) {
             (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
