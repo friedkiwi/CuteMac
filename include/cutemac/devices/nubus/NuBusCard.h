@@ -1,0 +1,40 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+
+#include <QString>
+
+#include "cutemac/devices/video/VideoFrame.h"
+
+namespace cutemac::devices::nubus {
+
+class NuBusCard {
+public:
+    using IrqCallback = std::function<void(bool)>;
+
+    virtual ~NuBusCard() = default;
+
+    [[nodiscard]] virtual QString id() const = 0;
+    virtual void reset() = 0;
+    virtual void tick(std::uint64_t cycles) = 0;
+    [[nodiscard]] virtual std::uint8_t read8(std::uint32_t offset) = 0;
+    virtual void write8(std::uint32_t offset, std::uint8_t value) = 0;
+    [[nodiscard]] virtual video::VideoFrame videoFrame() const { return {}; }
+
+    void setIrqCallback(IrqCallback callback) { m_irqCallback = std::move(callback); }
+
+protected:
+    void setIrq(bool asserted)
+    {
+        if (m_irqAsserted == asserted) return;
+        m_irqAsserted = asserted;
+        if (m_irqCallback) m_irqCallback(asserted);
+    }
+
+private:
+    IrqCallback m_irqCallback;
+    bool m_irqAsserted = false;
+};
+
+} // namespace cutemac::devices::nubus

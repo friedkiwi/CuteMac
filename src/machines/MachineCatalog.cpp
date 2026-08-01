@@ -26,9 +26,15 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
             CpuFamily::M68k,
             QStringLiteral("68030"),
             {
+                QStringLiteral("device.via6522.primary"),
+                QStringLiteral("device.via6522.secondary"),
+                QStringLiteral("device.scc.z8530"),
                 QStringLiteral("device.adb.bus"),
-                QStringLiteral("device.scsi.bus"),
-                QStringLiteral("device.video"),
+                QStringLiteral("device.swim1"),
+                QStringLiteral("device.scsi.ncr5380"),
+                QStringLiteral("device.nubus"),
+                QStringLiteral("device.audio.asc"),
+                QStringLiteral("device.rtc.pram"),
             },
         },
         {

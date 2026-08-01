@@ -8,7 +8,8 @@ The repository is currently early emulator bringup work:
 - Mac Plus IWM/floppy image loading for raw 400K/800K and Disk Copy 4.2 media
 - pluggable CPU cores for 68k and PowerPC targets
 - machine profiles composed from reusable devices
-- NuBus video support planned around the authentic Apple Macintosh II Video Card (630-0153) and an optional accelerated, configurable CuteMac Video card
+- Macintosh IIcx boot support for System 6 raw 800K floppies, NuBus, ADB, SWIM1, NCR5380 SCSI, ASC, and dual VIAs
+- NuBus video using configurable CuteMac Video or the authentic Apple Macintosh II Video Card (630-0153)
 - TOML configuration files for emulator and machine settings
 - portable CMake/Qt 6 builds for Linux, Windows, macOS, and WebAssembly
 
@@ -28,7 +29,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, `CuteMacDebugSession` for a readline debug console, and `CuteMacMacPlusSmoke` for headless ROM verification.
+The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, `CuteMacDebugSession` for a readline debug console, and headless Mac Plus/IIcx smoke tools.
 
 Every push also runs the Windows Win64 workflow. Its `CuteMac-win64` artifact is a portable folder containing the release executables and their Qt 6 runtime dependencies.
 
@@ -63,7 +64,7 @@ Mac Plus profiles can configure a 256-byte NVRAM image. RTC reads expose the cur
 nvram_path = "/path/to/mac-plus.nvram"
 ```
 
-New profiles default to unlimited speed. The shared machine configuration window organizes general, IWM/floppy, and addressed SCSI-device settings into capability-dependent tabs. The Tools menu provides a disk image manager for importing, exporting, and creating typed floppy and hard-disk images. Configuration and live media insertion use the same library picker, filtered to the requested floppy, CD-ROM, or hard-disk media type.
+New profiles default to unlimited speed. The shared machine configuration window provides capability-dependent general, floppy, SCSI, and NuBus tabs. The authentic 630-0153 card requires its user-supplied 4 KiB `342-0008-A` declaration ROM. The Tools menu provides a disk image manager for typed floppy and hard-disk images.
 
 Mac Plus ROM smoke test:
 

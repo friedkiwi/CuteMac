@@ -38,6 +38,7 @@ public:
     [[nodiscard]] bool paused() const;
     [[nodiscard]] Status status() const;
     [[nodiscard]] QByteArray framebufferBytes() const;
+    [[nodiscard]] devices::video::VideoFrame videoFrame() const;
     [[nodiscard]] config::Configuration configuration() const;
 
     void queueMousePosition(std::int16_t x, std::int16_t y);

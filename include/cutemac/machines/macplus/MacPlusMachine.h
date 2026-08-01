@@ -98,6 +98,7 @@ public:
     void debugWrite32(std::uint32_t address, std::uint32_t value);
 
     [[nodiscard]] QByteArray framebufferBytes() const override;
+    [[nodiscard]] devices::video::VideoFrame videoFrame() const override;
     [[nodiscard]] std::uint32_t framebufferHash() const;
     [[nodiscard]] QByteArray soundBufferBytes() const;
     [[nodiscard]] std::uint32_t soundBufferHash() const;

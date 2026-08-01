@@ -60,7 +60,9 @@ QStringList Configuration::enabledRomPatches() const
 {
     QStringList patches;
     if (skipRamPatternTest) {
-        patches.append(QStringLiteral("macplus.skip_ram_pattern_test"));
+        patches.append(machineId == QStringLiteral("mac-iicx")
+                ? QStringLiteral("maciicx.skip_ram_pattern_test")
+                : QStringLiteral("macplus.skip_ram_pattern_test"));
     }
     return patches;
 }
@@ -171,6 +173,23 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                 }
             }
         }
+        if (const auto* devices = document["nubus"]["devices"].as_array()) {
+            for (const auto& node : *devices) {
+                if (const auto* device = node.as_table()) {
+                    const auto type = fromTomlString((*device)["type"].value_or<std::string>("cutemac_video"));
+                    configuration.nubusDevices.append({
+                        static_cast<int>((*device)["slot"].value_or<std::int64_t>(9)),
+                        type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo : NuBusDeviceType::CuteMacVideo,
+                        fromTomlString((*device)["declaration_rom_path"].value_or<std::string>("")),
+                        static_cast<int>((*device)["width"].value_or<std::int64_t>(640)),
+                        static_cast<int>((*device)["height"].value_or<std::int64_t>(480)),
+                        static_cast<int>((*device)["depth"].value_or<std::int64_t>(8)),
+                        static_cast<int>((*device)["vram_mib"].value_or<std::int64_t>(4)),
+                        (*device)["acceleration"].value_or(true),
+                    });
+                }
+            }
+        }
     } catch (const toml::parse_error&) {
         return std::nullopt;
     }
@@ -220,6 +239,19 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             { "read_only", device.readOnly },
         });
     }
+    toml::array nubusDevices;
+    for (const auto& device : configuration.nubusDevices) {
+        nubusDevices.push_back(toml::table {
+            { "slot", device.slot },
+            { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video" : "cutemac_video" },
+            { "declaration_rom_path", toTomlString(device.declarationRomPath) },
+            { "width", device.width },
+            { "height", device.height },
+            { "depth", device.depth },
+            { "vram_mib", device.vramMiB },
+            { "acceleration", device.acceleration },
+        });
+    }
 
     toml::table document {
         { "name", toTomlString(configuration.profileName) },
@@ -240,6 +272,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
                      } },
         { "iwm", toml::table { { "drives", std::move(iwmDevices) } } },
         { "scsi", toml::table { { "devices", std::move(scsiDevices) } } },
+        { "nubus", toml::table { { "devices", std::move(nubusDevices) } } },
         { "rom_patches", toml::table {
                              { "skip_ram_pattern_test", configuration.skipRamPatternTest },
                          } },

@@ -19,6 +19,8 @@ public:
 
     void writeControl(Channel channel, std::uint8_t value);
     void writeData(Channel channel, std::uint8_t value);
+    void tick(int cycles);
+    [[nodiscard]] bool interruptActive() const;
 
 private:
     struct ChannelState {
@@ -26,6 +28,8 @@ private:
         std::uint8_t selectedRegister = 0;
         bool awaitingRegisterWrite = false;
         std::uint8_t data = 0;
+        int transmitCycles = 0;
+        bool transmitInterruptPending = false;
     };
 
     [[nodiscard]] ChannelState& state(Channel channel);

@@ -5,6 +5,7 @@ namespace cutemac::devices::via6522 {
 namespace {
 
 constexpr std::uint8_t registerB = 0;
+constexpr std::uint8_t registerAHandshake = 1;
 constexpr std::uint8_t dataDirectionB = 2;
 constexpr std::uint8_t dataDirectionA = 3;
 constexpr std::uint8_t timer1CounterLow = 4;
@@ -19,35 +20,35 @@ constexpr std::uint8_t interruptFlag = 13;
 constexpr std::uint8_t interruptEnable = 14;
 constexpr std::uint8_t registerA = 15;
 
-constexpr std::uint8_t initialPortA = 0x7b;
-constexpr std::uint8_t initialPortB = 0x8f;
-constexpr std::uint8_t initialDdrA = 0x7f;
-constexpr std::uint8_t initialDdrB = 0x87;
 constexpr std::uint8_t overlayBit = 0x10;
 constexpr std::uint8_t vblInterruptBit = 0x02;
+constexpr std::uint8_t cb1InterruptBit = 0x10;
+constexpr std::uint8_t cb2InterruptBit = 0x08;
 constexpr std::uint8_t timer1InterruptBit = 0x40;
 constexpr std::uint8_t timer2InterruptBit = 0x20;
 constexpr std::uint8_t shiftRegisterInterruptBit = 0x04;
 constexpr int keyboardByteCycles = 80;
 constexpr int keyboardInquiryTimeoutCycles = 1958400;
-constexpr int vblPeriodCycles = 130560;
 
 } // namespace
 
 void Via6522::reset()
 {
     m_registers.fill(0);
-    m_registers[registerA] = initialPortA;
-    m_registers[registerB] = initialPortB;
-    m_registers[dataDirectionA] = initialDdrA;
-    m_registers[dataDirectionB] = initialDdrB;
+    m_registers[registerA] = m_initialPortA;
+    m_registers[registerB] = m_initialPortB;
+    m_registers[dataDirectionA] = m_initialDdrA;
+    m_registers[dataDirectionB] = m_initialDdrB;
     m_interruptEnable = 0;
     m_timer1Counter = 0;
     m_timer1Latch = 0;
     m_timer1Running = false;
     m_timer2Counter = 0;
     m_timer2Running = false;
-    m_vblCycles = vblPeriodCycles;
+    m_vblCycles = m_automaticCa1Period;
+    m_ca1 = true;
+    m_cb1 = true;
+    m_cb2 = true;
     m_keyboardTransitions.clear();
     m_keyboardCommand = 0;
     m_shiftCycles = 0;
@@ -61,7 +62,15 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
 {
     index &= 0x0f;
     if (index == registerB) {
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~(cb1InterruptBit | cb2InterruptBit));
         return portB();
+    }
+    if (index == registerAHandshake) {
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~0x03U);
+        return portA();
+    }
+    if (index == registerA) {
+        return portA();
     }
     if (index == shiftRegister) {
         m_registers[interruptFlag] &= static_cast<std::uint8_t>(~shiftRegisterInterruptBit);
@@ -141,12 +150,13 @@ void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
     if (index == shiftRegister) {
         m_registers[index] = value;
         m_registers[interruptFlag] &= static_cast<std::uint8_t>(~shiftRegisterInterruptBit);
-        if ((m_registers[auxiliaryControl] & 0x1c) == 0x1c) {
+        if ((m_registers[auxiliaryControl] & 0x1c) == 0x1c && !m_shiftRegisterWrite) {
             m_keyboardCommand = value;
             m_keyboardCommandPending = true;
             m_keyboardResponseReady = false;
             m_shiftCycles = keyboardByteCycles;
         }
+        if (m_shiftRegisterWrite && (m_registers[auxiliaryControl] & 0x10) != 0) m_shiftRegisterWrite(value);
         return;
     }
     if (index == timer2CounterHigh) {
@@ -157,8 +167,12 @@ void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
         return;
     }
 
-    m_registers[index] = value;
-    if (index == registerA) {
+    if (index == registerAHandshake) {
+        m_registers[registerA] = value;
+    } else {
+        m_registers[index] = value;
+    }
+    if (index == registerA || index == registerAHandshake || index == dataDirectionA) {
         notifyPortAChanged();
     } else if ((index == registerB || index == dataDirectionB) && m_portBChanged) {
         m_portBChanged(m_registers[registerB], m_registers[dataDirectionB]);
@@ -171,10 +185,12 @@ void Via6522::tick(int cycles)
         return;
     }
 
-    m_vblCycles -= cycles;
-    while (m_vblCycles <= 0) {
-        m_vblCycles += vblPeriodCycles;
-        m_registers[interruptFlag] |= vblInterruptBit;
+    if (m_automaticCa1Period > 0) {
+        m_vblCycles -= cycles;
+        while (m_vblCycles <= 0) {
+            m_vblCycles += m_automaticCa1Period;
+            m_registers[interruptFlag] |= vblInterruptBit;
+        }
     }
 
     if (m_timer1Running) {
@@ -242,9 +258,67 @@ void Via6522::setPortBChangedCallback(PortBChangedCallback callback)
     if (m_portBChanged) m_portBChanged(m_registers[registerB], m_registers[dataDirectionB]);
 }
 
+void Via6522::setShiftRegisterWriteCallback(ShiftRegisterWriteCallback callback)
+{
+    m_shiftRegisterWrite = std::move(callback);
+}
+
+void Via6522::externalShiftIn(std::uint8_t value)
+{
+    m_registers[shiftRegister] = value;
+    m_registers[interruptFlag] |= shiftRegisterInterruptBit;
+}
+
+void Via6522::externalShiftOutComplete()
+{
+    m_registers[interruptFlag] |= shiftRegisterInterruptBit;
+}
+
+void Via6522::setPowerOnState(std::uint8_t portA, std::uint8_t portB, std::uint8_t ddrA, std::uint8_t ddrB)
+{
+    m_initialPortA = portA;
+    m_initialPortB = portB;
+    m_initialDdrA = ddrA;
+    m_initialDdrB = ddrB;
+}
+
+void Via6522::setAutomaticCa1Period(int cycles)
+{
+    m_automaticCa1Period = std::max(0, cycles);
+    m_vblCycles = m_automaticCa1Period;
+}
+
+void Via6522::setCa1(bool high)
+{
+    if (m_ca1 && !high) m_registers[interruptFlag] |= vblInterruptBit;
+    m_ca1 = high;
+}
+
+void Via6522::setCb1(bool high)
+{
+    if (m_cb1 && !high) m_registers[interruptFlag] |= cb1InterruptBit;
+    m_cb1 = high;
+}
+
+void Via6522::setCb2(bool high)
+{
+    if (m_cb2 && !high) m_registers[interruptFlag] |= cb2InterruptBit;
+    m_cb2 = high;
+}
+
 std::uint8_t Via6522::portA() const
 {
-    return m_registers[registerA];
+    const auto outputs = static_cast<std::uint8_t>(m_registers[registerA] & m_registers[dataDirectionA]);
+    const auto inputs = static_cast<std::uint8_t>(m_portAInputs & ~m_registers[dataDirectionA]);
+    return static_cast<std::uint8_t>(outputs | inputs);
+}
+
+void Via6522::setPortAInputBit(std::uint8_t bit, bool high)
+{
+    if (bit >= 8) return;
+    const auto mask = static_cast<std::uint8_t>(1U << bit);
+    if (high) m_portAInputs |= mask;
+    else m_portAInputs &= static_cast<std::uint8_t>(~mask);
 }
 
 std::uint8_t Via6522::portB() const
@@ -303,6 +377,10 @@ Via6522::DebugState Via6522::debugState() const
         m_keyboardTransitions.size(),
         m_keyboardCommandPending,
         m_keyboardResponseReady,
+        m_registers[auxiliaryControl],
+        m_registers[shiftRegister],
+        portA(),
+        portB(),
     };
 }
 

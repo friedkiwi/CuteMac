@@ -66,13 +66,28 @@ bool sameScsiDevices(const QVector<cutemac::config::ScsiDeviceConfiguration>& le
     return true;
 }
 
+bool sameNuBusDevices(const QVector<cutemac::config::NuBusDeviceConfiguration>& left,
+    const QVector<cutemac::config::NuBusDeviceConfiguration>& right)
+{
+    if (left.size() != right.size()) return false;
+    for (qsizetype index = 0; index < left.size(); ++index) {
+        const auto& a = left[index];
+        const auto& b = right[index];
+        if (a.slot != b.slot || a.type != b.type || a.declarationRomPath != b.declarationRomPath
+            || a.width != b.width || a.height != b.height || a.depth != b.depth
+            || a.vramMiB != b.vramMiB || a.acceleration != b.acceleration) return false;
+    }
+    return true;
+}
+
 bool requiresMachineReset(const cutemac::config::Configuration& current, const cutemac::config::Configuration& proposed)
 {
     return current.machineId != proposed.machineId || current.romPath != proposed.romPath
         || current.nvramPath != proposed.nvramPath
         || current.ramSizeMiB != proposed.ramSizeMiB || current.skipRamPatternTest != proposed.skipRamPatternTest
         || !sameIwmDevices(current.iwmDevices, proposed.iwmDevices)
-        || !sameScsiDevices(current.scsiDevices, proposed.scsiDevices);
+        || !sameScsiDevices(current.scsiDevices, proposed.scsiDevices)
+        || !sameNuBusDevices(current.nubusDevices, proposed.nubusDevices);
 }
 
 class DisplayWidget final : public QWidget {
@@ -95,9 +110,10 @@ public:
         update();
     }
 
-    void setFramebuffer(const QByteArray& bytes)
+    void setFramebuffer(const cutemac::devices::video::VideoFrame& frame)
     {
-        m_image = cutemac::session::FramebufferRenderer::renderMonochrome(bytes, 512, 342);
+        const auto image = cutemac::session::FramebufferRenderer::render(frame);
+        if (!image.isNull()) m_image = image;
         update();
     }
 
@@ -256,7 +272,7 @@ private:
 
     [[nodiscard]] QRect displayRect() const
     {
-        const QSize baseSize(512, 342);
+        const QSize baseSize = m_image.size().isEmpty() ? QSize(512, 342) : m_image.size();
         const auto scale = std::max(1, std::min(width() / baseSize.width(), height() / baseSize.height()));
         const QSize scaled(baseSize.width() * scale, baseSize.height() * scale);
         return QRect(QPoint((width() - scaled.width()) / 2, (height() - scaled.height()) / 2), scaled);
@@ -264,14 +280,15 @@ private:
 
     [[nodiscard]] QPoint macPointFor(const QPoint& widgetPoint) const
     {
+        const QSize baseSize = m_image.size().isEmpty() ? QSize(512, 342) : m_image.size();
         const auto target = displayRect();
         if (!target.contains(widgetPoint)) {
-            return QPoint(std::clamp(widgetPoint.x() - target.left(), 0, target.width() - 1) * 512 / target.width(),
-                std::clamp(widgetPoint.y() - target.top(), 0, target.height() - 1) * 342 / target.height());
+            return QPoint(std::clamp(widgetPoint.x() - target.left(), 0, target.width() - 1) * baseSize.width() / target.width(),
+                std::clamp(widgetPoint.y() - target.top(), 0, target.height() - 1) * baseSize.height() / target.height());
         }
 
-        return QPoint((widgetPoint.x() - target.left()) * 512 / target.width(),
-            (widgetPoint.y() - target.top()) * 342 / target.height());
+        return QPoint((widgetPoint.x() - target.left()) * baseSize.width() / target.width(),
+            (widgetPoint.y() - target.top()) * baseSize.height() / target.height());
     }
 
     void sendMouseEvent(QMouseEvent* event)
@@ -625,7 +642,7 @@ private:
         m_romLoaded = m_session.reconfigure(m_configuration);
         buildToolbar();
         if (m_romLoaded) {
-            m_display->setFramebuffer(m_session.framebufferBytes());
+            m_display->setFramebuffer(m_session.videoFrame());
             statusBar()->showMessage(QStringLiteral("ROM loaded"), 2000);
         } else {
             statusBar()->showMessage(QStringLiteral("ROM not loaded"));
@@ -712,7 +729,7 @@ private:
         }
 
         m_runner.runHostFrame();
-        m_display->setFramebuffer(m_session.framebufferBytes());
+        m_display->setFramebuffer(m_session.videoFrame());
         ++m_frames;
         if ((m_frames % 15) == 0) {
             updateStatus();

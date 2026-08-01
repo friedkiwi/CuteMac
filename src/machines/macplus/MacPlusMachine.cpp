@@ -578,6 +578,18 @@ QByteArray MacPlusMachine::framebufferBytes() const
     return bytes;
 }
 
+devices::video::VideoFrame MacPlusMachine::videoFrame() const
+{
+    return {
+        512,
+        342,
+        512 / 8,
+        devices::video::PixelFormat::Monochrome1,
+        framebufferBytes(),
+        { 0xffffffffU, 0xff000000U },
+    };
+}
+
 std::uint32_t MacPlusMachine::framebufferHash() const
 {
     const auto bytes = framebufferBytes();

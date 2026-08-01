@@ -76,6 +76,7 @@ private:
     [[nodiscard]] std::uint8_t selectedDriveRegister() const;
     [[nodiscard]] bool driveSenseHigh();
     [[nodiscard]] std::uint8_t lineMask() const;
+    [[nodiscard]] std::uint8_t swimAccess(std::uint8_t registerIndex, std::uint8_t value, bool write);
     [[nodiscard]] floppy::FloppyDiskImage& selectedDrive();
     [[nodiscard]] const floppy::FloppyDiskImage& selectedDrive() const;
     void appendTraceEvent(const QString& event);
@@ -95,6 +96,14 @@ private:
     std::uint64_t m_dataWrites = 0;
     bool m_traceEnabled = false;
     QStringList m_traceEvents;
+    bool m_swimMode = false;
+    std::uint8_t m_swimTransition = 0;
+    std::uint8_t m_swimModeRegister = 0;
+    std::uint8_t m_swimSetup = 0;
+    std::uint8_t m_swimPhases = 0;
+    std::array<std::uint8_t, 16> m_swimParameters {};
+    std::uint8_t m_swimParameterIndex = 0;
+    std::uint8_t m_swimError = 0;
 };
 
 } // namespace cutemac::devices::iwm

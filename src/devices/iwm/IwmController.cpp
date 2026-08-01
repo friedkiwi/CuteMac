@@ -21,6 +21,14 @@ void IwmController::reset()
     m_statusReads = 0;
     m_handshakeReads = 0;
     m_dataWrites = 0;
+    m_swimMode = false;
+    m_swimTransition = 0;
+    m_swimModeRegister = 0;
+    m_swimSetup = 0;
+    m_swimPhases = 0;
+    m_swimParameters.fill(0);
+    m_swimParameterIndex = 0;
+    m_swimError = 0;
     m_internalDrive.setMotorOn(false);
     m_externalDrive.setMotorOn(false);
 }
@@ -33,6 +41,25 @@ std::uint8_t IwmController::access(std::uint8_t registerIndex)
 std::uint8_t IwmController::access(std::uint8_t registerIndex, std::uint8_t value, bool write)
 {
     registerIndex &= 0x0f;
+    if (m_swimMode) return swimAccess(registerIndex, value, write);
+
+    if (write && registerIndex == 0x0f) {
+        const bool expected = m_swimTransition == 1 ? (value & 0x40) == 0 : (value & 0x40) != 0;
+        if (expected) {
+            ++m_swimTransition;
+            if (m_swimTransition == 4) {
+                m_swimMode = true;
+                m_swimModeRegister = 0x40;
+                m_swimTransition = 0;
+                appendTraceEvent(QStringLiteral("swim entered ISM mode"));
+                return 0xff;
+            }
+        } else {
+            m_swimTransition = 0;
+        }
+    } else if (m_swimTransition != 0) {
+        m_swimTransition = 0;
+    }
     const auto line = static_cast<std::uint8_t>(registerIndex >> 1);
     setLine(line, (registerIndex & 1) != 0);
 
@@ -41,6 +68,70 @@ std::uint8_t IwmController::access(std::uint8_t registerIndex, std::uint8_t valu
     }
 
     return readRegister();
+}
+
+std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t value, bool write)
+{
+    const auto reg = static_cast<std::uint8_t>(registerIndex & 7);
+    if (write) {
+        switch (reg) {
+        case 0:
+        case 1:
+            ++m_dataWrites;
+            break;
+        case 2:
+            break;
+        case 3:
+            m_swimParameters[m_swimParameterIndex] = value;
+            m_swimParameterIndex = static_cast<std::uint8_t>((m_swimParameterIndex + 1) & 15);
+            break;
+        case 4:
+            m_swimPhases = value;
+            for (std::uint8_t line = 0; line < 4; ++line) setLine(line, (value & (1U << line)) != 0);
+            break;
+        case 5:
+            m_swimSetup = value;
+            break;
+        case 6:
+            m_swimModeRegister = static_cast<std::uint8_t>(m_swimModeRegister & ~value);
+            m_swimParameterIndex = 0;
+            if ((m_swimModeRegister & 0x40) == 0) m_swimMode = false;
+            break;
+        case 7:
+            m_swimModeRegister = static_cast<std::uint8_t>(m_swimModeRegister | value);
+            break;
+        }
+        if (m_swimModeRegister & 0x01) m_swimError = 0;
+        m_internalDrive.setMotorOn((m_swimModeRegister & 0x80) != 0);
+        return 0xff;
+    }
+
+    switch (reg) {
+    case 0:
+    case 1:
+        ++m_dataReads;
+        return selectedDrive().nextNibble();
+    case 2: {
+        const auto error = m_swimError;
+        m_swimError = 0;
+        return error;
+    }
+    case 3: {
+        const auto result = m_swimParameters[m_swimParameterIndex];
+        m_swimParameterIndex = static_cast<std::uint8_t>((m_swimParameterIndex + 1) & 15);
+        return result;
+    }
+    case 4: return m_swimPhases;
+    case 5: return m_swimSetup;
+    case 6: return m_swimModeRegister;
+    case 7: {
+        std::uint8_t handshake = 0xc0;
+        if (!selectedDrive().inserted() || !selectedDrive().writable()) handshake |= 0x0c;
+        if (m_swimError) handshake |= 0x20;
+        return handshake;
+    }
+    default: return 0xff;
+    }
 }
 
 bool IwmController::loadFloppyImage(const QString& path, bool readOnly)

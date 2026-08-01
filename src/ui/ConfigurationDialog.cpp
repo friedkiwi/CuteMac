@@ -39,6 +39,8 @@ public:
     QCheckBox* floppyReadOnly = nullptr;
     QWidget* scsiTab = nullptr;
     QTableWidget* scsi = nullptr;
+    QWidget* nubusTab = nullptr;
+    QTableWidget* nubus = nullptr;
 };
 
 ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QWidget* parent)
@@ -127,6 +129,26 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     scsiLayout->addLayout(scsiButtons);
     m_impl->tabs->addTab(m_impl->scsiTab, QStringLiteral("SCSI"));
 
+    m_impl->nubusTab = new QWidget;
+    auto* nubusLayout = new QVBoxLayout(m_impl->nubusTab);
+    m_impl->nubus = new QTableWidget(0, 8);
+    m_impl->nubus->setHorizontalHeaderLabels({ QStringLiteral("Slot"), QStringLiteral("Card"), QStringLiteral("Declaration ROM"),
+        QStringLiteral("Width"), QStringLiteral("Height"), QStringLiteral("Depth"), QStringLiteral("VRAM MiB"), QStringLiteral("Acceleration") });
+    m_impl->nubus->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_impl->nubus->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_impl->nubus->setSelectionMode(QAbstractItemView::SingleSelection);
+    nubusLayout->addWidget(m_impl->nubus, 1);
+    auto* nubusButtons = new QHBoxLayout;
+    auto* addCuteMacVideo = new QPushButton(QStringLiteral("Add CuteMac Video"));
+    auto* addAppleVideo = new QPushButton(QStringLiteral("Add Macintosh II Video Card..."));
+    auto* removeNuBus = new QPushButton(QStringLiteral("Remove"));
+    nubusButtons->addWidget(addCuteMacVideo);
+    nubusButtons->addWidget(addAppleVideo);
+    nubusButtons->addWidget(removeNuBus);
+    nubusButtons->addStretch();
+    nubusLayout->addLayout(nubusButtons);
+    m_impl->tabs->addTab(m_impl->nubusTab, QStringLiteral("NuBus"));
+
     const auto addScsiRow = [this](const config::ScsiDeviceConfiguration& device) {
         const int row = m_impl->scsi->rowCount();
         m_impl->scsi->insertRow(row);
@@ -148,15 +170,50 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     };
     for (const auto& device : m_impl->original.scsiDevices) addScsiRow(device);
 
+    const auto addNuBusRow = [this](const config::NuBusDeviceConfiguration& device) {
+        const int row = m_impl->nubus->rowCount();
+        m_impl->nubus->insertRow(row);
+        auto* slot = new QComboBox;
+        for (int value = 9; value <= 11; ++value) slot->addItem(QString::number(value), value);
+        slot->setCurrentIndex(qMax(0, slot->findData(device.slot)));
+        m_impl->nubus->setCellWidget(row, 0, slot);
+        auto* type = new QComboBox;
+        type->addItem(QStringLiteral("CuteMac Video"), static_cast<int>(config::NuBusDeviceType::CuteMacVideo));
+        type->addItem(QStringLiteral("Apple 630-0153"), static_cast<int>(config::NuBusDeviceType::MacintoshIIVideo));
+        type->setCurrentIndex(type->findData(static_cast<int>(device.type)));
+        m_impl->nubus->setCellWidget(row, 1, type);
+        m_impl->nubus->setItem(row, 2, new QTableWidgetItem(device.declarationRomPath));
+        const auto spin = [this, row](int column, int minimum, int maximum, int value) {
+            auto* widget = new QSpinBox;
+            widget->setRange(minimum, maximum);
+            widget->setValue(value);
+            m_impl->nubus->setCellWidget(row, column, widget);
+        };
+        spin(3, 320, 4096, device.width);
+        spin(4, 200, 2160, device.height);
+        auto* depth = new QComboBox;
+        for (const int value : {1, 2, 4, 8, 16, 32}) depth->addItem(QString::number(value), value);
+        depth->setCurrentIndex(qMax(0, depth->findData(device.depth)));
+        m_impl->nubus->setCellWidget(row, 5, depth);
+        spin(6, 1, 14, device.vramMiB);
+        auto* acceleration = new QCheckBox;
+        acceleration->setChecked(device.acceleration);
+        acceleration->setEnabled(device.type == config::NuBusDeviceType::CuteMacVideo);
+        m_impl->nubus->setCellWidget(row, 7, acceleration);
+    };
+    for (const auto& device : m_impl->original.nubusDevices) addNuBusRow(device);
+
     const auto updateCapabilities = [this]() {
         const auto machineId = m_impl->machine->currentData().toString();
         const auto profiles = machines::MachineCatalog::supportedMachines();
         const auto it = std::find_if(profiles.cbegin(), profiles.cend(), [&](const auto& profile) { return profile.id == machineId; });
         const auto devices = it == profiles.cend() ? QStringList {} : it->reusableDevices;
-        const bool iwm = devices.contains(QStringLiteral("device.iwm"));
+        const bool iwm = devices.contains(QStringLiteral("device.iwm")) || devices.contains(QStringLiteral("device.swim1"));
         const bool scsi = devices.contains(QStringLiteral("device.scsi.ncr5380")) || devices.contains(QStringLiteral("device.scsi.bus"));
+        const bool nubus = devices.contains(QStringLiteral("device.nubus"));
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->iwmTab), iwm);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->scsiTab), scsi);
+        m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->nubusTab), nubus);
         m_impl->ram->setRange(machineId == QStringLiteral("mac-plus") ? 1 : 1, machineId == QStringLiteral("mac-plus") ? 4 : 256);
         m_impl->ram->setValue(qBound(m_impl->ram->minimum(), m_impl->original.ramSizeMiB, m_impl->ram->maximum()));
     };
@@ -199,6 +256,17 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         const auto path = createDiskImage(storage::DiskImageType::HardDisk, this);
         if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::HardDisk, path, false });
     });
+    connect(addCuteMacVideo, &QPushButton::clicked, this, [this, addNuBusRow]() {
+        addNuBusRow({9 + (m_impl->nubus->rowCount() % 3), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4, true});
+    });
+    connect(addAppleVideo, &QPushButton::clicked, this, [this, addNuBusRow]() {
+        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Select Apple 342-0008-A Declaration ROM"),
+            config::ConfigurationManager::romDirectoryPath(), QStringLiteral("ROM images (*.rom *.bin);;All files (*)"));
+        if (!path.isEmpty()) addNuBusRow({9 + (m_impl->nubus->rowCount() % 3), config::NuBusDeviceType::MacintoshIIVideo, path, 640, 480, 1, 1, false});
+    });
+    connect(removeNuBus, &QPushButton::clicked, this, [this]() {
+        if (m_impl->nubus->currentRow() >= 0) m_impl->nubus->removeRow(m_impl->nubus->currentRow());
+    });
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     outer->addWidget(buttons);
@@ -216,6 +284,20 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
                 return;
             }
             ids.insert(id);
+        }
+        QSet<int> occupiedSlots;
+        for (int row = 0; row < m_impl->nubus->rowCount(); ++row) {
+            const int slot = qobject_cast<QComboBox*>(m_impl->nubus->cellWidget(row, 0))->currentData().toInt();
+            if (occupiedSlots.contains(slot)) {
+                QMessageBox::warning(this, windowTitle(), QStringLiteral("Each NuBus slot can only be used once."));
+                return;
+            }
+            occupiedSlots.insert(slot);
+            const auto type = static_cast<config::NuBusDeviceType>(qobject_cast<QComboBox*>(m_impl->nubus->cellWidget(row, 1))->currentData().toInt());
+            if (type == config::NuBusDeviceType::MacintoshIIVideo && m_impl->nubus->item(row, 2)->text().trimmed().isEmpty()) {
+                QMessageBox::warning(this, windowTitle(), QStringLiteral("The Apple 630-0153 card requires its 342-0008-A declaration ROM."));
+                return;
+            }
         }
         accept();
     });
@@ -243,6 +325,19 @@ config::Configuration ConfigurationDialog::configuration() const
             static_cast<config::ScsiDeviceType>(qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 1))->currentData().toInt()),
             m_impl->scsi->item(row, 2)->text(),
             qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 3))->currentData().toBool(),
+        });
+    }
+    result.nubusDevices.clear();
+    for (int row = 0; row < m_impl->nubus->rowCount(); ++row) {
+        result.nubusDevices.append({
+            qobject_cast<QComboBox*>(m_impl->nubus->cellWidget(row, 0))->currentData().toInt(),
+            static_cast<config::NuBusDeviceType>(qobject_cast<QComboBox*>(m_impl->nubus->cellWidget(row, 1))->currentData().toInt()),
+            m_impl->nubus->item(row, 2)->text().trimmed(),
+            qobject_cast<QSpinBox*>(m_impl->nubus->cellWidget(row, 3))->value(),
+            qobject_cast<QSpinBox*>(m_impl->nubus->cellWidget(row, 4))->value(),
+            qobject_cast<QComboBox*>(m_impl->nubus->cellWidget(row, 5))->currentData().toInt(),
+            qobject_cast<QSpinBox*>(m_impl->nubus->cellWidget(row, 6))->value(),
+            qobject_cast<QCheckBox*>(m_impl->nubus->cellWidget(row, 7))->isChecked(),
         });
     }
     result.diskPath = result.scsiDevices.isEmpty() ? QString() : result.scsiDevices.first().imagePath;

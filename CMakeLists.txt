@@ -7,6 +7,7 @@ project(CuteMac
 )
 
 include(CTest)
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,8 +32,11 @@ add_library(CuteMacCore
     src/cpu/m68k/engine/softfloat/softfloat.c
     src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
+    src/devices/audio/AppleSoundChip.cpp
+    src/devices/adb/AdbTransceiver.cpp
     src/devices/floppy/FloppyDiskImage.cpp
     src/devices/iwm/IwmController.cpp
+    src/devices/nubus/NuBusBus.cpp
     src/devices/rtc/MacRtc.cpp
     src/devices/scsi/ScsiBlockDevice.cpp
     src/devices/scsi/ScsiBus.cpp
@@ -40,8 +44,11 @@ add_library(CuteMacCore
     src/devices/scc/Z8530Scc.cpp
     src/devices/via6522/Via6522.cpp
     src/devices/video/VideoDevice.cpp
+    src/devices/video/nubus/CuteMacVideoCard.cpp
+    src/devices/video/nubus/MacintoshIIVideoCard.cpp
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
+    src/machines/maciicx/MacIIcxMachine.cpp
     src/rom/RomPatcher.cpp
     src/storage/DiskImageManager.cpp
 )
@@ -114,11 +121,46 @@ set_target_properties(CuteMacSession PROPERTIES
     MACOSX_BUNDLE TRUE
 )
 
+# Keep the distributable product explicit. Development utilities, smoke tools,
+# and tests intentionally have no install rules, so CPack-based ZIP, DEB,
+# MSIX, and macOS bundle packaging cannot pick them up by scanning build output.
+if(WIN32 OR APPLE)
+    set(CUTEMAC_RUNTIME_DESTINATION ".")
+else()
+    set(CUTEMAC_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
+
+install(TARGETS CuteMac CuteMacSession
+    RUNTIME DESTINATION "${CUTEMAC_RUNTIME_DESTINATION}"
+        COMPONENT Runtime
+    BUNDLE DESTINATION "."
+        COMPONENT Runtime
+)
+
+install(FILES README.md
+    DESTINATION "."
+    COMPONENT Runtime
+)
+
+install(DIRECTORY licenses
+    DESTINATION "."
+    COMPONENT Runtime
+)
+
 add_executable(CuteMacMacPlusSmoke
     tools/macplus_smoke.cpp
 )
 
 target_link_libraries(CuteMacMacPlusSmoke
+    PRIVATE
+        CuteMacCore
+)
+
+add_executable(CuteMacIIcxSmoke
+    tools/maciicx_smoke.cpp
+)
+
+target_link_libraries(CuteMacIIcxSmoke
     PRIVATE
         CuteMacCore
 )
@@ -197,4 +239,8 @@ if(BUILD_TESTING)
     add_executable(CuteMacRtcTests tests/rtc_tests.cpp)
     target_link_libraries(CuteMacRtcTests PRIVATE CuteMacCore)
     add_test(NAME mac-rtc COMMAND CuteMacRtcTests)
+
+    add_executable(CuteMacNuBusVideoTests tests/nubus_video_tests.cpp)
+    target_link_libraries(CuteMacNuBusVideoTests PRIVATE CuteMacCore)
+    add_test(NAME nubus-video-cards COMMAND CuteMacNuBusVideoTests)
 endif()

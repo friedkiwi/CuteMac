@@ -3,6 +3,9 @@
 #include <algorithm>
 
 #include "cutemac/machines/macplus/MacPlusMachine.h"
+#include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
+#include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 
 namespace cutemac::core {
 
@@ -19,6 +22,22 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
     if (configuration.machineId == QStringLiteral("mac-plus")) {
         return std::make_unique<machines::macplus::MacPlusMachine>(
             static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024, configuration.nvramPath);
+    }
+    if (configuration.machineId == QStringLiteral("mac-iicx")) {
+        auto machine = std::make_unique<machines::maciicx::MacIIcxMachine>(
+            static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024,
+            configuration.nvramPath);
+        for (const auto& device : configuration.nubusDevices) {
+            if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {
+                auto card = std::make_shared<devices::video::nubus::MacintoshIIVideoCard>();
+                if (device.declarationRomPath.isEmpty() || !card->loadDeclarationRom(device.declarationRomPath)) continue;
+                (void)machine->installNuBusCard(device.slot, card);
+            } else {
+                (void)machine->installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
+                    device.width, device.height, device.depth, device.vramMiB, device.acceleration));
+            }
+        }
+        return machine;
     }
     return {};
 }
@@ -121,6 +140,12 @@ QByteArray EmulationSession::framebufferBytes() const
 {
     std::lock_guard lock(m_mutex);
     return m_machine ? m_machine->framebufferBytes() : QByteArray {};
+}
+
+devices::video::VideoFrame EmulationSession::videoFrame() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_machine ? m_machine->videoFrame() : devices::video::VideoFrame {};
 }
 
 config::Configuration EmulationSession::configuration() const

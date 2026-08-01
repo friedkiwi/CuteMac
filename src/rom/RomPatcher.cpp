@@ -21,6 +21,16 @@ QVector<RomPatchDefinition> allDefinitions()
                 { 0x000e08, QByteArray::fromHex("6722"), QByteArray::fromHex("6022") },
             },
         },
+        {
+            QStringLiteral("maciicx.skip_ram_pattern_test"),
+            QStringLiteral("Skip the destructive full-RAM pattern passes while preserving RAM sizing"),
+            QStringLiteral("mac-iicx"),
+            QByteArray::fromHex("79fae48e2d5cfde68520e46616503963f8c16430903f410514b62c1379af20cb"),
+            {
+                { 0x00000000, QByteArray::fromHex("97221136"), QByteArray::fromHex("97223bc4") },
+                { 0x00003714, QByteArray::fromHex("2448"), QByteArray::fromHex("4ed6") },
+            },
+        },
     };
 }
 
