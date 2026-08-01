@@ -1,6 +1,8 @@
 #include <QApplication>
+#include <QActionGroup>
 #include <QCommandLineParser>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -32,6 +34,7 @@
 #include "cutemac/session/SessionControlServer.h"
 #include "cutemac/session/FramebufferRenderer.h"
 #include "cutemac/session/HostInputMapper.h"
+#include "cutemac/ui/ConfigurationDialog.h"
 
 namespace {
 
@@ -324,74 +327,12 @@ private:
     std::function<void(int, bool)> m_keyCallback;
 };
 
-class RuntimeSettingsDialog final : public QDialog {
-public:
-    RuntimeSettingsDialog(cutemac::config::Configuration configuration, QWidget* parent = nullptr)
-        : QDialog(parent)
-        , m_configuration(std::move(configuration))
-    {
-        setWindowTitle(QStringLiteral("Configure Instance"));
-
-        auto* layout = new QVBoxLayout(this);
-        auto* form = new QFormLayout;
-
-        m_romPath = new QLineEdit(m_configuration.romPath);
-        auto* romBrowse = new QPushButton(QStringLiteral("Browse..."));
-        auto* romLayout = new QHBoxLayout;
-        romLayout->addWidget(m_romPath, 1);
-        romLayout->addWidget(romBrowse);
-
-        m_cyclesPerFrame = new QSpinBox;
-        m_cyclesPerFrame->setRange(1000, 2000000);
-        m_cyclesPerFrame->setSingleStep(10000);
-        m_cyclesPerFrame->setValue(m_configuration.cyclesPerFrame);
-
-        m_skipRamPatternTest = new QCheckBox;
-        m_skipRamPatternTest->setChecked(m_configuration.skipRamPatternTest);
-
-        form->addRow(QStringLiteral("ROM"), romLayout);
-        form->addRow(QStringLiteral("Cycles/frame"), m_cyclesPerFrame);
-        form->addRow(QStringLiteral("Skip RAM pattern test"), m_skipRamPatternTest);
-        layout->addLayout(form);
-
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addWidget(buttons);
-
-        connect(romBrowse, &QPushButton::clicked, this, [this]() {
-            const auto path = QFileDialog::getOpenFileName(this,
-                QStringLiteral("Select Mac Plus ROM"),
-                cutemac::config::ConfigurationManager::romDirectoryPath(),
-                QStringLiteral("ROM images (*.rom *.bin);;All files (*)"));
-            if (!path.isEmpty()) {
-                m_romPath->setText(path);
-            }
-        });
-        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    }
-
-    [[nodiscard]] cutemac::config::Configuration configuration() const
-    {
-        auto configuration = m_configuration;
-        configuration.romPath = m_romPath->text().trimmed();
-        configuration.cyclesPerFrame = m_cyclesPerFrame->value();
-        configuration.skipRamPatternTest = m_skipRamPatternTest->isChecked();
-        return configuration;
-    }
-
-private:
-    cutemac::config::Configuration m_configuration;
-    QLineEdit* m_romPath = nullptr;
-    QSpinBox* m_cyclesPerFrame = nullptr;
-    QCheckBox* m_skipRamPatternTest = nullptr;
-};
-
 class EmulatorWindow final : public QMainWindow {
 public:
     explicit EmulatorWindow(cutemac::config::Configuration configuration)
         : m_configuration(std::move(configuration))
         , m_session(m_configuration)
-        , m_runner(m_session, m_configuration.cyclesPerFrame)
+        , m_runner(m_session, m_configuration.cyclesPerFrame, m_configuration.runtimeSpeed)
         , m_controlServer(m_session, m_runner, this)
     {
         setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
@@ -435,6 +376,18 @@ private:
         machineMenu->addAction(QStringLiteral("Pause/Resume"), this, [this]() { setPaused(!m_paused); });
         machineMenu->addAction(QStringLiteral("Reset"), this, [this]() { loadAndReset(); });
         machineMenu->addAction(QStringLiteral("Configure Running Instance"), this, [this]() { configureRunningInstance(); });
+        auto* speedMenu = machineMenu->addMenu(QStringLiteral("Speed"));
+        auto* speedGroup = new QActionGroup(this);
+        speedGroup->setExclusive(true);
+        m_realtimeSpeedAction = speedMenu->addAction(QStringLiteral("Realtime"));
+        m_unlimitedSpeedAction = speedMenu->addAction(QStringLiteral("Unlimited"));
+        for (auto* action : { m_realtimeSpeedAction, m_unlimitedSpeedAction }) {
+            action->setActionGroup(speedGroup);
+            action->setCheckable(true);
+        }
+        connect(m_realtimeSpeedAction, &QAction::triggered, this, [this]() { setRuntimeSpeed(cutemac::config::RuntimeSpeed::Realtime); });
+        connect(m_unlimitedSpeedAction, &QAction::triggered, this, [this]() { setRuntimeSpeed(cutemac::config::RuntimeSpeed::Unlimited); });
+        updateSpeedActions();
         machineMenu->addSeparator();
         machineMenu->addAction(QStringLiteral("Close"), this, &QWidget::close);
 
@@ -495,6 +448,9 @@ private:
     void loadAndReset()
     {
         setPaused(true);
+        m_runner.setCyclesPerFrame(m_configuration.cyclesPerFrame);
+        m_runner.setSpeed(m_configuration.runtimeSpeed);
+        updateSpeedActions();
         m_romLoaded = m_session.reconfigure(m_configuration);
         if (m_romLoaded) {
             m_display->setFramebuffer(m_session.framebufferBytes());
@@ -506,12 +462,28 @@ private:
         updateStatus();
     }
 
+    void setRuntimeSpeed(cutemac::config::RuntimeSpeed speed)
+    {
+        m_configuration.runtimeSpeed = speed;
+        m_runner.setSpeed(speed);
+        updateSpeedActions();
+        updateStatus();
+    }
+
+    void updateSpeedActions()
+    {
+        if (m_realtimeSpeedAction != nullptr) {
+            m_realtimeSpeedAction->setChecked(m_runner.speed() == cutemac::config::RuntimeSpeed::Realtime);
+            m_unlimitedSpeedAction->setChecked(m_runner.speed() == cutemac::config::RuntimeSpeed::Unlimited);
+        }
+    }
+
     void configureRunningInstance()
     {
         const auto wasPaused = m_paused;
         setPaused(true);
 
-        RuntimeSettingsDialog dialog(m_configuration, this);
+        cutemac::ui::ConfigurationDialog dialog(m_configuration, this);
         if (dialog.exec() == QDialog::Accepted) {
             m_configuration = dialog.configuration();
             loadAndReset();
@@ -552,9 +524,11 @@ private:
         }
 
         const auto state = m_session.status();
-        m_status->setText(QStringLiteral("%1 | %2 | PC 0x%3 | cycles %4 | overlay %5 | frames %6 | ROM %7 | disk %8 | floppy %9")
+        updateSpeedActions();
+        m_status->setText(QStringLiteral("%1 | %2 | %3 | PC 0x%4 | cycles %5 | overlay %6 | frames %7 | ROM %8 | disk %9 | floppy %10")
                               .arg(m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"))
                               .arg(state.machineId)
+                              .arg(cutemac::config::runtimeSpeedName(m_runner.speed()))
                               .arg(state.programCounter, 6, 16, QLatin1Char('0'))
                               .arg(state.cycles)
                               .arg(state.overlayEnabled ? QStringLiteral("on") : QStringLiteral("off"))
@@ -570,6 +544,8 @@ private:
     cutemac::session::SessionControlServer m_controlServer;
     DisplayWidget* m_display = nullptr;
     QLabel* m_status = nullptr;
+    QAction* m_realtimeSpeedAction = nullptr;
+    QAction* m_unlimitedSpeedAction = nullptr;
     QTimer m_frameTimer;
     bool m_romLoaded = false;
     bool m_paused = true;

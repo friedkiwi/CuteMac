@@ -29,6 +29,7 @@ int main()
     configuration.romPath = QStringLiteral("/tmp/a \\ b.rom");
     configuration.ramSizeMiB = 4;
     configuration.cyclesPerFrame = 130560;
+    configuration.runtimeSpeed = cutemac::config::RuntimeSpeed::Unlimited;
     configuration.skipRamPatternTest = true;
 
     cutemac::config::ConfigurationManager manager;
@@ -39,6 +40,7 @@ int main()
         ok &= expect(loaded->profileName == configuration.profileName, "quoted profile name did not round-trip");
         ok &= expect(loaded->romPath == configuration.romPath, "escaped path did not round-trip");
         ok &= expect(loaded->skipRamPatternTest, "ROM patch setting did not round-trip");
+        ok &= expect(loaded->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "runtime speed did not round-trip");
         ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("macplus.skip_ram_pattern_test") },
             "enabled ROM patch ID is incorrect");
     }

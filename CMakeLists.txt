@@ -62,6 +62,18 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
+add_library(CuteMacWidgets
+    src/ui/ConfigurationDialog.cpp
+)
+
+target_link_libraries(CuteMacWidgets
+    PUBLIC
+        CuteMacCore
+        Qt6::Widgets
+)
+
+target_include_directories(CuteMacWidgets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 add_executable(CuteMac
     src/app/main.cpp
 )
@@ -69,6 +81,7 @@ add_executable(CuteMac
 target_link_libraries(CuteMac
     PRIVATE
         CuteMacCore
+        CuteMacWidgets
         Qt6::Widgets
 )
 
@@ -88,6 +101,7 @@ add_executable(CuteMacSession
 target_link_libraries(CuteMacSession
     PRIVATE
         CuteMacCore
+        CuteMacWidgets
         Qt6::Network
         Qt6::Widgets
 )

@@ -10,17 +10,21 @@
 #endif
 
 #include "cutemac/core/EmulationSession.h"
+#include "cutemac/config/Configuration.h"
 
 namespace cutemac::core {
 
 class SessionRunner {
 public:
-    SessionRunner(EmulationSession& session, int cyclesPerFrame);
+    SessionRunner(EmulationSession& session, int cyclesPerFrame, config::RuntimeSpeed speed);
     ~SessionRunner();
 
     void start();
     void stop();
     void setPaused(bool paused);
+    void setCyclesPerFrame(int cyclesPerFrame);
+    void setSpeed(config::RuntimeSpeed speed);
+    [[nodiscard]] config::RuntimeSpeed speed() const;
     void runHostFrame();
 
 private:
@@ -29,7 +33,8 @@ private:
 #endif
 
     EmulationSession& m_session;
-    int m_cyclesPerFrame = 130560;
+    std::atomic_int m_cyclesPerFrame = 130560;
+    std::atomic<config::RuntimeSpeed> m_speed = config::RuntimeSpeed::Realtime;
     std::atomic_bool m_running = false;
     std::atomic_bool m_paused = true;
 #if !defined(Q_OS_WASM)

@@ -46,6 +46,13 @@ Optional, ROM-version-verified patches can be enabled per profile. For example, 
 skip_ram_pattern_test = true
 ```
 
+Runtime speed can be changed live from the session's Machine menu and persisted in a profile:
+
+```toml
+[runtime]
+speed = "realtime" # or "unlimited"
+```
+
 Mac Plus ROM smoke test:
 
 ```sh

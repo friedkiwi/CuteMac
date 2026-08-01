@@ -53,6 +53,13 @@ void SessionControlServer::processLine(QTcpSocket& socket, const QByteArray& lin
         m_runner.setPaused(false);
     } else if (command == QStringLiteral("reset")) {
         m_session.reset();
+    } else if (command == QStringLiteral("set_speed")) {
+        const auto speed = document.object().value(QStringLiteral("speed")).toString();
+        if (speed != QStringLiteral("realtime") && speed != QStringLiteral("unlimited")) {
+            socket.write(QJsonDocument(QJsonObject { { QStringLiteral("ok"), false }, { QStringLiteral("error"), QStringLiteral("speed must be realtime or unlimited") } }).toJson(QJsonDocument::Compact) + '\n');
+            return;
+        }
+        m_runner.setSpeed(config::runtimeSpeedFromName(speed));
     } else if (command == QStringLiteral("mouse_position")) {
         m_session.queueMousePosition(static_cast<std::int16_t>(document.object().value(QStringLiteral("x")).toInt()),
             static_cast<std::int16_t>(document.object().value(QStringLiteral("y")).toInt()));
@@ -77,6 +84,7 @@ void SessionControlServer::sendStatus(QTcpSocket& socket)
         { QStringLiteral("pc"), static_cast<qint64>(status.programCounter) },
         { QStringLiteral("cycles"), static_cast<qint64>(status.cycles) },
         { QStringLiteral("paused"), status.paused },
+        { QStringLiteral("speed"), config::runtimeSpeedName(m_runner.speed()) },
         { QStringLiteral("rom_loaded"), status.romLoaded },
     };
     socket.write(QJsonDocument(response).toJson(QJsonDocument::Compact) + '\n');

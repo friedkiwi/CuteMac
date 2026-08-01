@@ -38,6 +38,24 @@ QString safeProfileFileBase(QString profileName)
 
 } // namespace
 
+QString runtimeSpeedName(RuntimeSpeed speed)
+{
+    switch (speed) {
+    case RuntimeSpeed::Unlimited:
+        return QStringLiteral("unlimited");
+    case RuntimeSpeed::Realtime:
+    default:
+        return QStringLiteral("realtime");
+    }
+}
+
+RuntimeSpeed runtimeSpeedFromName(const QString& name)
+{
+    return name.compare(QStringLiteral("unlimited"), Qt::CaseInsensitive) == 0
+        ? RuntimeSpeed::Unlimited
+        : RuntimeSpeed::Realtime;
+}
+
 QStringList Configuration::enabledRomPatches() const
 {
     QStringList patches;
@@ -124,6 +142,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         configuration.floppyPath = fromTomlString(document["storage"]["floppy_path"].value_or<std::string>(""));
         configuration.ramSizeMiB = static_cast<int>(document["machine"]["ram_size_mib"].value_or<std::int64_t>(configuration.ramSizeMiB));
         configuration.cyclesPerFrame = static_cast<int>(document["machine"]["cycles_per_frame"].value_or<std::int64_t>(configuration.cyclesPerFrame));
+        configuration.runtimeSpeed = runtimeSpeedFromName(fromTomlString(document["runtime"]["speed"].value_or<std::string>("realtime")));
         configuration.skipRamPatternTest = document["rom_patches"]["skip_ram_pattern_test"].value_or(false);
     } catch (const toml::parse_error&) {
         return std::nullopt;
@@ -160,6 +179,9 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
                          { "rom_path", toTomlString(configuration.romPath) },
                          { "disk_path", toTomlString(configuration.diskPath) },
                          { "floppy_path", toTomlString(configuration.floppyPath) },
+                     } },
+        { "runtime", toml::table {
+                         { "speed", toTomlString(runtimeSpeedName(configuration.runtimeSpeed)) },
                      } },
         { "rom_patches", toml::table {
                              { "skip_ram_pattern_test", configuration.skipRamPatternTest },

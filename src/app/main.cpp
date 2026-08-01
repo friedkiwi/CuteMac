@@ -31,131 +31,9 @@
 #endif
 
 #include "cutemac/config/Configuration.h"
+#include "cutemac/ui/ConfigurationDialog.h"
 
 namespace {
-
-class ProfileDialog final : public QDialog {
-public:
-    explicit ProfileDialog(cutemac::config::Configuration configuration, QWidget* parent = nullptr)
-        : QDialog(parent)
-        , m_configuration(std::move(configuration))
-    {
-        setWindowTitle(QStringLiteral("Profile"));
-
-        auto* layout = new QVBoxLayout(this);
-        auto* form = new QFormLayout;
-
-        m_name = new QLineEdit(m_configuration.profileName);
-        m_machine = new QComboBox;
-        m_machine->addItem(QStringLiteral("Macintosh Plus"), QStringLiteral("mac-plus"));
-        m_machine->setCurrentIndex(0);
-
-        m_romPath = new QLineEdit(m_configuration.romPath);
-        auto* romBrowse = new QPushButton(QStringLiteral("Browse..."));
-        auto* romLayout = new QHBoxLayout;
-        romLayout->addWidget(m_romPath, 1);
-        romLayout->addWidget(romBrowse);
-
-        m_diskPath = new QLineEdit(m_configuration.diskPath);
-        auto* diskBrowse = new QPushButton(QStringLiteral("Browse..."));
-        auto* diskLayout = new QHBoxLayout;
-        diskLayout->addWidget(m_diskPath, 1);
-        diskLayout->addWidget(diskBrowse);
-
-        m_floppyPath = new QLineEdit(m_configuration.floppyPath);
-        auto* floppyBrowse = new QPushButton(QStringLiteral("Browse..."));
-        auto* floppyLayout = new QHBoxLayout;
-        floppyLayout->addWidget(m_floppyPath, 1);
-        floppyLayout->addWidget(floppyBrowse);
-
-        m_ramSize = new QSpinBox;
-        m_ramSize->setRange(1, 4);
-        m_ramSize->setSuffix(QStringLiteral(" MiB"));
-        m_ramSize->setValue(m_configuration.ramSizeMiB);
-
-        m_cyclesPerFrame = new QSpinBox;
-        m_cyclesPerFrame->setRange(1000, 2000000);
-        m_cyclesPerFrame->setSingleStep(10000);
-        m_cyclesPerFrame->setValue(m_configuration.cyclesPerFrame);
-
-        m_skipRamPatternTest = new QCheckBox;
-        m_skipRamPatternTest->setChecked(m_configuration.skipRamPatternTest);
-
-        form->addRow(QStringLiteral("Name"), m_name);
-        form->addRow(QStringLiteral("Machine"), m_machine);
-        form->addRow(QStringLiteral("ROM"), romLayout);
-        form->addRow(QStringLiteral("Disk image"), diskLayout);
-        form->addRow(QStringLiteral("Floppy image"), floppyLayout);
-        form->addRow(QStringLiteral("RAM"), m_ramSize);
-        form->addRow(QStringLiteral("Cycles/frame"), m_cyclesPerFrame);
-        form->addRow(QStringLiteral("Skip RAM pattern test"), m_skipRamPatternTest);
-        layout->addLayout(form);
-
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        layout->addWidget(buttons);
-
-        connect(romBrowse, &QPushButton::clicked, this, [this]() {
-            const auto path = QFileDialog::getOpenFileName(this,
-                QStringLiteral("Select Mac Plus ROM"),
-                cutemac::config::ConfigurationManager::romDirectoryPath(),
-                QStringLiteral("ROM images (*.rom *.bin);;All files (*)"));
-            if (!path.isEmpty()) {
-                m_romPath->setText(path);
-            }
-        });
-        connect(diskBrowse, &QPushButton::clicked, this, [this]() {
-            const auto path = QFileDialog::getOpenFileName(this,
-                QStringLiteral("Select disk image"),
-                cutemac::config::ConfigurationManager::diskImageDirectoryPath(),
-                QStringLiteral("Disk images (*.dsk *.img *.image);;All files (*)"));
-            if (!path.isEmpty()) {
-                m_diskPath->setText(path);
-            }
-        });
-        connect(floppyBrowse, &QPushButton::clicked, this, [this]() {
-            const auto path = QFileDialog::getOpenFileName(this,
-                QStringLiteral("Select floppy image"),
-                cutemac::config::ConfigurationManager::diskImageDirectoryPath(),
-                QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)"));
-            if (!path.isEmpty()) {
-                m_floppyPath->setText(path);
-            }
-        });
-        connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
-            if (m_name->text().trimmed().isEmpty()) {
-                QMessageBox::warning(this, QStringLiteral("Profile"), QStringLiteral("Profile name is required."));
-                return;
-            }
-            accept();
-        });
-        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    }
-
-    [[nodiscard]] cutemac::config::Configuration configuration() const
-    {
-        auto configuration = m_configuration;
-        configuration.profileName = m_name->text().trimmed();
-        configuration.machineId = m_machine->currentData().toString();
-        configuration.romPath = m_romPath->text().trimmed();
-        configuration.diskPath = m_diskPath->text().trimmed();
-        configuration.floppyPath = m_floppyPath->text().trimmed();
-        configuration.ramSizeMiB = m_ramSize->value();
-        configuration.cyclesPerFrame = m_cyclesPerFrame->value();
-        configuration.skipRamPatternTest = m_skipRamPatternTest->isChecked();
-        return configuration;
-    }
-
-private:
-    cutemac::config::Configuration m_configuration;
-    QLineEdit* m_name = nullptr;
-    QComboBox* m_machine = nullptr;
-    QLineEdit* m_romPath = nullptr;
-    QLineEdit* m_diskPath = nullptr;
-    QLineEdit* m_floppyPath = nullptr;
-    QSpinBox* m_ramSize = nullptr;
-    QSpinBox* m_cyclesPerFrame = nullptr;
-    QCheckBox* m_skipRamPatternTest = nullptr;
-};
 
 struct ProfileRow {
     QString path;
@@ -306,7 +184,7 @@ private:
 
     void createProfile()
     {
-        ProfileDialog dialog(cutemac::config::ConfigurationManager::defaultMacPlusConfiguration(), this);
+        cutemac::ui::ConfigurationDialog dialog(cutemac::config::ConfigurationManager::defaultMacPlusConfiguration(), this);
         if (dialog.exec() != QDialog::Accepted) {
             return;
         }
@@ -323,7 +201,7 @@ private:
             return;
         }
 
-        ProfileDialog dialog(m_profiles[row].configuration, this);
+        cutemac::ui::ConfigurationDialog dialog(m_profiles[row].configuration, this);
         if (dialog.exec() != QDialog::Accepted) {
             return;
         }
@@ -343,7 +221,7 @@ private:
 
         auto configuration = m_profiles[row].configuration;
         configuration.profileName += QStringLiteral(" Copy");
-        ProfileDialog dialog(configuration, this);
+        cutemac::ui::ConfigurationDialog dialog(configuration, this);
         if (dialog.exec() != QDialog::Accepted) {
             return;
         }

@@ -4,9 +4,10 @@
 
 namespace cutemac::core {
 
-SessionRunner::SessionRunner(EmulationSession& session, int cyclesPerFrame)
+SessionRunner::SessionRunner(EmulationSession& session, int cyclesPerFrame, config::RuntimeSpeed speed)
     : m_session(session)
     , m_cyclesPerFrame(cyclesPerFrame)
+    , m_speed(speed)
 {
 }
 
@@ -44,11 +45,38 @@ void SessionRunner::setPaused(bool paused)
 #endif
 }
 
+void SessionRunner::setCyclesPerFrame(int cyclesPerFrame)
+{
+    m_cyclesPerFrame = cyclesPerFrame;
+}
+
+void SessionRunner::setSpeed(config::RuntimeSpeed speed)
+{
+    m_speed = speed;
+#if !defined(Q_OS_WASM)
+    m_wake.notify_all();
+#endif
+}
+
+config::RuntimeSpeed SessionRunner::speed() const
+{
+    return m_speed.load();
+}
+
 void SessionRunner::runHostFrame()
 {
 #if defined(Q_OS_WASM)
     if (m_running && !m_paused) {
-        (void)m_session.runCycles(m_cyclesPerFrame);
+        const auto cycles = m_cyclesPerFrame.load();
+        (void)m_session.runCycles(cycles);
+        if (m_speed == config::RuntimeSpeed::Unlimited) {
+            // Stay cooperative with the browser while using the remainder of this host frame.
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(12);
+            while (m_running && !m_paused && m_speed == config::RuntimeSpeed::Unlimited
+                && std::chrono::steady_clock::now() < deadline) {
+                (void)m_session.runCycles(cycles);
+            }
+        }
     }
 #endif
 }
@@ -58,6 +86,7 @@ void SessionRunner::workerLoop()
 {
     using clock = std::chrono::steady_clock;
     auto deadline = clock::now();
+    auto previousSpeed = m_speed.load();
     while (m_running) {
         if (m_paused) {
             std::unique_lock lock(m_waitMutex);
@@ -65,9 +94,22 @@ void SessionRunner::workerLoop()
             deadline = clock::now();
             continue;
         }
-        (void)m_session.runCycles(m_cyclesPerFrame);
+        const auto currentSpeed = m_speed.load();
+        if (currentSpeed != previousSpeed) {
+            deadline = clock::now();
+            previousSpeed = currentSpeed;
+        }
+        (void)m_session.runCycles(m_cyclesPerFrame.load());
+        if (currentSpeed == config::RuntimeSpeed::Unlimited) {
+            deadline = clock::now();
+            std::this_thread::yield();
+            continue;
+        }
         deadline += std::chrono::microseconds(16625);
-        std::this_thread::sleep_until(deadline);
+        std::unique_lock lock(m_waitMutex);
+        m_wake.wait_until(lock, deadline, [this, currentSpeed]() {
+            return !m_running || m_paused || m_speed.load() != currentSpeed;
+        });
         if (deadline < clock::now() - std::chrono::milliseconds(100)) {
             deadline = clock::now();
         }

@@ -8,6 +8,14 @@
 
 namespace cutemac::config {
 
+enum class RuntimeSpeed {
+    Realtime,
+    Unlimited,
+};
+
+[[nodiscard]] QString runtimeSpeedName(RuntimeSpeed speed);
+[[nodiscard]] RuntimeSpeed runtimeSpeedFromName(const QString& name);
+
 class Configuration {
 public:
     QString profileName;
@@ -17,6 +25,7 @@ public:
     QString floppyPath;
     int ramSizeMiB = 4;
     int cyclesPerFrame = 130560;
+    RuntimeSpeed runtimeSpeed = RuntimeSpeed::Realtime;
     bool skipRamPatternTest = false;
 
     [[nodiscard]] QStringList enabledRomPatches() const;

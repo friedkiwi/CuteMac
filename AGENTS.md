@@ -31,6 +31,7 @@
 - Frontends depend on `core::EmulationSession` and `core::IMachine`, never directly on a concrete machine. Concrete access is permitted only through `IDebugMachineAccess` in debug-only tooling.
 - Timestamp host input with the machine cycle counter and deliver it through `MachineScheduler`; preserve button transitions long enough for guest VBL sampling.
 - Desktop sessions run emulation through `SessionRunner` off the Qt event thread. WebAssembly uses the same runner API in single-threaded host-frame mode.
+- Runtime speed is profile-controlled with `[runtime] speed = "realtime"|"unlimited"` and can change without resetting the guest. Desktop unlimited mode removes throttling; wasm unlimited mode uses a bounded host-frame work budget so the browser remains responsive.
 - Keep host key mapping, capture policy, and framebuffer conversion in session frontend adapters. Wayland/wasm remain on the no-warp absolute-pointer path.
 - Session management commands use newline-delimited JSON over a loopback-only control socket. Keep networking compiled out at runtime on wasm.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
