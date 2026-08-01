@@ -67,6 +67,14 @@ int main()
         ok &= expect(migrated->scsiDevices.size() == 1 && migrated->scsiDevices.first().imagePath == QStringLiteral("old.hda"), "legacy disk was not migrated");
     }
 
+    QFile powerMacProfile(path);
+    ok &= expect(powerMacProfile.open(QIODevice::WriteOnly | QIODevice::Truncate), "Power Macintosh migration fixture open failed");
+    powerMacProfile.write("name = \"Power Macintosh\"\n[machine]\nid = \"powermac-6100\"\n");
+    powerMacProfile.close();
+    const auto migratedPowerMac = manager.loadTomlFile(path);
+    ok &= expect(migratedPowerMac.has_value() && migratedPowerMac->machineId == QStringLiteral("powermac-8100"),
+        "legacy Power Macintosh 6100 target must migrate to the 8100 target");
+
     QFile malformed(path);
     ok &= expect(malformed.open(QIODevice::WriteOnly | QIODevice::Truncate), "malformed fixture open failed");
     malformed.write("[machine\nid =");

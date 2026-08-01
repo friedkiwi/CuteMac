@@ -141,6 +141,9 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         const auto document = toml::parse(std::string_view(contents.constData(), static_cast<std::size_t>(contents.size())));
         configuration.profileName = fromTomlString(document["name"].value_or<std::string>(""));
         configuration.machineId = fromTomlString(document["machine"]["id"].value_or<std::string>(""));
+        if (configuration.machineId == QStringLiteral("powermac-6100")) {
+            configuration.machineId = QStringLiteral("powermac-8100");
+        }
         configuration.romPath = fromTomlString(document["storage"]["rom_path"].value_or<std::string>(""));
         configuration.nvramPath = fromTomlString(document["storage"]["nvram_path"].value_or<std::string>(""));
         configuration.diskPath = fromTomlString(document["storage"]["disk_path"].value_or<std::string>(""));

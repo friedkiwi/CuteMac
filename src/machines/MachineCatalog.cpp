@@ -49,13 +49,14 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
             },
         },
         {
-            QStringLiteral("powermac-6100"),
-            QStringLiteral("Power Macintosh 6100"),
+            QStringLiteral("powermac-8100"),
+            QStringLiteral("Power Macintosh 8100/80"),
             CpuFamily::PowerPc,
             QStringLiteral("PowerPC 601"),
             {
                 QStringLiteral("device.adb.bus"),
                 QStringLiteral("device.scsi.bus"),
+                QStringLiteral("device.nubus"),
                 QStringLiteral("device.video"),
             },
         },

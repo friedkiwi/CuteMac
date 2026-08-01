@@ -1,6 +1,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <algorithm>
 #include <iostream>
 
 #include "cutemac/rom/RomCatalog.h"
@@ -28,6 +29,15 @@ int main()
     ok &= expect(!catalog.pathForId(QStringLiteral("macplus-v2")).isEmpty(), "content scan must identify v2 independent of filename");
     ok &= expect(catalog.pathForId(QStringLiteral("macplus-v1")).isEmpty(), "different revision must remain missing");
     ok &= expect(catalog.pathForId(QStringLiteral("cutemac-video")) == QStringLiteral("(embedded)"), "embedded ROM must always be available");
+
+    const auto definitions = cutemac::rom::RomCatalog::definitions();
+    const auto powerMacRom = std::find_if(definitions.cbegin(), definitions.cend(), [](const auto& definition) {
+        return definition.id == QStringLiteral("powermac-pdm-9feb69b3");
+    });
+    ok &= expect(powerMacRom != definitions.cend()
+            && powerMacRom->ownerId == QStringLiteral("powermac-8100")
+            && powerMacRom->revision == QStringLiteral("9FEB69B3"),
+        "the shared launch Power Macintosh ROM must belong to the 8100 target");
 
     cutemac::config::Configuration configuration;
     configuration.machineId = QStringLiteral("mac-plus");

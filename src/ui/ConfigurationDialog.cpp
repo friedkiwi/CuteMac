@@ -270,7 +270,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->iwmTab), iwm);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->scsiTab), scsi);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->nubusTab), nubus);
-        m_impl->ram->setRange(machineId == QStringLiteral("mac-plus") ? 1 : 1, machineId == QStringLiteral("mac-plus") ? 4 : 256);
+        if (machineId == QStringLiteral("mac-plus")) {
+            m_impl->ram->setRange(1, 4);
+        } else if (machineId == QStringLiteral("powermac-8100")) {
+            m_impl->ram->setRange(8, 264);
+        } else {
+            m_impl->ram->setRange(1, 256);
+        }
         m_impl->ram->setValue(qBound(m_impl->ram->minimum(), m_impl->original.ramSizeMiB, m_impl->ram->maximum()));
     };
 

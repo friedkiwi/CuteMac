@@ -1,6 +1,6 @@
 # CuteMac
 
-CuteMac is a Qt 6 based classic Macintosh emulator project. The long-term target set is 68000-era Macs, Macintosh IIcx, Macintosh Quadra 800, and Power Macintosh 6100, using original unmodified ROM images supplied by the user.
+CuteMac is a Qt 6 based classic Macintosh emulator project. The long-term target set is 68000-era Macs, Macintosh IIcx, Macintosh Quadra 800, and the launch-model Power Macintosh 8100/80, using original unmodified ROM images supplied by the user.
 
 The repository is currently early emulator bringup work:
 
