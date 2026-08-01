@@ -69,6 +69,7 @@ bool sameScsiDevices(const QVector<cutemac::config::ScsiDeviceConfiguration>& le
 bool requiresMachineReset(const cutemac::config::Configuration& current, const cutemac::config::Configuration& proposed)
 {
     return current.machineId != proposed.machineId || current.romPath != proposed.romPath
+        || current.nvramPath != proposed.nvramPath
         || current.ramSizeMiB != proposed.ramSizeMiB || current.skipRamPatternTest != proposed.skipRamPatternTest
         || !sameIwmDevices(current.iwmDevices, proposed.iwmDevices)
         || !sameScsiDevices(current.scsiDevices, proposed.scsiDevices);

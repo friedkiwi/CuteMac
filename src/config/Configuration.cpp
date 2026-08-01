@@ -140,6 +140,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         configuration.profileName = fromTomlString(document["name"].value_or<std::string>(""));
         configuration.machineId = fromTomlString(document["machine"]["id"].value_or<std::string>(""));
         configuration.romPath = fromTomlString(document["storage"]["rom_path"].value_or<std::string>(""));
+        configuration.nvramPath = fromTomlString(document["storage"]["nvram_path"].value_or<std::string>(""));
         configuration.diskPath = fromTomlString(document["storage"]["disk_path"].value_or<std::string>(""));
         configuration.floppyPath = fromTomlString(document["storage"]["floppy_path"].value_or<std::string>(""));
         configuration.ramSizeMiB = static_cast<int>(document["machine"]["ram_size_mib"].value_or<std::int64_t>(configuration.ramSizeMiB));
@@ -230,6 +231,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
                      } },
         { "storage", toml::table {
                          { "rom_path", toTomlString(configuration.romPath) },
+                         { "nvram_path", toTomlString(configuration.nvramPath) },
                          { "disk_path", toTomlString(configuration.diskPath) },
                          { "floppy_path", toTomlString(configuration.floppyPath) },
                      } },

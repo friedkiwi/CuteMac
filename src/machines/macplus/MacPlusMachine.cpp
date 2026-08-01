@@ -42,6 +42,9 @@ constexpr std::uint32_t offset4MiBMask = 0x3fffff;
 
 constexpr std::uint8_t viaOverlayBit = 0x10;
 constexpr std::uint8_t viaDiskSelectBit = 0x20;
+constexpr std::uint8_t viaRtcDataBit = 0x01;
+constexpr std::uint8_t viaRtcClockBit = 0x02;
+constexpr std::uint8_t viaRtcEnableBit = 0x04;
 
 [[nodiscard]] std::uint8_t highByte(std::uint16_t value)
 {
@@ -57,15 +60,21 @@ constexpr std::uint8_t viaDiskSelectBit = 0x20;
 
 QString MacPlusMachine::machineId() const { return QStringLiteral("mac-plus"); }
 
-MacPlusMachine::MacPlusMachine(std::size_t ramSize)
+MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(ramSize), 0)
 {
+    (void)m_rtc.setNvramImagePath(nvramPath);
     m_cpu.setModel(cpu::m68k::M68kCpuCore::Model::M68000);
     m_cpu.setBus(this);
 
     m_via.setPortAChangedCallback([this](std::uint8_t portA) {
         setOverlayEnabled((portA & viaOverlayBit) != 0);
         m_iwm.setSideSelect((portA & viaDiskSelectBit) != 0);
+    });
+    m_via.setPortBChangedCallback([this](std::uint8_t portB, std::uint8_t ddrB) {
+        m_rtc.setPins((portB & viaRtcEnableBit) == 0, (portB & viaRtcClockBit) != 0,
+            (portB & viaRtcDataBit) != 0 && (ddrB & viaRtcDataBit) != 0);
+        m_via.setPortBInputBit(0, m_rtc.dataLine());
     });
 }
 
@@ -162,6 +171,7 @@ void MacPlusMachine::reset()
             m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
         }
     }
+    m_rtc.resetSerial();
     m_via.reset();
     m_scheduler.reset();
     m_lastMouseButtonCycle = 0;

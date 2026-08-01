@@ -29,6 +29,7 @@ public:
     QLineEdit* name = nullptr;
     QComboBox* machine = nullptr;
     QLineEdit* rom = nullptr;
+    QLineEdit* nvram = nullptr;
     QSpinBox* ram = nullptr;
     QComboBox* speed = nullptr;
     QCheckBox* skipRamTest = nullptr;
@@ -68,6 +69,14 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     romRow->addWidget(m_impl->rom, 1);
     romRow->addWidget(romBrowse);
     form->addRow(QStringLiteral("ROM"), romRow);
+    m_impl->nvram = new QLineEdit(m_impl->original.nvramPath);
+    auto* nvramBrowse = new QPushButton(QStringLiteral("Browse..."));
+    auto* nvramNew = new QPushButton(QStringLiteral("New..."));
+    auto* nvramRow = new QHBoxLayout;
+    nvramRow->addWidget(m_impl->nvram, 1);
+    nvramRow->addWidget(nvramBrowse);
+    nvramRow->addWidget(nvramNew);
+    form->addRow(QStringLiteral("NVRAM image"), nvramRow);
     m_impl->ram = new QSpinBox;
     m_impl->ram->setSuffix(QStringLiteral(" MiB"));
     form->addRow(QStringLiteral("RAM"), m_impl->ram);
@@ -157,6 +166,16 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Select ROM"), config::ConfigurationManager::romDirectoryPath(), QStringLiteral("ROM images (*.rom *.bin);;All files (*)"));
         if (!path.isEmpty()) m_impl->rom->setText(path);
     });
+    connect(nvramBrowse, &QPushButton::clicked, this, [this]() {
+        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Select NVRAM Image"),
+            config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("NVRAM images (*.nvram *.pram);;All files (*)"));
+        if (!path.isEmpty()) m_impl->nvram->setText(path);
+    });
+    connect(nvramNew, &QPushButton::clicked, this, [this]() {
+        const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Create NVRAM Image"),
+            config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("NVRAM image (*.nvram)"));
+        if (!path.isEmpty()) m_impl->nvram->setText(path);
+    });
     connect(floppyBrowse, &QPushButton::clicked, this, [this]() {
         const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::Floppy, QStringLiteral("Select Floppy Image"), this);
         if (!path.isEmpty()) m_impl->floppy->setText(path);
@@ -211,6 +230,7 @@ config::Configuration ConfigurationDialog::configuration() const
     result.profileName = m_impl->name->text().trimmed();
     result.machineId = m_impl->machine->currentData().toString();
     result.romPath = m_impl->rom->text().trimmed();
+    result.nvramPath = m_impl->nvram->text().trimmed();
     result.ramSizeMiB = m_impl->ram->value();
     result.runtimeSpeed = static_cast<config::RuntimeSpeed>(m_impl->speed->currentData().toInt());
     result.skipRamPatternTest = m_impl->skipRamTest->isChecked();

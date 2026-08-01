@@ -25,6 +25,7 @@ public:
     };
 
     using PortAChangedCallback = std::function<void(std::uint8_t)>;
+    using PortBChangedCallback = std::function<void(std::uint8_t, std::uint8_t)>;
 
     void reset();
 
@@ -33,6 +34,7 @@ public:
     void tick(int cycles);
 
     void setPortAChangedCallback(PortAChangedCallback callback);
+    void setPortBChangedCallback(PortBChangedCallback callback);
 
     [[nodiscard]] std::uint8_t portA() const;
     [[nodiscard]] std::uint8_t portB() const;
@@ -61,6 +63,7 @@ private:
     bool m_keyboardCommandPending = false;
     bool m_keyboardResponseReady = false;
     PortAChangedCallback m_portAChanged;
+    PortBChangedCallback m_portBChanged;
 };
 
 } // namespace cutemac::devices::via6522

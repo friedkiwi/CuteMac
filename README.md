@@ -53,6 +53,13 @@ Runtime speed can be changed live from the session's Machine menu and persisted 
 speed = "realtime" # or "unlimited"
 ```
 
+Mac Plus profiles can configure a 256-byte NVRAM image. RTC reads expose the current host-local date/time in the classic Macintosh epoch; guest time writes are intentionally discarded, while PRAM changes persist to this image:
+
+```toml
+[storage]
+nvram_path = "/path/to/mac-plus.nvram"
+```
+
 New profiles default to unlimited speed. The shared machine configuration window organizes general, IWM/floppy, and addressed SCSI-device settings into capability-dependent tabs. The Tools menu provides a disk image manager for importing, exporting, and creating typed floppy and hard-disk images. Configuration and live media insertion use the same library picker, filtered to the requested floppy, CD-ROM, or hard-disk media type.
 
 Mac Plus ROM smoke test:

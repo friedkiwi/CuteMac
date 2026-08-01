@@ -18,7 +18,7 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
 {
     if (configuration.machineId == QStringLiteral("mac-plus")) {
         return std::make_unique<machines::macplus::MacPlusMachine>(
-            static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024);
+            static_cast<std::size_t>(std::max(1, configuration.ramSizeMiB)) * 1024 * 1024, configuration.nvramPath);
     }
     return {};
 }

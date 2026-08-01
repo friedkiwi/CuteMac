@@ -27,6 +27,7 @@ int main()
     configuration.profileName = QStringLiteral("Quoted \"Plus\"");
     configuration.machineId = QStringLiteral("mac-plus");
     configuration.romPath = QStringLiteral("/tmp/a \\ b.rom");
+    configuration.nvramPath = QStringLiteral("/tmp/mac-plus.nvram");
     configuration.ramSizeMiB = 4;
     configuration.cyclesPerFrame = 130560;
     configuration.runtimeSpeed = cutemac::config::RuntimeSpeed::Unlimited;
@@ -41,6 +42,7 @@ int main()
     if (loaded) {
         ok &= expect(loaded->profileName == configuration.profileName, "quoted profile name did not round-trip");
         ok &= expect(loaded->romPath == configuration.romPath, "escaped path did not round-trip");
+        ok &= expect(loaded->nvramPath == configuration.nvramPath, "NVRAM path did not round-trip");
         ok &= expect(loaded->skipRamPatternTest, "ROM patch setting did not round-trip");
         ok &= expect(loaded->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "runtime speed did not round-trip");
         ok &= expect(loaded->iwmDevices.size() == 1 && loaded->iwmDevices.first().readOnly, "IWM device did not round-trip");

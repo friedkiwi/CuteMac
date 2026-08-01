@@ -54,6 +54,7 @@ void Via6522::reset()
     m_keyboardCommandPending = false;
     m_keyboardResponseReady = false;
     notifyPortAChanged();
+    if (m_portBChanged) m_portBChanged(m_registers[registerB], m_registers[dataDirectionB]);
 }
 
 std::uint8_t Via6522::readRegister(std::uint8_t index)
@@ -159,6 +160,8 @@ void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
     m_registers[index] = value;
     if (index == registerA) {
         notifyPortAChanged();
+    } else if ((index == registerB || index == dataDirectionB) && m_portBChanged) {
+        m_portBChanged(m_registers[registerB], m_registers[dataDirectionB]);
     }
 }
 
@@ -231,6 +234,12 @@ void Via6522::tick(int cycles)
 void Via6522::setPortAChangedCallback(PortAChangedCallback callback)
 {
     m_portAChanged = std::move(callback);
+}
+
+void Via6522::setPortBChangedCallback(PortBChangedCallback callback)
+{
+    m_portBChanged = std::move(callback);
+    if (m_portBChanged) m_portBChanged(m_registers[registerB], m_registers[dataDirectionB]);
 }
 
 std::uint8_t Via6522::portA() const

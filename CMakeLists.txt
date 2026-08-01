@@ -33,6 +33,7 @@ add_library(CuteMacCore
     src/devices/adb/AdbBus.cpp
     src/devices/floppy/FloppyDiskImage.cpp
     src/devices/iwm/IwmController.cpp
+    src/devices/rtc/MacRtc.cpp
     src/devices/scsi/ScsiBlockDevice.cpp
     src/devices/scsi/ScsiBus.cpp
     src/devices/scsi/ncr5380/Ncr5380.cpp
@@ -192,4 +193,8 @@ if(BUILD_TESTING)
     add_executable(CuteMacDiskImageManagerTests tests/disk_image_manager_tests.cpp)
     target_link_libraries(CuteMacDiskImageManagerTests PRIVATE CuteMacCore)
     add_test(NAME disk-image-manager COMMAND CuteMacDiskImageManagerTests)
+
+    add_executable(CuteMacRtcTests tests/rtc_tests.cpp)
+    target_link_libraries(CuteMacRtcTests PRIVATE CuteMacCore)
+    add_test(NAME mac-rtc COMMAND CuteMacRtcTests)
 endif()

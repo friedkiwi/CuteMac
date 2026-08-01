@@ -38,6 +38,7 @@ public:
     QString profileName;
     QString machineId;
     QString romPath;
+    QString nvramPath;
     QString diskPath;
     QString floppyPath;
     QVector<IwmDeviceConfiguration> iwmDevices;

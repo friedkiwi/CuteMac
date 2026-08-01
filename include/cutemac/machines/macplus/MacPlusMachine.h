@@ -14,6 +14,7 @@
 #include "cutemac/core/MachineScheduler.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/iwm/IwmController.h"
+#include "cutemac/devices/rtc/MacRtc.h"
 #include "cutemac/devices/scc/Z8530Scc.h"
 #include "cutemac/devices/scsi/ScsiBlockDevice.h"
 #include "cutemac/devices/scsi/ncr5380/Ncr5380.h"
@@ -60,7 +61,7 @@ public:
         bool loaded = false;
     };
 
-    explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024);
+    explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024, const QString& nvramPath = {});
 
     [[nodiscard]] QString machineId() const override;
     [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {}) override;
@@ -176,6 +177,7 @@ private:
     std::array<std::uint8_t, 128 * 1024> m_rom {};
 
     devices::via6522::Via6522 m_via;
+    devices::rtc::MacRtc m_rtc;
     devices::scc::Z8530Scc m_scc;
     devices::iwm::IwmController m_iwm;
     devices::scsi::ncr5380::Ncr5380 m_scsi;
