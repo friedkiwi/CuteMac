@@ -158,11 +158,11 @@ protected:
     {
         setFocus(Qt::MouseFocusReason);
         if (!m_mouseCaptured && displayRect().contains(event->pos())) {
-            captureMouse();
-            if (!m_relativeCapture && m_mouseCallback) {
+            if (m_mouseCallback) {
                 const auto point = macPointFor(event->pos());
-                m_mouseCallback(point.x(), point.y(), false);
+                m_mouseCallback(point.x(), point.y(), (event->buttons() & Qt::LeftButton) != 0);
             }
+            captureMouse();
             event->accept();
             return;
         }
