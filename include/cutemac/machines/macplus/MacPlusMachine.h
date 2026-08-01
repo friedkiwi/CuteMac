@@ -6,6 +6,7 @@
 #include <memory>
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 #include "cutemac/cpu/m68k/M68kBus.h"
@@ -52,12 +53,15 @@ public:
         std::uint32_t checksum = 0;
         std::uint32_t resetStackPointer = 0;
         std::uint32_t resetProgramCounter = 0;
+        QString sha256;
+        QStringList appliedPatches;
+        QString patchError;
         bool loaded = false;
     };
 
     explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024);
 
-    [[nodiscard]] bool loadRomFile(const QString& path);
+    [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {});
     [[nodiscard]] bool loadDiskImage(const QString& path);
     void ejectDiskImage();
     [[nodiscard]] bool loadFloppyImage(const QString& path);
@@ -173,6 +177,9 @@ private:
 
     bool m_romLoaded = false;
     QString m_romPath;
+    QString m_romSha256;
+    QStringList m_appliedRomPatches;
+    QString m_romPatchError;
     QString m_diskImagePath;
     std::int16_t m_mouseX = 15;
     std::int16_t m_mouseY = 15;

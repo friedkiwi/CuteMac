@@ -1,49 +1,27 @@
 #include "cutemac/config/Configuration.h"
 
-#include <QRegularExpression>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QStandardPaths>
-#include <QTextStream>
+
+#include <toml++/toml.hpp>
+
+#include <sstream>
 
 namespace cutemac::config {
 
 namespace {
 
-QString tomlEscape(QString value)
+QString fromTomlString(const std::string& value)
 {
-    value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
-    value.replace(QLatin1Char('"'), QStringLiteral("\\\""));
-    return value;
+    return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
 }
 
-QString tomlStringValue(const QString& contents, const QString& key)
+std::string toTomlString(const QString& value)
 {
-    const QRegularExpression expression(QStringLiteral(R"toml(^\s*%1\s*=\s*"((?:\\.|[^"])*)"\s*$)toml").arg(QRegularExpression::escape(key)),
-        QRegularExpression::MultilineOption);
-    const auto match = expression.match(contents);
-    if (!match.hasMatch()) {
-        return {};
-    }
-
-    auto value = match.captured(1);
-    value.replace(QStringLiteral("\\\""), QStringLiteral("\""));
-    value.replace(QStringLiteral("\\\\"), QStringLiteral("\\"));
-    return value;
-}
-
-int tomlIntValue(const QString& contents, const QString& key, int fallback)
-{
-    const QRegularExpression expression(QStringLiteral(R"(^\s*%1\s*=\s*([0-9]+)\s*$)").arg(QRegularExpression::escape(key)),
-        QRegularExpression::MultilineOption);
-    const auto match = expression.match(contents);
-    if (!match.hasMatch()) {
-        return fallback;
-    }
-
-    bool ok = false;
-    const auto value = match.captured(1).toInt(&ok);
-    return ok ? value : fallback;
+    const auto utf8 = value.toUtf8();
+    return std::string(utf8.constData(), static_cast<std::size_t>(utf8.size()));
 }
 
 QString safeProfileFileBase(QString profileName)
@@ -59,6 +37,15 @@ QString safeProfileFileBase(QString profileName)
 }
 
 } // namespace
+
+QStringList Configuration::enabledRomPatches() const
+{
+    QStringList patches;
+    if (skipRamPatternTest) {
+        patches.append(QStringLiteral("macplus.skip_ram_pattern_test"));
+    }
+    return patches;
+}
 
 QString ConfigurationManager::configRootPath()
 {
@@ -126,15 +113,21 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         return std::nullopt;
     }
 
-    const auto contents = QString::fromUtf8(file.readAll());
     auto configuration = defaultMacPlusConfiguration();
-    configuration.profileName = tomlStringValue(contents, QStringLiteral("name"));
-    configuration.machineId = tomlStringValue(contents, QStringLiteral("id"));
-    configuration.romPath = tomlStringValue(contents, QStringLiteral("rom_path"));
-    configuration.diskPath = tomlStringValue(contents, QStringLiteral("disk_path"));
-    configuration.floppyPath = tomlStringValue(contents, QStringLiteral("floppy_path"));
-    configuration.ramSizeMiB = tomlIntValue(contents, QStringLiteral("ram_size_mib"), configuration.ramSizeMiB);
-    configuration.cyclesPerFrame = tomlIntValue(contents, QStringLiteral("cycles_per_frame"), configuration.cyclesPerFrame);
+    try {
+        const auto contents = file.readAll();
+        const auto document = toml::parse(std::string_view(contents.constData(), static_cast<std::size_t>(contents.size())));
+        configuration.profileName = fromTomlString(document["name"].value_or<std::string>(""));
+        configuration.machineId = fromTomlString(document["machine"]["id"].value_or<std::string>(""));
+        configuration.romPath = fromTomlString(document["storage"]["rom_path"].value_or<std::string>(""));
+        configuration.diskPath = fromTomlString(document["storage"]["disk_path"].value_or<std::string>(""));
+        configuration.floppyPath = fromTomlString(document["storage"]["floppy_path"].value_or<std::string>(""));
+        configuration.ramSizeMiB = static_cast<int>(document["machine"]["ram_size_mib"].value_or<std::int64_t>(configuration.ramSizeMiB));
+        configuration.cyclesPerFrame = static_cast<int>(document["machine"]["cycles_per_frame"].value_or<std::int64_t>(configuration.cyclesPerFrame));
+        configuration.skipRamPatternTest = document["rom_patches"]["skip_ram_pattern_test"].value_or(false);
+    } catch (const toml::parse_error&) {
+        return std::nullopt;
+    }
 
     if (configuration.profileName.isEmpty()) {
         configuration.profileName = QFileInfo(path).baseName();
@@ -155,18 +148,27 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
         return false;
     }
 
-    QTextStream stream(&file);
-    stream << "name = \"" << tomlEscape(configuration.profileName) << "\"\n";
-    stream << "version = 1\n\n";
-    stream << "[machine]\n";
-    stream << "id = \"" << tomlEscape(configuration.machineId) << "\"\n";
-    stream << "ram_size_mib = " << configuration.ramSizeMiB << "\n";
-    stream << "cycles_per_frame = " << configuration.cyclesPerFrame << "\n\n";
-    stream << "[storage]\n";
-    stream << "rom_path = \"" << tomlEscape(configuration.romPath) << "\"\n";
-    stream << "disk_path = \"" << tomlEscape(configuration.diskPath) << "\"\n";
-    stream << "floppy_path = \"" << tomlEscape(configuration.floppyPath) << "\"\n";
-    return true;
+    toml::table document {
+        { "name", toTomlString(configuration.profileName) },
+        { "version", 1 },
+        { "machine", toml::table {
+                         { "id", toTomlString(configuration.machineId) },
+                         { "ram_size_mib", configuration.ramSizeMiB },
+                         { "cycles_per_frame", configuration.cyclesPerFrame },
+                     } },
+        { "storage", toml::table {
+                         { "rom_path", toTomlString(configuration.romPath) },
+                         { "disk_path", toTomlString(configuration.diskPath) },
+                         { "floppy_path", toTomlString(configuration.floppyPath) },
+                     } },
+        { "rom_patches", toml::table {
+                             { "skip_ram_pattern_test", configuration.skipRamPatternTest },
+                         } },
+    };
+    std::ostringstream stream;
+    stream << document;
+    const auto serialized = stream.str();
+    return file.write(serialized.data(), static_cast<qint64>(serialized.size())) == static_cast<qint64>(serialized.size());
 }
 
 } // namespace cutemac::config

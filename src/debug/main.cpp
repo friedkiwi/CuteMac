@@ -717,6 +717,7 @@ private:
         m_out << "floppy=" << displayPath(m_configuration.floppyPath) << '\n';
         m_out << "ram_size_mib=" << m_configuration.ramSizeMiB << '\n';
         m_out << "cycles_per_frame=" << m_configuration.cyclesPerFrame << '\n';
+        m_out << "skip_ram_pattern_test=" << (m_configuration.skipRamPatternTest ? "true" : "false") << '\n';
     }
 
     void setProfileValue(const QString& key, const QString& value)
@@ -752,6 +753,10 @@ private:
             m_configuration.cyclesPerFrame = value.toInt();
         } else if (key == QStringLiteral("ram_size_mib")) {
             m_configuration.ramSizeMiB = value.toInt();
+            reloadMachine();
+        } else if (key == QStringLiteral("skip_ram_pattern_test")) {
+            m_configuration.skipRamPatternTest = value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0
+                || value == QStringLiteral("1") || value.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0;
             reloadMachine();
         } else {
             m_out << "unknown profile key: " << key << '\n';
@@ -799,7 +804,8 @@ private:
         m_gdbStub->setEnabled(m_gdbEnabled);
         m_gdbStub->setPort(m_gdbPort);
 
-        m_romLoaded = !m_configuration.romPath.isEmpty() && m_machine->loadRomFile(m_configuration.romPath);
+        m_romLoaded = !m_configuration.romPath.isEmpty()
+            && m_machine->loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
         if (!m_configuration.diskPath.isEmpty()) {
             if (m_machine->loadDiskImage(m_configuration.diskPath)) {
                 m_out << "disk loaded: " << displayPath(m_configuration.diskPath) << '\n';
@@ -818,7 +824,12 @@ private:
             m_machine->reset();
             m_out << "machine reset: pc=" << hexValue(m_machine->programCounter()) << '\n';
         } else {
-            m_out << "machine reset without ROM; set rom_path in profile\n";
+            const auto patchError = m_machine->romInfo().patchError;
+            if (!patchError.isEmpty()) {
+                m_out << "ROM patch failed: " << patchError << '\n';
+            } else {
+                m_out << "machine reset without ROM; set rom_path in profile\n";
+            }
         }
     }
 
@@ -1329,6 +1340,11 @@ private:
         m_out << "rom_checksum=" << hexValue(info.checksum) << '\n';
         m_out << "reset_sp=" << hexValue(info.resetStackPointer) << '\n';
         m_out << "reset_pc=" << hexValue(info.resetProgramCounter) << '\n';
+        m_out << "rom_sha256=" << info.sha256 << '\n';
+        m_out << "rom_patches=" << (info.appliedPatches.isEmpty() ? QStringLiteral("none") : info.appliedPatches.join(QLatin1Char(','))) << '\n';
+        if (!info.patchError.isEmpty()) {
+            m_out << "rom_patch_error=" << info.patchError << '\n';
+        }
     }
 
     void handleDisk(const QStringList& parts)

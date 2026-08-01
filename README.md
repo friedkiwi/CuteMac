@@ -19,7 +19,7 @@ Ubuntu/WSL2 prerequisites:
 
 ```sh
 sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev
-sudo apt-get install libreadline-dev
+sudo apt-get install libreadline-dev libtomlplusplus-dev
 ```
 
 ```sh
@@ -36,6 +36,13 @@ The build produces `CuteMac` for profile management, `CuteMacSession` for emulat
 ```
 
 `CuteMac` opens the profile manager. It stores TOML profiles in Qt's per-user app config location and uses Qt's per-user app data location for default ROM and disk-image folders. Starting a profile launches `CuteMacSession`, the individual emulator window.
+
+Optional, ROM-version-verified patches can be enabled per profile. For example, the supported Mac Plus v3 ROM can skip its destructive RAM pattern passes while retaining ROM verification and RAM sizing:
+
+```toml
+[rom_patches]
+skip_ram_pattern_test = true
+```
 
 Mac Plus ROM smoke test:
 

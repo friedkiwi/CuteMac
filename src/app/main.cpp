@@ -78,6 +78,9 @@ public:
         m_cyclesPerFrame->setSingleStep(10000);
         m_cyclesPerFrame->setValue(m_configuration.cyclesPerFrame);
 
+        m_skipRamPatternTest = new QCheckBox;
+        m_skipRamPatternTest->setChecked(m_configuration.skipRamPatternTest);
+
         form->addRow(QStringLiteral("Name"), m_name);
         form->addRow(QStringLiteral("Machine"), m_machine);
         form->addRow(QStringLiteral("ROM"), romLayout);
@@ -85,6 +88,7 @@ public:
         form->addRow(QStringLiteral("Floppy image"), floppyLayout);
         form->addRow(QStringLiteral("RAM"), m_ramSize);
         form->addRow(QStringLiteral("Cycles/frame"), m_cyclesPerFrame);
+        form->addRow(QStringLiteral("Skip RAM pattern test"), m_skipRamPatternTest);
         layout->addLayout(form);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -137,6 +141,7 @@ public:
         configuration.floppyPath = m_floppyPath->text().trimmed();
         configuration.ramSizeMiB = m_ramSize->value();
         configuration.cyclesPerFrame = m_cyclesPerFrame->value();
+        configuration.skipRamPatternTest = m_skipRamPatternTest->isChecked();
         return configuration;
     }
 
@@ -149,6 +154,7 @@ private:
     QLineEdit* m_floppyPath = nullptr;
     QSpinBox* m_ramSize = nullptr;
     QSpinBox* m_cyclesPerFrame = nullptr;
+    QCheckBox* m_skipRamPatternTest = nullptr;
 };
 
 struct ProfileRow {

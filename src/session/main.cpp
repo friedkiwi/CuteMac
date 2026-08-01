@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -271,8 +272,12 @@ public:
         m_cyclesPerFrame->setSingleStep(10000);
         m_cyclesPerFrame->setValue(m_configuration.cyclesPerFrame);
 
+        m_skipRamPatternTest = new QCheckBox;
+        m_skipRamPatternTest->setChecked(m_configuration.skipRamPatternTest);
+
         form->addRow(QStringLiteral("ROM"), romLayout);
         form->addRow(QStringLiteral("Cycles/frame"), m_cyclesPerFrame);
+        form->addRow(QStringLiteral("Skip RAM pattern test"), m_skipRamPatternTest);
         layout->addLayout(form);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -296,6 +301,7 @@ public:
         auto configuration = m_configuration;
         configuration.romPath = m_romPath->text().trimmed();
         configuration.cyclesPerFrame = m_cyclesPerFrame->value();
+        configuration.skipRamPatternTest = m_skipRamPatternTest->isChecked();
         return configuration;
     }
 
@@ -303,6 +309,7 @@ private:
     cutemac::config::Configuration m_configuration;
     QLineEdit* m_romPath = nullptr;
     QSpinBox* m_cyclesPerFrame = nullptr;
+    QCheckBox* m_skipRamPatternTest = nullptr;
 };
 
 class EmulatorWindow final : public QMainWindow {
@@ -399,7 +406,8 @@ private:
     void loadAndReset()
     {
         setPaused(true);
-        m_romLoaded = !m_configuration.romPath.isEmpty() && m_machine.loadRomFile(m_configuration.romPath);
+        m_romLoaded = !m_configuration.romPath.isEmpty()
+            && m_machine.loadRomFile(m_configuration.romPath, m_configuration.enabledRomPatches());
         if (!m_configuration.diskPath.isEmpty()) {
             (void)m_machine.loadDiskImage(m_configuration.diskPath);
         }
@@ -411,7 +419,8 @@ private:
             m_display->setFramebuffer(m_machine.framebufferBytes());
             statusBar()->showMessage(QStringLiteral("ROM loaded"), 2000);
         } else {
-            statusBar()->showMessage(QStringLiteral("ROM not loaded"));
+            const auto patchError = m_machine.romInfo().patchError;
+            statusBar()->showMessage(patchError.isEmpty() ? QStringLiteral("ROM not loaded") : patchError);
         }
         setPaused(!m_romLoaded);
         updateStatus();

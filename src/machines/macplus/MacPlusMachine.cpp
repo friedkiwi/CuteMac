@@ -1,4 +1,5 @@
 #include "cutemac/machines/macplus/MacPlusMachine.h"
+#include "cutemac/rom/RomPatcher.h"
 
 #include <QFile>
 #include <QString>
@@ -65,21 +66,34 @@ MacPlusMachine::MacPlusMachine(std::size_t ramSize)
     });
 }
 
-bool MacPlusMachine::loadRomFile(const QString& path)
+bool MacPlusMachine::loadRomFile(const QString& path, const QStringList& enabledPatches)
 {
+    m_romLoaded = false;
+    m_romPath = path;
+    m_romSha256.clear();
+    m_appliedRomPatches.clear();
+    m_romPatchError.clear();
+
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         return false;
     }
 
-    const auto data = file.readAll();
+    auto data = file.readAll();
     if (data.size() != static_cast<qsizetype>(m_rom.size())) {
+        return false;
+    }
+
+    const auto patchResult = rom::RomPatcher::apply(data, QStringLiteral("mac-plus"), enabledPatches);
+    m_romSha256 = QString::fromLatin1(patchResult.originalSha256.toHex());
+    m_romPatchError = patchResult.error;
+    if (!patchResult.success) {
         return false;
     }
 
     std::copy(data.begin(), data.end(), m_rom.begin());
     m_romLoaded = true;
-    m_romPath = path;
+    m_appliedRomPatches = patchResult.appliedPatchIds;
     return true;
 }
 
@@ -693,6 +707,9 @@ MacPlusMachine::RomInfo MacPlusMachine::romInfo() const
         checksum,
         readRom32Direct(0),
         readRom32Direct(4),
+        m_romSha256,
+        m_appliedRomPatches,
+        m_romPatchError,
         m_romLoaded,
     };
 }

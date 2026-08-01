@@ -8,6 +8,7 @@
 - Target machines are 68000-era Macs, Macintosh IIcx, Macintosh Quadra 800, and Power Macintosh 6100.
 - Support original, unmodified ROM files supplied by users. Do not embed copyrighted ROM content.
 - Configuration files should use TOML syntax and should evolve toward a WinUAE/VMware Workstation style configuration workflow.
+- Parse and serialize profiles with toml++; do not add ad hoc TOML parsing.
 
 ## Repository Practices
 
@@ -24,6 +25,8 @@
 - Preserve provenance notices for imported or derived code under `licenses/`.
 - Compose machine models from reusable devices where practical, for example SCSI, ADB, VIA, SCC, video, sound, memory, storage, and bus glue.
 - Keep machine-specific behavior in machine profile or chipset modules rather than spreading conditionals through shared device code.
+- ROM patches are optional profile features and default off. Apply them to an in-memory copy only, gate them by the original ROM SHA-256 and expected bytes, apply transactionally, and expose applied patch IDs in debug state. Never modify the user's ROM file.
+- The Mac Plus v3 `skip_ram_pattern_test` patch skips only the destructive pattern passes. It preserves ROM checksum verification and RAM sizing, and updates the ROM's stored checksum to account for the branch edit.
 - Prefer clear interfaces between emulator core, devices, machine profiles, configuration, and Qt UI.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.

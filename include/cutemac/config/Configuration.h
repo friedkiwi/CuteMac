@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <optional>
 
@@ -16,6 +17,9 @@ public:
     QString floppyPath;
     int ramSizeMiB = 4;
     int cyclesPerFrame = 130560;
+    bool skipRamPatternTest = false;
+
+    [[nodiscard]] QStringList enabledRomPatches() const;
 };
 
 class ConfigurationManager {

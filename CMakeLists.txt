@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Widgets)
+find_package(tomlplusplus REQUIRED CONFIG)
 find_package(Readline)
 
 qt_standard_project_setup()
@@ -38,6 +39,7 @@ add_library(CuteMacCore
     src/devices/video/VideoDevice.cpp
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
+    src/rom/RomPatcher.cpp
 )
 
 target_include_directories(CuteMacCore
@@ -48,6 +50,7 @@ target_include_directories(CuteMacCore
 target_link_libraries(CuteMacCore
     PUBLIC
         Qt6::Core
+        tomlplusplus::tomlplusplus
 )
 
 if(UNIX AND NOT APPLE)
@@ -121,4 +124,26 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME iwm-register-protocol COMMAND CuteMacIwmTests)
+
+    add_executable(CuteMacRomPatchTests
+        tests/rom_patch_tests.cpp
+    )
+
+    target_link_libraries(CuteMacRomPatchTests
+        PRIVATE
+            CuteMacCore
+    )
+
+    add_test(NAME rom-patches COMMAND CuteMacRomPatchTests)
+
+    add_executable(CuteMacConfigurationTests
+        tests/configuration_tests.cpp
+    )
+
+    target_link_libraries(CuteMacConfigurationTests
+        PRIVATE
+            CuteMacCore
+    )
+
+    add_test(NAME configuration-toml COMMAND CuteMacConfigurationTests)
 endif()
