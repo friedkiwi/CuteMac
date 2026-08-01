@@ -18,6 +18,7 @@ Ubuntu/WSL2 prerequisites:
 
 ```sh
 sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev
+sudo apt-get install libreadline-dev
 ```
 
 ```sh
@@ -25,7 +26,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, and `CuteMacMacPlusSmoke` for headless ROM verification.
+The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, `CuteMacDebugSession` for a readline debug console, and `CuteMacMacPlusSmoke` for headless ROM verification.
 
 ## Run
 
@@ -39,4 +40,10 @@ Mac Plus ROM smoke test:
 
 ```sh
 ./build/CuteMacMacPlusSmoke work/roms/MacPlusV3.rom
+```
+
+Debug console:
+
+```sh
+./build/CuteMacDebugSession --profile ~/.config/friedkiwi/CuteMac/profiles/Mac_Plus.toml
 ```

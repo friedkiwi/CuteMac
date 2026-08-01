@@ -9,8 +9,10 @@ project(CuteMac
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+find_package(Readline)
 
 qt_standard_project_setup()
 
@@ -88,3 +90,15 @@ target_link_libraries(CuteMacMacPlusSmoke
     PRIVATE
         CuteMacCore
 )
+
+if(Readline_FOUND AND NOT EMSCRIPTEN)
+    add_executable(CuteMacDebugSession
+        src/debug/main.cpp
+    )
+
+    target_link_libraries(CuteMacDebugSession
+        PRIVATE
+            CuteMacCore
+            Readline::Readline
+    )
+endif()

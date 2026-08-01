@@ -27,6 +27,7 @@
 - Prefer clear interfaces between emulator core, devices, machine profiles, configuration, and Qt UI.
 - Keep Qt UI code out of emulator core modules except for explicit frontend integration boundaries.
 - Keep the GUI split as `CuteMac` for profile management and `CuteMacSession` for individual emulator windows unless there is a strong reason to change it.
+- Keep debug-only interactive tools in `CuteMacDebugSession` so normal emulator sessions stay lean.
 - Use `QStandardPaths` for cross-platform profile, ROM, and disk-image defaults.
 - Avoid starting emulator implementation before the scaffold, build system, and source organization are in place.
 
