@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -41,7 +41,21 @@ jobs:
             -DBUILD_TESTING=ON
 
       - name: Build
-        run: cmake --build build --config Release
+        shell: pwsh
+        run: |
+          & cmake --build build --config Release 2>&1 | Tee-Object -FilePath build-output.log
+          $buildExitCode = $LASTEXITCODE
+          if ($buildExitCode -ne 0) {
+            $tail = Get-Content build-output.log -Tail 200
+            Add-Content $env:GITHUB_STEP_SUMMARY "### Windows build failure"
+            Add-Content $env:GITHUB_STEP_SUMMARY '```text'
+            $tail | Add-Content $env:GITHUB_STEP_SUMMARY
+            Add-Content $env:GITHUB_STEP_SUMMARY '```'
+
+            $annotation = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows build failed::$annotation"
+            exit $buildExitCode
+          }
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
