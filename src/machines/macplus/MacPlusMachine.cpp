@@ -584,9 +584,14 @@ devices::video::VideoFrame MacPlusMachine::videoFrame() const
         512,
         342,
         512 / 8,
-        devices::video::PixelFormat::Monochrome1,
+        devices::video::PixelStorage::Indexed,
+        1,
+        devices::video::ByteOrder::BigEndian,
+        devices::video::BitOrder::MostSignificantFirst,
         framebufferBytes(),
         { 0xffffffffU, 0xff000000U },
+        { 0, 1 },
+        {},
     };
 }
 

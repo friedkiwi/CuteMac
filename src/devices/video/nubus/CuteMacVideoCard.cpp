@@ -132,17 +132,25 @@ VideoFrame CuteMacVideoCard::videoFrame() const
     const auto stride = strideBytes();
     const auto required = static_cast<qsizetype>(stride) * m_height;
     if (required > m_vram.size()) return {};
-    return { m_width, m_height, stride, pixelFormat(), m_vram.left(required), m_palette };
+    if (m_depth <= 8) {
+        QVector<std::uint16_t> mapping(1 << m_depth);
+        const auto maximum = mapping.size() - 1;
+        for (int value = 0; value < mapping.size(); ++value) {
+            mapping[value] = static_cast<std::uint16_t>(value * 255 / maximum);
+        }
+        return { m_width, m_height, stride, PixelStorage::Indexed, m_depth, ByteOrder::BigEndian,
+            BitOrder::MostSignificantFirst, m_vram.left(required), m_palette, mapping, {} };
+    }
+    return { m_width, m_height, stride, PixelStorage::Direct, m_depth, ByteOrder::BigEndian,
+        BitOrder::MostSignificantFirst, m_vram.left(required), {}, {}, channelLayout() };
 }
 
 int CuteMacVideoCard::strideBytes() const { return ((m_width * m_depth + 31) / 32) * 4; }
 
-PixelFormat CuteMacVideoCard::pixelFormat() const
+ChannelLayout CuteMacVideoCard::channelLayout() const
 {
-    switch (m_depth) {
-    case 1: return PixelFormat::Indexed1; case 2: return PixelFormat::Indexed2; case 4: return PixelFormat::Indexed4;
-    case 8: return PixelFormat::Indexed8; case 16: return PixelFormat::RGB555; default: return PixelFormat::XRGB8888;
-    }
+    if (m_depth == 16) return { 0x7c00, 0x03e0, 0x001f, 0 };
+    return { 0x00ff0000, 0x0000ff00, 0x000000ff, 0 };
 }
 
 void CuteMacVideoCard::initializePalette()

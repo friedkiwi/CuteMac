@@ -23,7 +23,7 @@ public:
 private:
     [[nodiscard]] static QByteArray buildDeclarationRom(int width, int height, int vramBytes);
     [[nodiscard]] int strideBytes() const;
-    [[nodiscard]] PixelFormat pixelFormat() const;
+    [[nodiscard]] ChannelLayout channelLayout() const;
     void initializePalette();
 
     int m_width;

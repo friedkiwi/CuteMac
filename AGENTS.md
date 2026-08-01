@@ -33,6 +33,7 @@
 - The IIcx `skip_ram_pattern_test` patch is independently SHA-256/byte gated for ROM checksum `0x97221136`. It replaces the destructive-pattern routine entry with its native `JMP (A6)` return and adjusts the stored ROM checksum; RAM sizing and mapping tests remain intact.
 - Prefer clear interfaces between emulator core, devices, machine profiles, configuration, and Qt UI.
 - Frontends depend on `core::EmulationSession` and `core::IMachine`, never directly on a concrete machine. Concrete access is permitted only through `IDebugMachineAccess` in debug-only tooling.
+- Video devices own emulated VRAM, mode, CLUT, and scanout interpretation, and publish frontend-neutral `VideoFrame` snapshots. Indexed frames specify packed depth and pixel-to-CLUT mapping; direct-color frames specify depth, byte order, and channel masks. Qt owns the resulting `QImage`; never put frontend bitmap types in emulated devices.
 - Timestamp host input with the machine cycle counter and deliver it through `MachineScheduler`; preserve button transitions long enough for guest VBL sampling.
 - Desktop sessions run emulation through `SessionRunner` off the Qt event thread. WebAssembly uses the same runner API in single-threaded host-frame mode.
 - Runtime speed is profile-controlled with `[runtime] speed = "realtime"|"unlimited"` and can change without resetting the guest. Desktop unlimited mode removes throttling; wasm unlimited mode uses a bounded host-frame work budget so the browser remains responsive.

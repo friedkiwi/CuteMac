@@ -6,14 +6,53 @@ namespace cutemac::session {
 
 namespace {
 
-QRgb paletteColor(const devices::video::VideoFrame& frame, int index)
+std::uint32_t indexedValue(const devices::video::VideoFrame& frame, const std::uint8_t* source, int x)
 {
-    if (index >= 0 && index < frame.palette.size()) {
-        return static_cast<QRgb>(frame.palette[index]);
+    if (frame.bitsPerPixel == 8) return source[x];
+    const auto pixelsPerByte = 8 / frame.bitsPerPixel;
+    const auto position = x % pixelsPerByte;
+    const auto shift = frame.bitOrder == devices::video::BitOrder::MostSignificantFirst
+        ? 8 - frame.bitsPerPixel * (position + 1)
+        : frame.bitsPerPixel * position;
+    return (source[x / pixelsPerByte] >> shift) & ((1U << frame.bitsPerPixel) - 1U);
+}
+
+QRgb indexedColor(const devices::video::VideoFrame& frame, std::uint32_t pixelValue)
+{
+    auto colorIndex = pixelValue;
+    if (pixelValue < static_cast<std::uint32_t>(frame.pixelToColorIndex.size())) {
+        colorIndex = frame.pixelToColorIndex[static_cast<qsizetype>(pixelValue)];
     }
-    const auto levels = std::max(1, frame.palette.isEmpty() ? 255 : static_cast<int>(frame.palette.size()) - 1);
-    const auto value = 255 - (index * 255 / levels);
+    if (colorIndex < static_cast<std::uint32_t>(frame.colorTable.size())) {
+        return static_cast<QRgb>(frame.colorTable[static_cast<qsizetype>(colorIndex)]);
+    }
+    const auto maximum = std::max(1U, (1U << frame.bitsPerPixel) - 1U);
+    const auto value = 255 - static_cast<int>(pixelValue * 255U / maximum);
     return qRgb(value, value, value);
+}
+
+std::uint32_t directValue(const devices::video::VideoFrame& frame, const std::uint8_t* source, int x)
+{
+    const auto bytesPerPixel = (frame.bitsPerPixel + 7) / 8;
+    const auto* pixel = source + x * bytesPerPixel;
+    std::uint32_t value = 0;
+    if (frame.byteOrder == devices::video::ByteOrder::BigEndian) {
+        for (int byte = 0; byte < bytesPerPixel; ++byte) value = (value << 8) | pixel[byte];
+    } else {
+        for (int byte = bytesPerPixel - 1; byte >= 0; --byte) value = (value << 8) | pixel[byte];
+    }
+    return value;
+}
+
+int channel(std::uint32_t value, std::uint32_t mask)
+{
+    if (mask == 0) return 0;
+    int shift = 0;
+    while ((mask & 1U) == 0) {
+        mask >>= 1;
+        ++shift;
+    }
+    return static_cast<int>(((value >> shift) & mask) * 255U / mask);
 }
 
 } // namespace
@@ -45,36 +84,12 @@ QImage FramebufferRenderer::render(const devices::video::VideoFrame& frame)
         const auto* source = reinterpret_cast<const std::uint8_t*>(frame.pixels.constData() + y * frame.strideBytes);
         auto* destination = reinterpret_cast<QRgb*>(image.scanLine(y));
         for (int x = 0; x < frame.width; ++x) {
-            int index = 0;
-            switch (frame.format) {
-            case devices::video::PixelFormat::Monochrome1:
-            case devices::video::PixelFormat::Indexed1:
-                index = (source[x >> 3] >> (7 - (x & 7))) & 1;
-                destination[x] = paletteColor(frame, index);
-                break;
-            case devices::video::PixelFormat::Indexed2:
-                index = (source[x >> 2] >> (6 - ((x & 3) * 2))) & 3;
-                destination[x] = paletteColor(frame, index);
-                break;
-            case devices::video::PixelFormat::Indexed4:
-                index = (source[x >> 1] >> (4 - ((x & 1) * 4))) & 15;
-                destination[x] = paletteColor(frame, index);
-                break;
-            case devices::video::PixelFormat::Indexed8:
-                destination[x] = paletteColor(frame, source[x]);
-                break;
-            case devices::video::PixelFormat::RGB555: {
-                const auto pixel = static_cast<std::uint16_t>((source[x * 2] << 8) | source[x * 2 + 1]);
-                destination[x] = qRgb(((pixel >> 10) & 31) * 255 / 31, ((pixel >> 5) & 31) * 255 / 31,
-                    (pixel & 31) * 255 / 31);
-                break;
-            }
-            case devices::video::PixelFormat::RGB888:
-                destination[x] = qRgb(source[x * 3], source[x * 3 + 1], source[x * 3 + 2]);
-                break;
-            case devices::video::PixelFormat::XRGB8888:
-                destination[x] = qRgb(source[x * 4 + 1], source[x * 4 + 2], source[x * 4 + 3]);
-                break;
+            if (frame.storage == devices::video::PixelStorage::Indexed) {
+                destination[x] = indexedColor(frame, indexedValue(frame, source, x));
+            } else {
+                const auto value = directValue(frame, source, x);
+                destination[x] = qRgb(channel(value, frame.channels.redMask), channel(value, frame.channels.greenMask),
+                    channel(value, frame.channels.blueMask));
             }
         }
     }

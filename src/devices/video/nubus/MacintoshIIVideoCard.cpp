@@ -12,16 +12,6 @@ constexpr std::uint32_t localMask = 0x000fffff;
 constexpr std::uint32_t declarationRomBase = 0x00f00000;
 constexpr std::uint64_t cyclesPerVbl = 260608;
 
-PixelFormat formatForMode(int mode)
-{
-    switch (mode & 3) {
-    case 0: return PixelFormat::Indexed1;
-    case 1: return PixelFormat::Indexed2;
-    case 2: return PixelFormat::Indexed4;
-    default: return PixelFormat::Indexed8;
-    }
-}
-
 int strideForMode(int mode)
 {
     return 128 << (mode & 3);
@@ -60,6 +50,10 @@ void MacintoshIIVideoCard::reset()
         m_palette[index] = 0xff000000U | (static_cast<std::uint32_t>(level) << 16)
             | (static_cast<std::uint32_t>(level) << 8) | level;
     }
+    // The card powers on in one-bit mode, where TFB expands pixel value 1 to
+    // RAMDAC index 0x80. Keep the boot display legible before Mac OS programs
+    // the full CLUT.
+    m_palette[0x80] = 0xff000000U;
     m_paletteAddress = 0;
     m_paletteComponent = 0;
     m_mode = 0;
@@ -117,14 +111,22 @@ void MacintoshIIVideoCard::write8(std::uint32_t offset, std::uint8_t value)
 VideoFrame MacintoshIIVideoCard::videoFrame() const
 {
     const auto stride = strideForMode(m_mode);
+    const auto depth = 1 << (m_mode & 3);
     const auto bytes = std::min(m_vram.size() - 0x20, static_cast<qsizetype>(stride * m_height));
+    QVector<std::uint16_t> mapping(1 << depth);
+    for (int value = 0; value < mapping.size(); ++value) mapping[value] = static_cast<std::uint16_t>(value << (8 - depth));
     return {
         m_width,
         m_height,
         stride,
-        formatForMode(m_mode),
+        PixelStorage::Indexed,
+        depth,
+        ByteOrder::BigEndian,
+        BitOrder::MostSignificantFirst,
         m_vram.mid(0x20, bytes),
         m_palette,
+        mapping,
+        {},
     };
 }
 

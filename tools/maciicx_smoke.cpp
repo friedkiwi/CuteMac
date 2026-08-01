@@ -106,7 +106,7 @@ int main(int argc, char** argv)
         std::cout << "  0x" << std::hex << rankedPcs[index].second << " "
                   << machine.disassemble(rankedPcs[index].second).toStdString() << std::dec << '\n';
     }
-    if (argc >= 5 && frame.valid() && frame.format == cutemac::devices::video::PixelFormat::Indexed1) {
+    if (argc >= 5 && frame.valid() && frame.storage == cutemac::devices::video::PixelStorage::Indexed && frame.bitsPerPixel == 1) {
         QByteArray pgm = QByteArray("P5\n") + QByteArray::number(frame.width) + ' ' + QByteArray::number(frame.height) + "\n255\n";
         pgm.reserve(pgm.size() + frame.width * frame.height);
         for (int y = 0; y < frame.height; ++y) {

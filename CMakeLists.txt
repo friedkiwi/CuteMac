@@ -253,4 +253,11 @@ if(BUILD_TESTING)
     add_executable(CuteMacNuBusVideoTests tests/nubus_video_tests.cpp)
     target_link_libraries(CuteMacNuBusVideoTests PRIVATE CuteMacCore)
     add_test(NAME nubus-video-cards COMMAND CuteMacNuBusVideoTests)
+
+    add_executable(CuteMacFramebufferRendererTests
+        tests/framebuffer_renderer_tests.cpp
+        src/session/FramebufferRenderer.cpp
+    )
+    target_link_libraries(CuteMacFramebufferRendererTests PRIVATE CuteMacCore Qt6::Gui)
+    add_test(NAME framebuffer-renderer COMMAND CuteMacFramebufferRendererTests)
 endif()
