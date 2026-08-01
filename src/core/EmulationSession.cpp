@@ -58,9 +58,9 @@ bool EmulationSession::initialize()
     const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
     m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
-        if (device.type == config::ScsiDeviceType::HardDisk && !device.imagePath.isEmpty()) {
-            (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
-        }
+        if (device.imagePath.isEmpty()) continue;
+        if (device.type == config::ScsiDeviceType::CdRom) (void)m_machine->loadScsiCdRom(device.id, device.imagePath);
+        else (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
     }
     if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
         (void)m_machine->loadDiskImage(m_configuration.diskPath);
@@ -91,9 +91,9 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
     m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
-        if (device.type == config::ScsiDeviceType::HardDisk && !device.imagePath.isEmpty()) {
-            (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
-        }
+        if (device.imagePath.isEmpty()) continue;
+        if (device.type == config::ScsiDeviceType::CdRom) (void)m_machine->loadScsiCdRom(device.id, device.imagePath);
+        else (void)m_machine->loadScsiDisk(device.id, device.imagePath, device.readOnly);
     }
     if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
         (void)m_machine->loadDiskImage(m_configuration.diskPath);

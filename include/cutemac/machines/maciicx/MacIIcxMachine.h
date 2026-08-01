@@ -23,6 +23,7 @@
 #include "cutemac/devices/rtc/MacRtc.h"
 #include "cutemac/devices/scc/Z8530Scc.h"
 #include "cutemac/devices/scsi/ScsiBlockDevice.h"
+#include "cutemac/devices/scsi/ScsiCdRomDevice.h"
 #include "cutemac/devices/scsi/ncr5380/Ncr5380.h"
 #include "cutemac/devices/via6522/Via6522.h"
 
@@ -37,6 +38,7 @@ public:
     [[nodiscard]] bool loadDiskImage(const QString& path) override;
     void ejectDiskImage() override;
     [[nodiscard]] bool loadScsiDisk(int id, const QString& path, bool readOnly) override;
+    [[nodiscard]] bool loadScsiCdRom(int id, const QString& path) override;
     void ejectScsiDevice(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly) override;
     void ejectFloppyImage() override;
@@ -108,6 +110,7 @@ private:
     devices::scsi::ncr5380::Ncr5380 m_scsi;
     devices::nubus::NuBusBus m_nubus;
     std::array<std::shared_ptr<devices::scsi::ScsiBlockDevice>, 7> m_scsiDisks;
+    std::array<std::shared_ptr<devices::scsi::ScsiCdRomDevice>, 7> m_scsiCdRoms;
     core::MachineScheduler m_scheduler;
     QString m_romPath;
     QString m_floppyPath;

@@ -39,6 +39,7 @@ add_library(CuteMacCore
     src/devices/nubus/NuBusBus.cpp
     src/devices/rtc/MacRtc.cpp
     src/devices/scsi/ScsiBlockDevice.cpp
+    src/devices/scsi/ScsiCdRomDevice.cpp
     src/devices/scsi/ScsiBus.cpp
     src/devices/scsi/ncr5380/Ncr5380.cpp
     src/devices/scc/Z8530Scc.cpp

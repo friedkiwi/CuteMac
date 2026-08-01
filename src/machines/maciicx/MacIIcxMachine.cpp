@@ -87,8 +87,20 @@ bool MacIIcxMachine::loadScsiDisk(int id, const QString& path, bool readOnly)
     if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return false;
     auto disk = std::make_shared<devices::scsi::ScsiBlockDevice>();
     if (!disk->loadImage(path, readOnly)) return false;
+    m_scsiCdRoms[static_cast<std::size_t>(id)].reset();
     m_scsiDisks[static_cast<std::size_t>(id)] = disk;
     m_scsi.attachTarget(static_cast<std::uint8_t>(id), disk);
+    return true;
+}
+
+bool MacIIcxMachine::loadScsiCdRom(int id, const QString& path)
+{
+    if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return false;
+    auto cdRom = std::make_shared<devices::scsi::ScsiCdRomDevice>();
+    if (!cdRom->loadImage(path)) return false;
+    m_scsiDisks[static_cast<std::size_t>(id)].reset();
+    m_scsiCdRoms[static_cast<std::size_t>(id)] = cdRom;
+    m_scsi.attachTarget(static_cast<std::uint8_t>(id), cdRom);
     return true;
 }
 
@@ -97,6 +109,7 @@ void MacIIcxMachine::ejectScsiDevice(int id)
     if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return;
     m_scsi.detachTarget(static_cast<std::uint8_t>(id));
     m_scsiDisks[static_cast<std::size_t>(id)].reset();
+    m_scsiCdRoms[static_cast<std::size_t>(id)].reset();
 }
 
 bool MacIIcxMachine::loadFloppyImage(const QString& path, bool readOnly)
@@ -128,6 +141,7 @@ void MacIIcxMachine::reset()
     m_scsi.reset();
     for (std::size_t id = 0; id < m_scsiDisks.size(); ++id) {
         if (m_scsiDisks[id]) m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
+        else if (m_scsiCdRoms[id]) m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiCdRoms[id]);
     }
     m_via1.reset();
     m_via2.reset();
@@ -309,12 +323,22 @@ void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
         writeIo8(address, highByte(value));
         return;
     }
+    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+        ++m_ioStatistics.nubusWrites;
+        m_nubus.write16(address, value);
+        return;
+    }
     write8(address, highByte(value));
     write8(address + 1, lowByte(value));
 }
 
 void MacIIcxMachine::write32(std::uint32_t address, std::uint32_t value)
 {
+    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+        ++m_ioStatistics.nubusWrites;
+        m_nubus.write32(address, value);
+        return;
+    }
     write16(address, static_cast<std::uint16_t>(value >> 16));
     write16(address + 2, static_cast<std::uint16_t>(value));
 }

@@ -443,6 +443,9 @@ qsizetype Ncr5380::expectedCommandLength(std::uint8_t opcode) const
     if (group == 1 || group == 2) {
         return 10;
     }
+    if (group == 5) {
+        return 12;
+    }
     return 6;
 }
 

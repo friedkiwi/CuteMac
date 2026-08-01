@@ -24,6 +24,7 @@ public:
     [[nodiscard]] virtual bool loadDiskImage(const QString& path) = 0;
     virtual void ejectDiskImage() = 0;
     [[nodiscard]] virtual bool loadScsiDisk(int id, const QString& path, bool readOnly) = 0;
+    [[nodiscard]] virtual bool loadScsiCdRom(int id, const QString& path) = 0;
     virtual void ejectScsiDevice(int id) = 0;
     [[nodiscard]] virtual bool loadFloppyImage(const QString& path, bool readOnly = false) = 0;
     virtual void ejectFloppyImage() = 0;

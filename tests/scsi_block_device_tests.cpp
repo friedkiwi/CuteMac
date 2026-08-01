@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "cutemac/devices/scsi/ScsiBlockDevice.h"
+#include "cutemac/devices/scsi/ScsiCdRomDevice.h"
 #include "cutemac/devices/scsi/ncr5380/Ncr5380.h"
 
 namespace {
@@ -85,6 +86,36 @@ int main()
     ok &= expect(write.status == 0, "WRITE(6) failed");
     QFile persisted(path);
     ok &= expect(persisted.open(QIODevice::ReadOnly) && persisted.read(512) == marker, "WRITE(6) was not persisted");
+
+    const auto isoPath = directory.filePath(QStringLiteral("disc.iso"));
+    QFile iso(isoPath);
+    ok &= expect(iso.open(QIODevice::WriteOnly), "ISO fixture open failed");
+    QByteArray isoBytes(4 * 2048, '\0');
+    std::fill(isoBytes.begin() + 2 * 2048, isoBytes.begin() + 3 * 2048, static_cast<char>(0x5a));
+    ok &= expect(iso.write(isoBytes) == isoBytes.size(), "ISO fixture write failed");
+    iso.close();
+
+    cutemac::devices::scsi::ScsiCdRomDevice cdRom;
+    ok &= expect(cdRom.loadImage(isoPath), "CD-ROM image load failed");
+    const auto cdInquiry = cdRom.executeCommand(QByteArray::fromHex("120000002400"), {});
+    ok &= expect(cdInquiry.status == 0 && static_cast<std::uint8_t>(cdInquiry.data[0]) == 0x05
+            && (static_cast<std::uint8_t>(cdInquiry.data[1]) & 0x80) != 0,
+        "CD-ROM INQUIRY type is wrong");
+    ok &= expect(cdInquiry.data.mid(8, 8) == QByteArrayLiteral("MATSHITA")
+            && cdInquiry.data.mid(16, 16) == QByteArrayLiteral("CD-ROM CR-8004  "),
+        "AppleCD-compatible identity is wrong");
+    const auto capacity = cdRom.executeCommand(QByteArray::fromHex("25000000000000000000"), {});
+    ok &= expect(capacity.data == QByteArray::fromHex("0000000300000800"), "CD-ROM capacity must use 2048-byte blocks");
+    const auto cdRead = cdRom.executeCommand(QByteArray::fromHex("28000000000200000100"), {});
+    ok &= expect(cdRead.status == 0 && cdRead.data == QByteArray(2048, static_cast<char>(0x5a)), "READ(10) CD sector failed");
+    const auto toc = cdRom.executeCommand(QByteArray::fromHex("43000000000000001200"), {});
+    ok &= expect(toc.status == 0 && toc.data.size() == 18 && static_cast<std::uint8_t>(toc.data[6]) == 1
+            && static_cast<std::uint8_t>(toc.data[14]) == 0xaa,
+        "single-track CD-ROM TOC is wrong");
+    const auto cdMode = cdRom.executeCommand(QByteArray::fromHex("1a003f00ff00"), {});
+    ok &= expect(cdMode.status == 0 && cdMode.data.contains(QByteArray::fromHex("0d06000d003c004b"))
+            && cdMode.data.contains(QByteArray::fromHex("2a0e")),
+        "CD-ROM mode pages are missing");
 
     auto target = std::make_shared<RecordingTarget>();
     cutemac::devices::scsi::ncr5380::Ncr5380 controller;
