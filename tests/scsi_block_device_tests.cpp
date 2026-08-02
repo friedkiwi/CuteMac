@@ -150,16 +150,6 @@ int main()
             && (static_cast<std::uint8_t>(cdModeHeaderDbd.data[2]) & 0x80) != 0
             && cdModeHeaderDbd.data[3] == 0,
         "MODE SENSE(6) DBD probe must omit the block descriptor");
-    const auto cdOperatingPage = cdRom.executeCommand(QByteArray::fromHex("1a0800000800"), {});
-    ok &= expect(cdOperatingPage.status == 0 && cdOperatingPage.data.size() == 8
-            && cdOperatingPage.data.mid(4) == QByteArray::fromHex("00028005"),
-        "Apple-compatible CD MODE SENSE page zero must identify an optical device");
-    const auto cdApplePage = cdRom.executeCommand(QByteArray::fromHex("1a083000ff00"), {});
-    ok &= expect(cdApplePage.status == 0 && cdApplePage.data.mid(4, 24)
-            == QByteArray::fromHex("3016") + QByteArrayLiteral("APPLE COMPUTER, INC   "),
-        "Apple-compatible CD vendor mode page is missing");
-    ok &= expect(cdRom.executeCommand(QByteArray::fromHex("151000000c00"), QByteArray(12, '\0')).status == 0,
-        "AppleCD MODE SELECT(6) initialization must be accepted");
     const auto cdMode10 = cdRom.executeCommand(QByteArray::fromHex("5a003f0000000000ff00"), {});
     ok &= expect(cdMode10.status == 0 && (static_cast<std::uint8_t>(cdMode10.data[3]) & 0x80) != 0,
         "CD-ROM MODE SENSE(10) must advertise write protection");

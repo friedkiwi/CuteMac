@@ -277,16 +277,6 @@ void Ncr5380::executeCommand()
         setPhase(Phase::DataOut);
         return;
     }
-    if (opcode == 0x55 && m_command.size() >= 10) {
-        m_expectedDataOut = (static_cast<qsizetype>(static_cast<std::uint8_t>(m_command[7])) << 8)
-            | static_cast<std::uint8_t>(m_command[8]);
-        if (m_expectedDataOut != 0) {
-            m_dataBuffer.clear();
-            m_dataIndex = 0;
-            setPhase(Phase::DataOut);
-            return;
-        }
-    }
     if (opcode == 0x04 && m_command.size() >= 6 && (static_cast<std::uint8_t>(m_command[1]) & 0x10) != 0) {
         m_expectedDataOut = 4;
         m_dataBuffer.clear();
