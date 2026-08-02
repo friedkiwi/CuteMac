@@ -139,6 +139,17 @@ int main()
         "CD-ROM mode pages are missing");
     ok &= expect((static_cast<std::uint8_t>(cdMode.data[2]) & 0x80) != 0,
         "CD-ROM MODE SENSE(6) must advertise write protection");
+    const auto cdModeHeader = cdRom.executeCommand(QByteArray::fromHex("1a0000000c00"), {});
+    ok &= expect(cdModeHeader.status == 0 && cdModeHeader.data.size() == 12
+            && (static_cast<std::uint8_t>(cdModeHeader.data[2]) & 0x80) != 0
+            && static_cast<std::uint8_t>(cdModeHeader.data[3]) == 8
+            && cdModeHeader.data.mid(9, 3) == QByteArray::fromHex("000800"),
+        "classic MODE SENSE(6) page-zero probe must report a protected 2048-byte medium");
+    const auto cdModeHeaderDbd = cdRom.executeCommand(QByteArray::fromHex("1a0800000400"), {});
+    ok &= expect(cdModeHeaderDbd.status == 0 && cdModeHeaderDbd.data.size() == 4
+            && (static_cast<std::uint8_t>(cdModeHeaderDbd.data[2]) & 0x80) != 0
+            && cdModeHeaderDbd.data[3] == 0,
+        "MODE SENSE(6) DBD probe must omit the block descriptor");
     const auto cdMode10 = cdRom.executeCommand(QByteArray::fromHex("5a003f0000000000ff00"), {});
     ok &= expect(cdMode10.status == 0 && (static_cast<std::uint8_t>(cdMode10.data[3]) & 0x80) != 0,
         "CD-ROM MODE SENSE(10) must advertise write protection");

@@ -105,7 +105,8 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
         return read(lba, blocks);
     }
     case 0x12: return inquiry(cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 36);
-    case 0x1a: return modeSense(false, cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) & 0x3f : 0x3f,
+    case 0x1a: return modeSense(false, cdb.size() > 1 && (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
+        cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) & 0x3f : 0x3f,
         cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 4);
     case 0x1b:
         if (cdb.size() > 4 && (static_cast<std::uint8_t>(cdb[4]) & 0x02) != 0
@@ -119,7 +120,8 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
     case 0x43: return readToc(cdb);
     case 0x5a:
         if (cdb.size() < 10) return checkCondition(senseIllegalRequest, 0x24);
-        return modeSense(true, static_cast<std::uint8_t>(cdb[2]) & 0x3f,
+        return modeSense(true, (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
+            static_cast<std::uint8_t>(cdb[2]) & 0x3f,
             (static_cast<std::uint16_t>(static_cast<std::uint8_t>(cdb[7])) << 8) | static_cast<std::uint8_t>(cdb[8]));
     case 0xa8:
         if (cdb.size() < 12) return checkCondition(senseIllegalRequest, 0x24);
@@ -202,16 +204,30 @@ ScsiCommandResult ScsiCdRomDevice::requestSense(std::uint8_t allocationLength)
     return good(data);
 }
 
-ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, std::uint8_t pageCode, std::uint16_t allocationLength) const
+ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, bool disableBlockDescriptors,
+    std::uint8_t pageCode, std::uint16_t allocationLength) const
 {
     QByteArray data(tenByte ? 8 : 4, '\0');
     // The device-specific parameter byte is byte 2 in a MODE SENSE(6)
     // header and byte 3 in a MODE SENSE(10) header.  Bit 7 advertises
     // write protection; classic Mac OS uses it to avoid desktop-file writes.
     data[tenByte ? 3 : 2] = static_cast<char>(0x80);
+    if (!disableBlockDescriptors) {
+        QByteArray descriptor(8, '\0');
+        const auto blocks = std::min<std::uint32_t>(blockCount(), 0x00ffffffU);
+        descriptor[1] = static_cast<char>(blocks >> 16);
+        descriptor[2] = static_cast<char>(blocks >> 8);
+        descriptor[3] = static_cast<char>(blocks);
+        descriptor[5] = static_cast<char>(blockSize >> 16);
+        descriptor[6] = static_cast<char>(blockSize >> 8);
+        descriptor[7] = static_cast<char>(blockSize);
+        data.append(descriptor);
+        data[tenByte ? 7 : 3] = 8;
+    }
     if (pageCode == 0x0d || pageCode == 0x3f) data.append(QByteArray::fromHex("0d06000d003c004b"));
     if (pageCode == 0x2a || pageCode == 0x3f) data.append(QByteArray::fromHex("2a0e0000000328000562000000400562"));
-    if (data.size() == (tenByte ? 8 : 4)) return { {}, 0x02, 0, senseIllegalRequest };
+    if (pageCode != 0x00 && pageCode != 0x0d && pageCode != 0x2a && pageCode != 0x3f)
+        return { {}, 0x02, 0, senseIllegalRequest };
     if (tenByte) {
         const auto length = static_cast<std::uint16_t>(data.size() - 2);
         data[0] = static_cast<char>(length >> 8);
