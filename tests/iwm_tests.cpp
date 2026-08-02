@@ -104,10 +104,13 @@ int main()
     // Enter ISM mode with the unmodified ROM's 1,0,1,1 sequence.
     for (const auto value : { 0x40, 0x00, 0x40, 0x40 }) (void)swim.access(15, static_cast<std::uint8_t>(value), true);
     (void)swim.access(7, 0xc2, true); // ISM + motor + internal drive
+    swim.setSideSelect(true);
+    (void)swim.access(4, 0xf6, true); // Select the active-low NoReady drive sense.
     (void)swim.access(7, 0x08, true); // read ACTION
     const auto handshake = swim.access(15);
     ok &= expect((handshake & 0x80) != 0, "MFM read action must make a byte available");
     ok &= expect((handshake & 0x01) != 0, "first synchronized MFM byte must be a mark");
+    ok &= expect((handshake & 0x0c) == 0, "inserted spinning media must deassert NoReady");
     ok &= expect(swim.access(9) == 0xa1, "MFM address mark must begin with an illegal-clock A1 byte");
 
     return ok ? 0 : 1;

@@ -32,6 +32,7 @@ void IwmController::reset()
     m_swimParameterIndex = 0;
     m_swimError = 0;
     m_swimPhaseStrobe = false;
+    m_swimTraceBytesRemaining = 0;
     m_internalDrive.setMotorOn(false);
     m_externalDrive.setMotorOn(false);
 }
@@ -77,7 +78,7 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
 {
     const auto reg = static_cast<std::uint8_t>(registerIndex & 7);
     const auto previousMode = m_swimModeRegister;
-    if (m_traceEnabled && reg != 4 && reg != 7) {
+    if (m_traceEnabled && write && (reg == 5 || reg == 6 || reg == 7)) {
         appendTraceEvent(QStringLiteral("swim %1 reg=%2 value=0x%3 mode=0x%4")
                              .arg(write ? QStringLiteral("write") : QStringLiteral("read"))
                              .arg(reg)
@@ -124,6 +125,13 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
             for (qsizetype scanned = 0; scanned < bytesOnTrack && !drive.peekDiskByte().mark; ++scanned) {
                 (void)drive.nextDiskByte();
             }
+            if (m_traceEnabled) {
+                m_swimTraceBytesRemaining = 12;
+                appendTraceEvent(QStringLiteral("swim read-action track=%1 side=%2 cursor=%3")
+                                     .arg(drive.currentTrack())
+                                     .arg(drive.currentSide())
+                                     .arg(drive.debugState().trackCursor));
+            }
         }
         return 0xff;
     }
@@ -132,12 +140,27 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
     case 0: {
         ++m_dataReads;
         const auto diskByte = selectedDrive().nextDiskByte();
+        if (m_traceEnabled && m_swimTraceBytesRemaining > 0) {
+            --m_swimTraceBytesRemaining;
+            appendTraceEvent(QStringLiteral("swim data value=0x%1 mark=%2")
+                                 .arg(diskByte.value, 2, 16, QLatin1Char('0'))
+                                 .arg(diskByte.mark ? 1 : 0));
+        }
         if (diskByte.mark) m_swimError = static_cast<std::uint8_t>(m_swimError | 0x02);
         return diskByte.value;
     }
     case 1:
         ++m_dataReads;
-        return selectedDrive().nextDiskByte().value;
+        {
+            const auto diskByte = selectedDrive().nextDiskByte();
+            if (m_traceEnabled && m_swimTraceBytesRemaining > 0) {
+                --m_swimTraceBytesRemaining;
+                appendTraceEvent(QStringLiteral("swim mark value=0x%1 mark=%2")
+                                     .arg(diskByte.value, 2, 16, QLatin1Char('0'))
+                                     .arg(diskByte.mark ? 1 : 0));
+            }
+            return diskByte.value;
+        }
     case 2: {
         const auto error = m_swimError;
         m_swimError = 0;
@@ -447,7 +470,7 @@ bool IwmController::driveSenseHigh()
             m_tach = !m_tach;
             return m_tach;
         case 0x0d: return drive.highDensity(); // current emulated encoding is MFM
-        case 0x0e: return drive.inserted() && drive.motorOn();
+        case 0x0e: return !drive.inserted() || !drive.motorOn(); // active-high not-ready
         case 0x0f: return !drive.highDensity(); // active-low HD aperture
         default: return false;
         }

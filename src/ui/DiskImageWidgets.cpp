@@ -53,7 +53,7 @@ bool importWithDialog(storage::DiskImageManager& manager, storage::DiskImageType
 
 class CreateImageDialog final : public QDialog {
 public:
-    CreateImageDialog(storage::DiskImageType type, QWidget* parent)
+    CreateImageDialog(storage::DiskImageType type, QWidget* parent, qint64 presetSizeBytes = -1)
         : QDialog(parent), m_type(type)
     {
         setWindowTitle(type == storage::DiskImageType::Floppy ? QStringLiteral("Create Blank Floppy Image") : QStringLiteral("Create Blank Hard Disk Image"));
@@ -73,6 +73,10 @@ public:
             for (const auto size : { 20, 40, 80, 160, 230, 500, 1024 })
                 m_preset->addItem(size == 1024 ? QStringLiteral("1 GB") : QStringLiteral("%1 MB").arg(size), static_cast<qint64>(size) * 1024 * 1024);
             m_preset->addItem(QStringLiteral("Custom"), -1);
+        }
+        if (presetSizeBytes > 0) {
+            const auto index = m_preset->findData(presetSizeBytes);
+            if (index >= 0) m_preset->setCurrentIndex(index);
         }
         form->addRow(QStringLiteral("Size"), m_preset);
         m_custom = new QLineEdit(QStringLiteral("100"));
@@ -258,10 +262,10 @@ QString DiskImagePickerDialog::getImage(storage::DiskImageType type, const QStri
     return dialog.exec() == QDialog::Accepted ? dialog.selectedImagePath() : QString();
 }
 
-QString createDiskImage(storage::DiskImageType type, QWidget* parent)
+QString createDiskImage(storage::DiskImageType type, QWidget* parent, qint64 presetSizeBytes)
 {
     if (type == storage::DiskImageType::CdRom) return {};
-    CreateImageDialog dialog(type, parent);
+    CreateImageDialog dialog(type, parent, presetSizeBytes);
     return dialog.exec() == QDialog::Accepted ? dialog.createdPath() : QString();
 }
 

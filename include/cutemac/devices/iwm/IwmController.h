@@ -107,6 +107,7 @@ private:
     std::uint8_t m_swimParameterIndex = 0;
     std::uint8_t m_swimError = 0;
     bool m_swimPhaseStrobe = false;
+    int m_swimTraceBytesRemaining = 0;
 };
 
 } // namespace cutemac::devices::iwm

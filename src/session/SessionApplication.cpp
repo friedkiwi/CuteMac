@@ -612,7 +612,8 @@ private:
                 saveConfiguration();
                 updateStatus();
             });
-            menu->addAction(QStringLiteral("New 800K Image..."), this, [this]() { createFloppyFromToolbar(); });
+            menu->addAction(QStringLiteral("New 800K Image..."), this, [this]() { createFloppyFromToolbar(800LL * 1024); });
+            menu->addAction(QStringLiteral("New 1.44 MB Image..."), this, [this]() { createFloppyFromToolbar(1440LL * 1024); });
             menu->addSeparator();
             auto* readOnly = menu->addAction(QStringLiteral("Read-only"));
             readOnly->setCheckable(true);
@@ -738,9 +739,9 @@ private:
         updateStatus();
     }
 
-    void createFloppyFromToolbar()
+    void createFloppyFromToolbar(qint64 sizeBytes)
     {
-        const auto path = cutemac::ui::createDiskImage(cutemac::storage::DiskImageType::Floppy, this);
+        const auto path = cutemac::ui::createDiskImage(cutemac::storage::DiskImageType::Floppy, this, sizeBytes);
         if (path.isEmpty()) return;
         insertCreatedFloppy(path);
     }

@@ -28,6 +28,6 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-[[nodiscard]] QString createDiskImage(storage::DiskImageType type, QWidget* parent = nullptr);
+[[nodiscard]] QString createDiskImage(storage::DiskImageType type, QWidget* parent = nullptr, qint64 presetSizeBytes = -1);
 
 } // namespace cutemac::ui
