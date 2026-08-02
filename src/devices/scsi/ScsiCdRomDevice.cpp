@@ -105,6 +105,7 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
         return read(lba, blocks);
     }
     case 0x12: return inquiry(cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 36);
+    case 0x15: return good(); // MODE SELECT(6); accept AppleCD initialization parameters.
     case 0x1a: return modeSense(false, cdb.size() > 1 && (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
         cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) & 0x3f : 0x3f,
         cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 4);
@@ -118,6 +119,7 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
         if (cdb.size() < 10) return checkCondition(senseIllegalRequest, 0x24);
         return read(be32(cdb, 2), (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[7])) << 8) | static_cast<std::uint8_t>(cdb[8]));
     case 0x43: return readToc(cdb);
+    case 0x55: return good(); // MODE SELECT(10).
     case 0x5a:
         if (cdb.size() < 10) return checkCondition(senseIllegalRequest, 0x24);
         return modeSense(true, (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
@@ -226,7 +228,12 @@ ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, bool disableBlockDesc
     }
     if (pageCode == 0x0d || pageCode == 0x3f) data.append(QByteArray::fromHex("0d06000d003c004b"));
     if (pageCode == 0x2a || pageCode == 0x3f) data.append(QByteArray::fromHex("2a0e0000000328000562000000400562"));
-    if (pageCode != 0x00 && pageCode != 0x0d && pageCode != 0x2a && pageCode != 0x3f)
+    if (pageCode == 0x30 || pageCode == 0x3f)
+        data.append(QByteArray::fromHex("3016") + QByteArrayLiteral("APPLE COMPUTER, INC   "));
+    if (pageCode == 0x00 || pageCode == 0x3f)
+        data.append(QByteArray::fromHex("00028005"));
+    if (pageCode != 0x00 && pageCode != 0x0d && pageCode != 0x2a
+        && pageCode != 0x30 && pageCode != 0x3f)
         return { {}, 0x02, 0, senseIllegalRequest };
     if (tenByte) {
         const auto length = static_cast<std::uint16_t>(data.size() - 2);
