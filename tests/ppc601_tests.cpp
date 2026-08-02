@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -90,6 +91,24 @@ void testResetAndInteger()
     require(s.gpr[3] == 0x7fff && s.gpr[4] == 0x12340000, "immediate arithmetic");
     require(s.gpr[5] == 0x12347fff && s.gpr[6] == 0x7f00, "add and logical");
     require((s.cr >> 28) == 4, "record-form CR0");
+}
+
+void testCountLeadingZeros()
+{
+    constexpr std::array<std::pair<std::uint32_t, std::uint32_t>, 8> cases {{
+        {0x00000000U, 32U}, {0x00000001U, 31U}, {0x00000002U, 30U},
+        {0x00008000U, 16U}, {0x00010000U, 15U}, {0x40000000U, 1U},
+        {0x80000000U, 0U}, {0xffffffffU, 0U},
+    }};
+    for (const auto& [input, expected] : cases) {
+        Fixture f;
+        auto state = f.cpu.registers();
+        state.gpr[3] = input;
+        f.cpu.setRegisters(state);
+        f.instruction(0x100, x(3, 4, 0, 26)); // cntlzw r4,r3
+        (void)f.cpu.stepInstruction();
+        require(f.cpu.registers().gpr[4] == expected, "cntlzw result");
+    }
 }
 
 void testMemoryBranchAndReservation()
@@ -395,6 +414,7 @@ int main(int argc, char** argv)
     if (argc == 3 && std::string(argv[1]) == "--integer-vectors") return runExternalIntegerVectors(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--floating-vectors") return runExternalFloatingVectors(argv[2]);
     testResetAndInteger();
+    testCountLeadingZeros();
     testMemoryBranchAndReservation();
     testStringStores();
     testExceptionsAndInterrupt();

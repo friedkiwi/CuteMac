@@ -57,6 +57,13 @@ constexpr std::uint16_t byteSwap16(std::uint16_t value)
 {
     return static_cast<std::uint16_t>((value << 8) | (value >> 8));
 }
+constexpr unsigned countLeadingZeros32(std::uint32_t value)
+{
+    unsigned count = 0;
+    for (std::uint32_t bit = 0x80000000U; bit != 0 && (value & bit) == 0; bit >>= 1)
+        ++count;
+    return count;
+}
 constexpr unsigned decodedSpr(std::uint32_t opcode)
 {
     return ((opcode >> 16) & 0x1f) | ((opcode >> 6) & 0x3e0);
@@ -768,7 +775,7 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
         return 2;
     }
     case 24: finish(ra(op), (b & 0x20U) ? 0U : m_state.gpr[rt(op)] << (b & 31U)); return 1; // slw
-    case 26: finish(ra(op), a == 0 ? 32U : static_cast<std::uint32_t>(__builtin_clz(a))); return 1;
+    case 26: finish(ra(op), countLeadingZeros32(m_state.gpr[rt(op)])); return 1;
     case 28: finish(ra(op), m_state.gpr[rt(op)] & b); return 1;
     case 29: finish(ra(op), mask32(m_state.gpr[rt(op)] & 31U, b & 31U)); return 1; // maskg
     case 54: case 86: case 246: case 278: case 982:
