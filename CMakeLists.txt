@@ -24,36 +24,68 @@ set(CUTEMAC_RETRO68_TOOLCHAIN_BIN "" CACHE PATH "Directory containing the Retro6
 find_program(CUTEMAC_RETRO68_AS
     NAMES m68k-apple-macos-as
     HINTS "${CUTEMAC_RETRO68_TOOLCHAIN_BIN}" /opt/Retro68/toolchain/bin
-    REQUIRED
 )
 find_program(CUTEMAC_RETRO68_OBJCOPY
     NAMES m68k-apple-macos-objcopy
     HINTS "${CUTEMAC_RETRO68_TOOLCHAIN_BIN}" /opt/Retro68/toolchain/bin
-    REQUIRED
 )
 
 set(CUTEMAC_VIDEO_DRIVER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/devices/video/nubus/guest/cutemac_video_driver.S")
-set(CUTEMAC_VIDEO_DRIVER_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.o")
-set(CUTEMAC_VIDEO_DRIVER_BINARY "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.bin")
-set(CUTEMAC_VIDEO_DRIVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.generated.h")
-add_custom_command(
-    OUTPUT "${CUTEMAC_VIDEO_DRIVER_HEADER}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
-    COMMAND "${CUTEMAC_RETRO68_AS}" -m68020 -o "${CUTEMAC_VIDEO_DRIVER_OBJECT}" "${CUTEMAC_VIDEO_DRIVER_SOURCE}"
-    COMMAND "${CUTEMAC_RETRO68_OBJCOPY}" -O binary -j .text "${CUTEMAC_VIDEO_DRIVER_OBJECT}" "${CUTEMAC_VIDEO_DRIVER_BINARY}"
-    COMMAND "${CMAKE_COMMAND}"
-        "-DINPUT_FILE=${CUTEMAC_VIDEO_DRIVER_BINARY}"
-        "-DOUTPUT_FILE=${CUTEMAC_VIDEO_DRIVER_HEADER}"
-        -DARRAY_NAME=videoDriver
-        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
-    DEPENDS "${CUTEMAC_VIDEO_DRIVER_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
-    COMMENT "Building CuteMac Video declaration-ROM driver with Retro68"
-    VERBATIM
-)
-add_custom_target(CuteMacVideoRom DEPENDS "${CUTEMAC_VIDEO_DRIVER_HEADER}")
+set(CUTEMAC_ACCEL_VIDEO_EXTENSION "${CMAKE_CURRENT_SOURCE_DIR}/src/devices/video/nubus/guest/cutemac_accelerated_video_extension.S")
+set(CUTEMAC_VIDEO_ROM_CACHE "${CMAKE_CURRENT_SOURCE_DIR}/src/devices/video/nubus/guest/prebuilt")
+
+if(CUTEMAC_RETRO68_AS AND CUTEMAC_RETRO68_OBJCOPY)
+    message(STATUS "Retro68 found; rebuilding CuteMac Video declaration ROMs")
+    set(CUTEMAC_VIDEO_DRIVER_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.o")
+    set(CUTEMAC_VIDEO_DRIVER_BINARY "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.bin")
+    set(CUTEMAC_VIDEO_DRIVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.generated.h")
+    add_custom_command(
+        OUTPUT "${CUTEMAC_VIDEO_DRIVER_HEADER}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
+        COMMAND "${CUTEMAC_RETRO68_AS}" -m68020 -o "${CUTEMAC_VIDEO_DRIVER_OBJECT}" "${CUTEMAC_VIDEO_DRIVER_SOURCE}"
+        COMMAND "${CUTEMAC_RETRO68_OBJCOPY}" -O binary -j .text "${CUTEMAC_VIDEO_DRIVER_OBJECT}" "${CUTEMAC_VIDEO_DRIVER_BINARY}"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT_FILE=${CUTEMAC_VIDEO_DRIVER_BINARY}"
+            "-DOUTPUT_FILE=${CUTEMAC_VIDEO_DRIVER_HEADER}" -DARRAY_NAME=videoDriver
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
+        DEPENDS "${CUTEMAC_VIDEO_DRIVER_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
+        COMMENT "Building CuteMac Video declaration-ROM driver with Retro68"
+        VERBATIM
+    )
+    add_custom_target(CuteMacVideoRom DEPENDS "${CUTEMAC_VIDEO_DRIVER_HEADER}")
+
+    set(CUTEMAC_ACCEL_VIDEO_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_accelerated_video_driver.S")
+    set(CUTEMAC_ACCEL_VIDEO_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_accelerated_video_driver.o")
+    set(CUTEMAC_ACCEL_VIDEO_BINARY "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_accelerated_video_driver.bin")
+    set(CUTEMAC_ACCEL_VIDEO_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_accelerated_video_driver.generated.h")
+    add_custom_command(
+        OUTPUT "${CUTEMAC_ACCEL_VIDEO_HEADER}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
+        COMMAND "${CMAKE_COMMAND}" "-DBASE_SOURCE=${CUTEMAC_VIDEO_DRIVER_SOURCE}"
+            "-DEXTENSION_SOURCE=${CUTEMAC_ACCEL_VIDEO_EXTENSION}" "-DOUTPUT_SOURCE=${CUTEMAC_ACCEL_VIDEO_SOURCE}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildAcceleratedVideoDriver.cmake"
+        COMMAND "${CUTEMAC_RETRO68_AS}" -m68020 -o "${CUTEMAC_ACCEL_VIDEO_OBJECT}" "${CUTEMAC_ACCEL_VIDEO_SOURCE}"
+        COMMAND "${CUTEMAC_RETRO68_OBJCOPY}" -O binary -j .text "${CUTEMAC_ACCEL_VIDEO_OBJECT}" "${CUTEMAC_ACCEL_VIDEO_BINARY}"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT_FILE=${CUTEMAC_ACCEL_VIDEO_BINARY}"
+            "-DOUTPUT_FILE=${CUTEMAC_ACCEL_VIDEO_HEADER}" -DARRAY_NAME=acceleratedVideoDriver
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
+        DEPENDS "${CUTEMAC_VIDEO_DRIVER_SOURCE}" "${CUTEMAC_ACCEL_VIDEO_EXTENSION}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildAcceleratedVideoDriver.cmake"
+        COMMENT "Building CuteMac Video Accelerated declaration-ROM driver with Retro68"
+        VERBATIM
+    )
+    add_custom_target(CuteMacAcceleratedVideoRom DEPENDS "${CUTEMAC_ACCEL_VIDEO_HEADER}")
+else()
+    message(STATUS "Retro68 not found; using checked-in CuteMac Video declaration ROMs")
+    set(CUTEMAC_VIDEO_DRIVER_HEADER "${CUTEMAC_VIDEO_ROM_CACHE}/cutemac_video_driver.generated.h")
+    set(CUTEMAC_ACCEL_VIDEO_HEADER "${CUTEMAC_VIDEO_ROM_CACHE}/cutemac_accelerated_video_driver.generated.h")
+    if(NOT EXISTS "${CUTEMAC_VIDEO_DRIVER_HEADER}" OR NOT EXISTS "${CUTEMAC_ACCEL_VIDEO_HEADER}")
+        message(FATAL_ERROR "Retro68 is unavailable and the checked-in CuteMac Video declaration ROMs are missing")
+    endif()
+endif()
 
 add_library(CuteMacCore
     "${CUTEMAC_VIDEO_DRIVER_HEADER}"
+    "${CUTEMAC_ACCEL_VIDEO_HEADER}"
     src/config/Configuration.cpp
     src/core/EmulationSession.cpp
     src/core/MachineScheduler.cpp
@@ -97,13 +129,16 @@ add_library(CuteMacCore
     src/storage/PngPageSink.cpp
 )
 
-add_dependencies(CuteMacCore CuteMacVideoRom)
+if(TARGET CuteMacVideoRom)
+    add_dependencies(CuteMacCore CuteMacVideoRom CuteMacAcceleratedVideoRom)
+endif()
 
 target_include_directories(CuteMacCore
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}/generated
+        ${CUTEMAC_VIDEO_ROM_CACHE}
 )
 
 target_link_libraries(CuteMacCore

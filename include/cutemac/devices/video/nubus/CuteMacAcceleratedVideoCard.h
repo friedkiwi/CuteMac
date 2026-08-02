@@ -74,6 +74,7 @@ public:
     void setHostPointerPosition(std::int16_t x, std::int16_t y);
 
 private:
+    static QByteArray buildDeclarationRom(int width, int height, int vramBytes, int maximumDepth);
     enum class AcceleratorError : std::uint32_t {
         None = 0,
         Disabled = 1,
@@ -95,6 +96,7 @@ private:
     bool m_acceleration;
     std::uint32_t m_vramBytes;
     CuteMacVideoCard m_compatibleCard;
+    QByteArray m_declarationRom;
     std::uint32_t m_status = 0;
     std::uint32_t m_commandsSubmitted = 0;
     std::uint32_t m_commandsCompleted = 0;

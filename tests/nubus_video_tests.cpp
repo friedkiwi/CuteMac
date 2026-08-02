@@ -39,12 +39,16 @@ int main()
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc00080002")),
         "CuteMac declaration ROM driver must expose palette operations");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex(
-            "0000002e00000000006800000000027003400000")),
-        "CuteMac indexed mode parameters must publish the classic base PixMap layout");
+            "0000002e00000000006800000000027003400001")),
+        "CuteMac indexed mode parameters must publish the version-1 PixMap layout");
     ok &= expect(!virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
         "CuteMac video driver must not remap a new CLUT using the previous hardware mode");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("2668001c4a8b")),
         "CuteMac video driver must dereference selector-specific Control and Status parameters");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("0c40000a6700")),
+        "CuteMac video driver must implement the System 7 SwitchMode selector");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("10290029b0ab0002")),
+        "CuteMac SwitchMode must validate the functional sResource ID");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("26532468001c362a0004342a0006")),
         "CuteMac video driver must read SetEntries through VDSetEntryRecord");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a1357c0")),
@@ -68,16 +72,37 @@ int main()
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a076"))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("20780d284e90")),
         "CuteMac video driver must install, remove, and dispatch its slot VBL interrupt");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("95ca4e75")),
+        "CuteMac video driver must return a page-zero offset for its non-f32BitMode declaration");
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
         "CuteMac video must reset to one-bit indexed mode");
     ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
         "CuteMac one-bit mode must span the hardware color table");
+    virtualCard.write8(0x00900000, 0x5a);
+    ok &= expect(virtualCard.read8(0x00000000) == 0x5a
+            && static_cast<std::uint8_t>(virtualCard.videoFrame().pixels[0]) == 0x5a,
+        "CuteMac video must mirror 24-bit slot-9 framebuffer accesses onto local VRAM");
+    virtualCard.write8(0x00980000, 3);
+    ok &= expect(virtualCard.read8(0x00080000) == 3,
+        "CuteMac video must mirror control registers through the 24-bit slot-9 alias");
+    ok &= expect(virtualCard.read8(0x00f00020) == static_cast<std::uint8_t>(virtualCard.declarationRom()[0x20]),
+        "CuteMac declaration ROM must take precedence over the mirrored hardware aperture");
+    virtualCard.write8(0x00f00000, 0xc3);
+    ok &= expect(virtualCard.read8(0x00000000) == 0x5a,
+        "writes to the CuteMac declaration ROM aperture must not alias onto VRAM");
+    virtualCard.reset();
     virtualCard.write8(0x00080000, 3);
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must select eight-bit indexed mode");
     virtualCard.write8(0x00080000, 4);
     ok &= expect(virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must reject depths above the configured maximum");
+    virtualCard.reset();
+    virtualCard.write8(0x00080006, 0);
+    ok &= expect(static_cast<std::uint8_t>(virtualCard.videoFrame().pixels[0]) == 0xaa
+            && static_cast<std::uint8_t>(virtualCard.videoFrame().pixels[virtualCard.videoFrame().strideBytes]) == 0x55,
+        "CuteMac GrayPage must replace one-bit VRAM with the classic alternating gray pattern");
+    virtualCard.write8(0x00080000, 3);
     virtualCard.write8(0x00080002, 0x2a);
     virtualCard.write8(0x00080003, 0x12);
     virtualCard.write8(0x00080004, 0x34);
@@ -122,15 +147,23 @@ int main()
     CuteMacAcceleratedVideoCard acceleratedCard(832, 624, 8, 4, true, true);
     ok &= expect(acceleratedCard.id() == QStringLiteral("nubus-video-cutemac-accelerated")
             && acceleratedCard.accelerationEnabled()
-            && acceleratedCard.declarationRom() == virtualCard.declarationRom()
+            && acceleratedCard.declarationRom().size() == 4096
+            && acceleratedCard.declarationRom() != virtualCard.declarationRom()
+            && acceleratedCard.declarationRom().contains(QByteArray::fromHex("a746"))
+            && acceleratedCard.declarationRom().contains(QByteArray::fromHex("a647"))
+            && acceleratedCard.read8(0x00f00000 + 0x20) == static_cast<std::uint8_t>(acceleratedCard.declarationRom()[0x20])
             && acceleratedCard.videoFrame().bitsPerPixel == 1,
-        "accelerated adapter must begin as an independent compatible CuteMac Video variant");
+        "accelerated adapter must carry a separate ROM-resident Toolbox hook");
     acceleratedCard.write8(0x00080000, 3);
     acceleratedCard.setHostPointerPosition(123, 234);
     ok &= expect(acceleratedCard.videoFrame().bitsPerPixel == 8
             && acceleratedCard.read8(CuteMacAcceleratedVideoCard::guestPointerBase + 2) == 0x00
             && acceleratedCard.read8(CuteMacAcceleratedVideoCard::guestPointerBase + 3) == 123,
         "accelerated adapter must preserve mode and absolute-pointer behavior");
+    acceleratedCard.write8(0x00900000, 0xa5);
+    ok &= expect(acceleratedCard.read8(0x00000000) == 0xa5
+            && static_cast<std::uint8_t>(acceleratedCard.videoFrame().pixels[0]) == 0xa5,
+        "accelerated adapter must preserve the 24-bit slot-9 framebuffer mirror");
     const auto accel = CuteMacAcceleratedVideoCard::acceleratorBase;
     using AccelRegister = CuteMacAcceleratedVideoCard::AcceleratorRegister;
     const auto accelRegister = [accel](AccelRegister reg) { return accel + static_cast<std::uint32_t>(reg); };

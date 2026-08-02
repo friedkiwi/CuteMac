@@ -50,8 +50,12 @@ control:
         move.w  26(%a0),%d0
         cmpi.w  #2,%d0
         beq.w   set_mode
+        cmpi.w  #10,%d0               | SwitchMode uses VDSwitchInfo
+        beq.w   switch_mode
         cmpi.w  #3,%d0
         beq.w   set_entries
+        cmpi.w  #5,%d0                | GrayPage / GrayScreen
+        beq.w   gray_screen
         cmpi.w  #6,%d0
         beq.w   set_gray
         cmpi.w  #7,%d0
@@ -65,14 +69,37 @@ set_mode:
         movea.l 28(%a0),%a3            | csParam points to VDSwitchInfo
         tst.l   %a3
         beq.w   param_error
+        tst.w   6(%a3)                 | only page zero is supported
+        bne.w   param_error
+set_mode_common:
         move.w  (%a3),%d1
         subi.w  #0x80,%d1
         cmpi.w  #5,%d1
         bhi.w   param_error
-        bsr.w   card_base
+        bsr.w   framebuffer_base
         move.l  %a2,8(%a3)             | csBaseAddr
+        bsr.w   card_base
         adda.l  #0x00080000,%a2
         move.b  %d1,(%a2)
+        moveq   #0,%d0
+        bra.w   complete
+
+switch_mode:
+        movea.l 28(%a0),%a3            | csParam points to VDSwitchInfo
+        tst.l   %a3
+        beq.w   param_error
+        tst.w   6(%a3)                 | only page zero is supported
+        bne.w   param_error
+        moveq   #0,%d0
+        move.b  41(%a1),%d0            | functional sResource ID
+        cmp.l   2(%a3),%d0             | fixed-resolution card has one timing
+        bne.w   param_error
+        bra.w   set_mode_common
+
+gray_screen:
+        bsr.w   card_base
+        adda.l  #0x00080006,%a2
+        clr.b   (%a2)
         moveq   #0,%d0
         bra.w   complete
 
@@ -231,6 +258,10 @@ card_base:
         movea.l %d0,%a2
         rts
 
+framebuffer_base:
+        suba.l  %a2,%a2                | page-zero offset; Slot Manager supplies the slot base
+        rts
+
 install_guest_helpers:
         lea     service_base(%pc),%a2
         move.l  %a2,-(%sp)
@@ -257,6 +288,8 @@ status:
         move.w  26(%a0),%d0
         cmpi.w  #2,%d0
         beq.w   get_mode
+        cmpi.w  #10,%d0                | GetCurMode fills VDSwitchInfo
+        beq.w   get_current_mode
         cmpi.w  #3,%d0
         beq.w   get_entries
         cmpi.w  #4,%d0
@@ -274,8 +307,9 @@ get_mode:
         movea.l 28(%a0),%a3            | csParam points to VDSwitchInfo
         tst.l   %a3
         beq.w   param_error
-        bsr.w   card_base
+        bsr.w   framebuffer_base
         move.l  %a2,8(%a3)
+        bsr.w   card_base
         adda.l  #0x00080000,%a2
         moveq   #0,%d1
         move.b  (%a2),%d1
@@ -283,6 +317,27 @@ get_mode:
         addi.w  #0x80,%d1
         move.w  %d1,(%a3)
         clr.w   6(%a3)
+        moveq   #0,%d0
+        bra.w   complete
+
+get_current_mode:
+        movea.l 28(%a0),%a3
+        tst.l   %a3
+        beq.w   param_error
+        bsr.w   framebuffer_base
+        move.l  %a2,8(%a3)             | csBaseAddr
+        moveq   #0,%d1
+        move.b  41(%a1),%d1
+        move.l  %d1,2(%a3)             | csData: functional sResource ID
+        clr.w   6(%a3)                 | csPage
+        clr.l   12(%a3)                | csReserved
+        bsr.w   card_base
+        adda.l  #0x00080000,%a2
+        moveq   #0,%d1
+        move.b  (%a2),%d1
+        andi.w  #7,%d1
+        addi.w  #0x80,%d1
+        move.w  %d1,(%a3)
         moveq   #0,%d0
         bra.w   complete
 
@@ -343,7 +398,7 @@ get_base:
         beq.w   param_error
         tst.w   6(%a3)
         bne.w   param_error
-        bsr.w   card_base
+        bsr.w   framebuffer_base
         move.l  %a2,8(%a3)
         moveq   #0,%d0
         bra.w   complete

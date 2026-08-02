@@ -9,12 +9,14 @@ namespace cutemac::devices::video::nubus {
 namespace {
 
 constexpr std::uint32_t declarationRomBase = 0x00f00000;
+constexpr std::uint32_t standardSlotLocalMask = 0x000fffff;
 constexpr std::uint32_t modeRegister = 0x00080000;
 constexpr std::uint32_t interruptRegister = 0x00080001;
 constexpr std::uint32_t paletteAddressRegister = 0x00080002;
 constexpr std::uint32_t paletteRedRegister = 0x00080003;
 constexpr std::uint32_t paletteGreenRegister = 0x00080004;
 constexpr std::uint32_t paletteBlueRegister = 0x00080005;
+constexpr std::uint32_t grayScreenRegister = 0x00080006;
 constexpr std::array<std::uint8_t, 4> guestServicesSignature { 'C', 'T', 'M', 'C' };
 constexpr std::uint8_t guestServicesVersion = 2;
 constexpr std::uint8_t guestServicesCleanShutdown = 1U << 0;
@@ -58,7 +60,7 @@ int addVideoParameters(SlotRomBuilder& rom, int width, int height, int depth)
     rom.longWord(0);
     rom.word(static_cast<std::uint16_t>(stride));
     rom.word(0); rom.word(0); rom.word(static_cast<std::uint16_t>(height)); rom.word(static_cast<std::uint16_t>(width));
-    rom.word(0); rom.word(0); rom.longWord(0); rom.longWord(0x00480000); rom.longWord(0x00480000);
+    rom.word(1); rom.word(0); rom.longWord(0); rom.longWord(0x00480000); rom.longWord(0x00480000);
     const auto direct = depth >= 16;
     rom.word(direct ? 0x10 : 0);
     rom.word(static_cast<std::uint16_t>(depth));
@@ -122,6 +124,12 @@ void CuteMacVideoCard::tick(std::uint64_t cycles)
 std::uint8_t CuteMacVideoCard::read8(std::uint32_t offset)
 {
     if (offset >= declarationRomBase) return static_cast<std::uint8_t>(m_declarationRom[static_cast<qsizetype>(offset & (declarationRomBytes - 1))]);
+    // A minor-space NuBus device sees the first MiB repeated through the
+    // standard 16 MiB slot aperture.  In 24-bit mode Slot Manager encodes a
+    // slot-9 base as $F9900000, which NuBusBus presents as offset $900000.
+    // Decode the hardware aperture after the declaration-ROM check so the
+    // ROM at the top of slot space does not alias onto VRAM.
+    offset &= standardSlotLocalMask;
     if (offset == modeRegister) {
         switch (m_depth) { case 1: return 0; case 2: return 1; case 4: return 2; case 8: return 3; case 16: return 4; default: return 5; }
     }
@@ -153,6 +161,8 @@ std::uint8_t CuteMacVideoCard::read8(std::uint32_t offset)
 
 void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
 {
+    if (offset >= declarationRomBase) return;
+    offset &= standardSlotLocalMask;
     if (offset == modeRegister) {
         constexpr std::array<int, 6> depths { 1, 2, 4, 8, 16, 32 };
         if (value < depths.size() && depths[value] <= m_maximumDepth) m_depth = depths[value];
@@ -172,6 +182,18 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
                 | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
         }
         m_paletteAddress = (m_paletteAddress + 1) & 0xff;
+    } else if (offset == grayScreenRegister) {
+        const auto stride = strideBytes();
+        const auto required = std::min<qsizetype>(m_vram.size(), static_cast<qsizetype>(stride) * m_height);
+        if (m_depth == 1) {
+            for (int y = 0; y < m_height; ++y) {
+                const auto pattern = static_cast<char>((y & 1) == 0 ? 0xaa : 0x55);
+                const auto begin = static_cast<qsizetype>(y) * stride;
+                std::fill(m_vram.begin() + begin, m_vram.begin() + std::min(required, begin + stride), pattern);
+            }
+        } else {
+            std::fill(m_vram.begin(), m_vram.begin() + required, static_cast<char>(0x88));
+        }
     } else if (offset == guestServicesCommand) {
         if (value == 1) {
             // The Shutdown Manager callback runs before System 6 draws its
