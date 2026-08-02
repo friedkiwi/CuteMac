@@ -46,33 +46,56 @@ int NuBusBus::standardSlot(std::uint32_t address)
     return slot >= 9 && slot <= 14 ? slot : -1;
 }
 
+int NuBusBus::superSlot(std::uint32_t address)
+{
+    // NuBus Power Macs expose each slot through a 256 MiB super-slot window.
+    // Cards which only decode the traditional 16 MiB slot space see that
+    // space repeated throughout the window.
+    if (address < 0x60000000U || address >= 0xf0000000U) return -1;
+    const auto slot = static_cast<int>(address >> 28);
+    return slot >= 9 && slot <= 14 ? slot : -1;
+}
+
+namespace {
+int decodedSlot(std::uint32_t address)
+{
+    const auto standard = NuBusBus::standardSlot(address);
+    return standard >= 0 ? standard : NuBusBus::superSlot(address);
+}
+
+std::uint32_t cardOffset(std::uint32_t address)
+{
+    return address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+}
+}
+
 std::uint8_t NuBusBus::read8(std::uint32_t address)
 {
-    const auto slot = standardSlot(address);
+    const auto slot = decodedSlot(address);
     const auto target = card(slot);
-    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    const auto offset = cardOffset(address);
     return target ? target->read8(offset) : 0xff;
 }
 
 void NuBusBus::write8(std::uint32_t address, std::uint8_t value)
 {
-    const auto slot = standardSlot(address);
+    const auto slot = decodedSlot(address);
     const auto target = card(slot);
-    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    const auto offset = cardOffset(address);
     if (target) target->write8(offset, value);
 }
 
 void NuBusBus::write16(std::uint32_t address, std::uint16_t value)
 {
-    const auto target = card(standardSlot(address));
-    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    const auto target = card(decodedSlot(address));
+    const auto offset = cardOffset(address);
     if (target) target->write16(offset, value);
 }
 
 void NuBusBus::write32(std::uint32_t address, std::uint32_t value)
 {
-    const auto target = card(standardSlot(address));
-    const auto offset = address < 0x01000000U ? address & 0x000fffffU : address & 0x00ffffffU;
+    const auto target = card(decodedSlot(address));
+    const auto offset = cardOffset(address);
     if (target) target->write32(offset, value);
 }
 

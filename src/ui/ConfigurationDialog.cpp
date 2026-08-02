@@ -8,6 +8,7 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLineEdit>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
@@ -19,6 +20,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <array>
 
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/rom/RomCatalog.h"
@@ -37,6 +39,10 @@ public:
     QComboBox* speed = nullptr;
     QCheckBox* skipRamTest = nullptr;
     QTabWidget* tabs = nullptr;
+    QWidget* serialTab = nullptr;
+    std::array<QComboBox*, 2> serialDevice {};
+    std::array<QPushButton*, 2> serialConfigure {};
+    std::array<QString, 2> serialOutputDirectory;
     QWidget* iwmTab = nullptr;
     QLineEdit* floppy = nullptr;
     QCheckBox* floppyReadOnly = nullptr;
@@ -119,9 +125,45 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         device.depth = depth->currentData().toInt();
         device.vramMiB = vram->value();
         device.acceleration = acceleration->isChecked();
-        device.declarationRomPath.clear();
         device.absolutePointer = absolutePointer->isChecked();
+        device.declarationRomPath.clear();
     }
+    return true;
+}
+
+bool editImageWriterII(QString& outputDirectory, QWidget* parent)
+{
+    QDialog dialog(parent);
+    dialog.setWindowTitle(QStringLiteral("ImageWriter II Configuration"));
+    auto* outer = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    outer->addLayout(form);
+    auto* output = new QLineEdit(outputDirectory);
+    auto* browse = new QPushButton(QStringLiteral("Browse..."));
+    auto* row = new QHBoxLayout;
+    row->addWidget(output, 1);
+    row->addWidget(browse);
+    form->addRow(QStringLiteral("PNG output folder"), row);
+    QObject::connect(browse, &QPushButton::clicked, &dialog, [&dialog, output]() {
+        const auto path = QFileDialog::getExistingDirectory(&dialog,
+            QStringLiteral("Select Print Output Folder"), output->text());
+        if (!path.isEmpty()) output->setText(path);
+    });
+    auto* note = new QLabel(QStringLiteral("Pages are written at 144 DPI using sequential filenames."));
+    note->setWordWrap(true);
+    outer->addWidget(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    outer->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&dialog, output]() {
+        if (output->text().trimmed().isEmpty()) {
+            QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("Select an output folder."));
+            return;
+        }
+        dialog.accept();
+    });
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return false;
+    outputDirectory = output->text().trimmed();
     return true;
 }
 
@@ -170,6 +212,38 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->skipRamTest->setChecked(m_impl->original.skipRamPatternTest);
     form->addRow(QStringLiteral("Skip RAM pattern test"), m_impl->skipRamTest);
     m_impl->tabs->addTab(general, QStringLiteral("General"));
+
+    m_impl->serialTab = new QWidget;
+    auto* serialForm = new QFormLayout(m_impl->serialTab);
+    const std::array<QString, 2> portNames { QStringLiteral("Modem port"), QStringLiteral("Printer port") };
+    for (int channel = 0; channel < 2; ++channel) {
+        auto* device = new QComboBox;
+        device->addItem(QStringLiteral("None"), -1);
+        device->addItem(QStringLiteral("ImageWriter II"), static_cast<int>(config::SerialDeviceType::ImageWriterII));
+        auto* configure = new QPushButton(QStringLiteral("Configure..."));
+        auto* row = new QHBoxLayout;
+        row->addWidget(device, 1);
+        row->addWidget(configure);
+        serialForm->addRow(portNames[channel], row);
+        m_impl->serialDevice[channel] = device;
+        m_impl->serialConfigure[channel] = configure;
+        const auto configured = std::find_if(m_impl->original.serialDevices.cbegin(), m_impl->original.serialDevices.cend(),
+            [channel](const auto& entry) { return entry.channel == channel; });
+        if (configured != m_impl->original.serialDevices.cend()) {
+            device->setCurrentIndex(device->findData(static_cast<int>(configured->type)));
+            m_impl->serialOutputDirectory[channel] = configured->outputDirectory;
+        }
+        configure->setEnabled(device->currentData().toInt() >= 0);
+        connect(device, &QComboBox::currentIndexChanged, configure,
+            [device, configure]() { configure->setEnabled(device->currentData().toInt() >= 0); });
+        connect(configure, &QPushButton::clicked, this, [this, channel]() {
+            if (m_impl->serialDevice[channel]->currentData().toInt()
+                == static_cast<int>(config::SerialDeviceType::ImageWriterII)) {
+                (void)editImageWriterII(m_impl->serialOutputDirectory[channel], this);
+            }
+        });
+    }
+    m_impl->tabs->addTab(m_impl->serialTab, QStringLiteral("Serial"));
 
     m_impl->iwmTab = new QWidget;
     auto* iwmForm = new QFormLayout(m_impl->iwmTab);
@@ -271,9 +345,12 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         const bool iwm = devices.contains(QStringLiteral("device.iwm")) || devices.contains(QStringLiteral("device.swim1"));
         const bool scsi = devices.contains(QStringLiteral("device.scsi.ncr5380")) || devices.contains(QStringLiteral("device.scsi.bus"));
         const bool nubus = devices.contains(QStringLiteral("device.nubus"));
+        const bool serial = std::any_of(devices.cbegin(), devices.cend(),
+            [](const QString& device) { return device.startsWith(QStringLiteral("device.scc")); });
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->iwmTab), iwm);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->scsiTab), scsi);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->nubusTab), nubus);
+        m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->serialTab), serial);
         m_impl->ram->clear();
         if (it != profiles.cend()) {
             for (const auto sizeKiB : it->supportedRamSizesKiB) {
@@ -384,6 +461,15 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             QMessageBox::warning(this, windowTitle(), QStringLiteral("Profile name is required."));
             return;
         }
+        for (int channel = 0; channel < 2; ++channel) {
+            if (m_impl->serialDevice[channel]->currentData().toInt() >= 0
+                && m_impl->serialOutputDirectory[channel].trimmed().isEmpty()) {
+                QMessageBox::warning(this, windowTitle(),
+                    QStringLiteral("Configure the device attached to the %1 port.")
+                        .arg(channel == 0 ? QStringLiteral("modem") : QStringLiteral("printer")));
+                return;
+            }
+        }
         QSet<int> ids;
         for (int row = 0; row < m_impl->scsi->rowCount(); ++row) {
             const int id = qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 0))->currentData().toInt();
@@ -430,6 +516,14 @@ config::Configuration ConfigurationDialog::configuration() const
     result.ramSizeKiB = m_impl->ram->currentData().toInt();
     result.runtimeSpeed = static_cast<config::RuntimeSpeed>(m_impl->speed->currentData().toInt());
     result.skipRamPatternTest = m_impl->skipRamTest->isChecked();
+    result.serialDevices.clear();
+    for (int channel = 0; channel < 2; ++channel) {
+        if (m_impl->serialDevice[channel]->currentData().toInt() >= 0) {
+            result.serialDevices.append({ channel,
+                static_cast<config::SerialDeviceType>(m_impl->serialDevice[channel]->currentData().toInt()),
+                m_impl->serialOutputDirectory[channel].trimmed() });
+        }
+    }
     result.iwmDevices = { { m_impl->floppy->text().trimmed(), m_impl->floppyReadOnly->isChecked() } };
     result.floppyPath = result.iwmDevices.first().imagePath;
     result.scsiDevices.clear();

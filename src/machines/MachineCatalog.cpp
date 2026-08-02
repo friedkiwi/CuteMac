@@ -48,6 +48,7 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
             QStringLiteral("68040"),
             {
                 QStringLiteral("device.adb.bus"),
+                QStringLiteral("device.scc.z8530"),
                 QStringLiteral("device.scsi.bus"),
                 QStringLiteral("device.video"),
             },
@@ -60,6 +61,7 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
             QStringLiteral("PowerPC 601"),
             {
                 QStringLiteral("device.adb.bus"),
+                QStringLiteral("device.scc.z8530"),
                 QStringLiteral("device.scsi.bus"),
                 QStringLiteral("device.nubus"),
                 QStringLiteral("device.video"),

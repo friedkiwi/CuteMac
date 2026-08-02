@@ -25,6 +25,7 @@ public:
     void setSlotIrqCallback(SlotIrqCallback callback) { m_slotIrqCallback = std::move(callback); }
 
     [[nodiscard]] static int standardSlot(std::uint32_t address);
+    [[nodiscard]] static int superSlot(std::uint32_t address);
 
 private:
     std::array<std::shared_ptr<NuBusCard>, 16> m_cards;

@@ -75,6 +75,7 @@ public:
     void ejectScsiDevice(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly = false) override;
     void ejectFloppyImage() override;
+    void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     void reset() override;
 
     [[nodiscard]] int runCycles(int cycles) override;

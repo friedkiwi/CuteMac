@@ -35,6 +35,7 @@ int main()
     configuration.scsiDevices.append({ 4, cutemac::config::ScsiDeviceType::HardDisk, QStringLiteral("/tmp/disk.hda"), false });
     configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4, true, false });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 1, false });
+    configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     configuration.skipRamPatternTest = true;
 
     cutemac::config::ConfigurationManager manager;
@@ -53,6 +54,9 @@ int main()
                 && !loaded->nubusDevices.first().absolutePointer
                 && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
             "NuBus devices did not round-trip");
+        ok &= expect(loaded->serialDevices.size() == 1 && loaded->serialDevices.first().channel == 1
+                && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints"),
+            "serial printer did not round-trip");
         ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("macplus.skip_ram_pattern_test") },
             "enabled ROM patch ID is incorrect");
     }

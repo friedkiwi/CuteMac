@@ -9,6 +9,8 @@
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
+#include "cutemac/devices/printer/ImageWriterII.h"
+#include "cutemac/storage/PngPageSink.h"
 #include "cutemac/rom/RomCatalog.h"
 
 namespace cutemac::core {
@@ -26,11 +28,11 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
     if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
         return {};
     }
+    std::unique_ptr<IMachine> result;
     if (configuration.machineId == QStringLiteral("mac-plus")) {
-        return std::make_unique<machines::macplus::MacPlusMachine>(
+        result = std::make_unique<machines::macplus::MacPlusMachine>(
             static_cast<std::size_t>(configuration.ramSizeKiB) * 1024, configuration.nvramPath);
-    }
-    if (configuration.machineId == QStringLiteral("mac-iicx")) {
+    } else if (configuration.machineId == QStringLiteral("mac-iicx")) {
         auto machine = std::make_unique<machines::maciicx::MacIIcxMachine>(
             static_cast<std::size_t>(configuration.ramSizeKiB) * 1024,
             configuration.nvramPath);
@@ -45,13 +47,20 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
                     device.width, device.height, device.depth, device.vramMiB, device.acceleration, device.absolutePointer));
             }
         }
-        return machine;
-    }
-    if (configuration.machineId == QStringLiteral("powermac-8100")) {
-        return std::make_unique<machines::powermac8100::PowerMac8100Machine>(
+        result = std::move(machine);
+    } else if (configuration.machineId == QStringLiteral("powermac-8100")) {
+        result = std::make_unique<machines::powermac8100::PowerMac8100Machine>(
             static_cast<std::size_t>(configuration.ramSizeKiB) * 1024U);
     }
-    return {};
+    if (!result) return {};
+    for (const auto& device : configuration.serialDevices) {
+        if (device.outputDirectory.isEmpty()) continue;
+        auto pngSink = std::make_shared<storage::PngPageSink>(device.outputDirectory);
+        auto printer = std::make_shared<devices::printer::ImageWriterII>(
+            [pngSink](const devices::printer::RasterPage& page) { (void)pngSink->write(page); });
+        result->attachSerialEndpoint(device.channel, std::move(printer));
+    }
+    return result;
 }
 
 bool EmulationSession::initialize()

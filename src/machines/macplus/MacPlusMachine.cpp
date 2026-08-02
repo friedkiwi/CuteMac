@@ -66,6 +66,11 @@ constexpr std::uint8_t viaRtcEnableBit = 0x04;
 
 QString MacPlusMachine::machineId() const { return QStringLiteral("mac-plus"); }
 
+void MacPlusMachine::attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint)
+{
+    m_scc.attachEndpoint(channel == 0 ? devices::scc::Z8530Scc::Channel::A : devices::scc::Z8530Scc::Channel::B, std::move(endpoint));
+}
+
 MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(ramSize), 0)
 {

@@ -43,6 +43,7 @@ public:
     void ejectScsiDevice(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly) override;
     void ejectFloppyImage() override;
+    void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     void reset() override;
     [[nodiscard]] int runCycles(int cycles) override;
     [[nodiscard]] int stepInstruction() override;
@@ -76,6 +77,7 @@ public:
     void debugWrite32(std::uint32_t address, std::uint32_t value) override;
     [[nodiscard]] devices::via6522::Via6522::DebugState via1DebugState() const { return m_via1.debugState(); }
     [[nodiscard]] devices::via6522::Via6522::DebugState via2DebugState() const { return m_via2.debugState(); }
+    [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const { return m_scsi.debugState(); }
     [[nodiscard]] bool sccInterruptActive() const { return m_scc.interruptActive(); }
     [[nodiscard]] devices::adb::AdbTransceiver::DebugState adbDebugState() const { return m_adbTransceiver.debugState(); }
     struct IoStatistics {

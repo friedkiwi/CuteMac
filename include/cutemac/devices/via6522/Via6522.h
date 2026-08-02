@@ -31,6 +31,7 @@ public:
     using PortAChangedCallback = std::function<void(std::uint8_t)>;
     using PortBChangedCallback = std::function<void(std::uint8_t, std::uint8_t)>;
     using ShiftRegisterWriteCallback = std::function<void(std::uint8_t)>;
+    using ShiftRegisterReadCallback = std::function<void()>;
 
     void reset();
 
@@ -41,6 +42,7 @@ public:
     void setPortAChangedCallback(PortAChangedCallback callback);
     void setPortBChangedCallback(PortBChangedCallback callback);
     void setShiftRegisterWriteCallback(ShiftRegisterWriteCallback callback);
+    void setShiftRegisterReadCallback(ShiftRegisterReadCallback callback);
     void externalShiftIn(std::uint8_t value);
     void externalShiftOutComplete();
     void setPowerOnState(std::uint8_t portA, std::uint8_t portB, std::uint8_t ddrA, std::uint8_t ddrB);
@@ -88,6 +90,7 @@ private:
     PortAChangedCallback m_portAChanged;
     PortBChangedCallback m_portBChanged;
     ShiftRegisterWriteCallback m_shiftRegisterWrite;
+    ShiftRegisterReadCallback m_shiftRegisterRead;
 };
 
 } // namespace cutemac::devices::via6522

@@ -58,6 +58,7 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     });
     m_via2.setPortAChangedCallback([this](std::uint8_t value) {
         m_glueRamSize = value & 0xc0;
+        updateViaInputs();
     });
     m_nubus.setSlotIrqCallback([this](int slot, bool asserted) {
         const auto mask = static_cast<std::uint8_t>(1U << (slot - 9));
@@ -78,6 +79,11 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
 }
 
 QString MacIIcxMachine::machineId() const { return QStringLiteral("mac-iicx"); }
+
+void MacIIcxMachine::attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint)
+{
+    m_scc.attachEndpoint(channel == 0 ? devices::scc::Z8530Scc::Channel::A : devices::scc::Z8530Scc::Channel::B, std::move(endpoint));
+}
 
 bool MacIIcxMachine::loadRomFile(const QString& path, const QStringList& patches)
 {
@@ -531,10 +537,11 @@ void MacIIcxMachine::updateInterrupts()
 void MacIIcxMachine::updateViaInputs()
 {
     const std::uint8_t via1A = 0xc1;
+    const auto via2A = static_cast<std::uint8_t>(m_glueRamSize | m_nubusIrqState);
     const std::uint8_t via2B = 0xcf;
     for (int bit = 0; bit < 8; ++bit) {
         m_via1.setPortAInputBit(static_cast<std::uint8_t>(bit), (via1A & (1 << bit)) != 0);
-        m_via2.setPortAInputBit(static_cast<std::uint8_t>(bit), (m_nubusIrqState & (1 << bit)) != 0);
+        m_via2.setPortAInputBit(static_cast<std::uint8_t>(bit), (via2A & (1 << bit)) != 0);
         m_via2.setPortBInputBit(static_cast<std::uint8_t>(bit), (via2B & (1 << bit)) != 0);
     }
     m_via1.setPortBInputBit(0, m_rtc.dataLine());

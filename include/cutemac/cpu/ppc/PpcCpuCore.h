@@ -16,7 +16,7 @@ namespace cutemac::cpu::ppc {
 class PowerPc601Core final : public core::CpuCore {
 public:
     enum class AccessType : std::uint8_t { Instruction, Read, Write };
-    enum class TranslationPath : std::uint8_t { Real, Bat, Page, Fault };
+    enum class TranslationPath : std::uint8_t { Real, IoController, Bat, Page, Fault };
     enum class Exception : std::uint16_t {
         Reset = 0x0100, MachineCheck = 0x0200, DataStorage = 0x0300,
         InstructionStorage = 0x0400, ExternalInterrupt = 0x0500,
@@ -112,6 +112,7 @@ private:
     [[nodiscard]] int executeOpcode31(std::uint32_t opcode, std::uint32_t instructionPc);
     [[nodiscard]] int executeFloating(std::uint32_t opcode, bool singlePrecision);
     void enterException(Exception exception, std::uint32_t savedPc, std::uint32_t srr1Bits = 0);
+    void enterMachineCheck(std::uint32_t nextPc);
     void programException(std::uint32_t savedPc, std::uint32_t cause);
     void updateCr0(std::uint32_t value);
     void updateCrField(unsigned int field, std::uint8_t value);

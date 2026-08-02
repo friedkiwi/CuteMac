@@ -83,6 +83,7 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
                 ? keyboardInquiryTimeoutCycles
                 : keyboardByteCycles;
         }
+        if (m_shiftRegisterRead) m_shiftRegisterRead();
         return value;
     }
     if (index == timer1CounterLow) {
@@ -261,6 +262,11 @@ void Via6522::setPortBChangedCallback(PortBChangedCallback callback)
 void Via6522::setShiftRegisterWriteCallback(ShiftRegisterWriteCallback callback)
 {
     m_shiftRegisterWrite = std::move(callback);
+}
+
+void Via6522::setShiftRegisterReadCallback(ShiftRegisterReadCallback callback)
+{
+    m_shiftRegisterRead = std::move(callback);
 }
 
 void Via6522::externalShiftIn(std::uint8_t value)

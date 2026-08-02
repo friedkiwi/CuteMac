@@ -28,6 +28,7 @@
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
+#include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/session/FramebufferRenderer.h"
 
 namespace {
@@ -1240,8 +1241,17 @@ private:
                     if (!card) continue;
                     const auto frame = card->videoFrame();
                     m_out << "slot=" << slot << " card=" << card->id();
-                    if (frame.valid()) {
+                    if (frame.width > 0 && frame.height > 0) {
                         m_out << " video=" << frame.width << 'x' << frame.height << " depth=" << frame.bitsPerPixel;
+                        if (!frame.valid()) m_out << " invalid-frame";
+                    }
+                    if (const auto appleVideo = std::dynamic_pointer_cast<cutemac::devices::video::nubus::MacintoshIIVideoCard>(card)) {
+                        m_out << " tfb=";
+                        for (const auto value : appleVideo->timingRegisters()) m_out << hexValue(value, 2).mid(2);
+                        m_out << " vbl=" << (appleVideo->vblEnabled() ? "enabled" : "disabled")
+                              << " assertions=" << appleVideo->vblAssertions()
+                              << " acks=" << appleVideo->vblAcks()
+                              << " status_reads=" << appleVideo->vblStatusReads();
                     }
                     m_out << '\n';
                 }

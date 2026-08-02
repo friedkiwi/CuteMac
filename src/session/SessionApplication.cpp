@@ -18,6 +18,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QScreen>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTimer>
@@ -81,6 +82,17 @@ bool sameNuBusDevices(const QVector<cutemac::config::NuBusDeviceConfiguration>& 
     return true;
 }
 
+bool sameSerialDevices(const QVector<cutemac::config::SerialDeviceConfiguration>& left,
+    const QVector<cutemac::config::SerialDeviceConfiguration>& right)
+{
+    if (left.size() != right.size()) return false;
+    for (qsizetype i = 0; i < left.size(); ++i) {
+        if (left[i].channel != right[i].channel || left[i].type != right[i].type
+            || left[i].outputDirectory != right[i].outputDirectory) return false;
+    }
+    return true;
+}
+
 bool requiresMachineReset(const cutemac::config::Configuration& current, const cutemac::config::Configuration& proposed)
 {
     return current.machineId != proposed.machineId || current.romPath != proposed.romPath
@@ -88,7 +100,8 @@ bool requiresMachineReset(const cutemac::config::Configuration& current, const c
         || current.ramSizeKiB != proposed.ramSizeKiB || current.skipRamPatternTest != proposed.skipRamPatternTest
         || !sameIwmDevices(current.iwmDevices, proposed.iwmDevices)
         || !sameScsiDevices(current.scsiDevices, proposed.scsiDevices)
-        || !sameNuBusDevices(current.nubusDevices, proposed.nubusDevices);
+        || !sameNuBusDevices(current.nubusDevices, proposed.nubusDevices)
+        || !sameSerialDevices(current.serialDevices, proposed.serialDevices);
 }
 
 class DisplayWidget final : public QWidget {
@@ -387,14 +400,10 @@ public:
         setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
         m_display = new DisplayWidget;
         m_display->setMouseCallback([this](int x, int y, bool pressed) {
-            if (pressed && !m_mouseInputPressed) {
-                m_mouseInputPressed = true;
-                updateInteractiveInputState();
-            }
             m_session.queueMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
-            m_session.queueMouseButton(pressed);
-            if (!pressed && m_mouseInputPressed) {
-                m_mouseInputPressed = false;
+            if (pressed != m_mouseInputPressed) {
+                m_mouseInputPressed = pressed;
+                m_session.queueMouseButton(pressed);
                 updateInteractiveInputState();
             }
         });
@@ -420,9 +429,8 @@ public:
         connect(&m_frameTimer, &QTimer::timeout, this, [this]() { runFrame(); });
 
         loadAndReset();
-        const auto initialScale = m_display->framebufferSize().width() == 512 ? 2.0 : 1.0;
-        setZoom(initialScale);
-        QTimer::singleShot(0, this, [this, initialScale]() { setZoom(initialScale); });
+        setZoom(1.0);
+        QTimer::singleShot(0, this, [this]() { setZoom(preferredInitialZoom()); });
         m_runner.start();
         if (m_controlServer.listen()) {
             qInfo("CuteMac session control listening on 127.0.0.1:%u", m_controlServer.port());
@@ -444,6 +452,26 @@ protected:
     }
 
 private:
+    [[nodiscard]] double preferredInitialZoom() const
+    {
+        const auto framebuffer = m_display->framebufferSize();
+        const auto* targetScreen = screen() != nullptr ? screen() : QApplication::primaryScreen();
+        if (framebuffer.isEmpty() || targetScreen == nullptr) return 1.0;
+
+        const QSize chrome(qMax(0, width() - m_display->width()),
+            qMax(0, height() - m_display->height()));
+        const auto available = targetScreen->availableGeometry().size();
+        // Leave breathing room for the desktop shell, window borders, and
+        // positioning differences between window managers.
+        const QSize comfortable(qFloor(available.width() * 0.9), qFloor(available.height() * 0.9));
+        for (const double factor : { 2.0, 1.5 }) {
+            const QSize requested(qRound(framebuffer.width() * factor) + chrome.width(),
+                qRound(framebuffer.height() * factor) + chrome.height());
+            if (requested.width() <= comfortable.width() && requested.height() <= comfortable.height()) return factor;
+        }
+        return 1.0;
+    }
+
     void updateInteractiveInputState()
     {
         m_runner.setInteractiveInputActive(m_mouseInputPressed || !m_pressedInputKeys.isEmpty());

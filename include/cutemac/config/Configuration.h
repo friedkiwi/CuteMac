@@ -47,6 +47,14 @@ struct NuBusDeviceConfiguration {
     bool absolutePointer = true;
 };
 
+enum class SerialDeviceType { ImageWriterII };
+
+struct SerialDeviceConfiguration {
+    int channel = 1; // SCC A=0 (modem), B=1 (printer)
+    SerialDeviceType type = SerialDeviceType::ImageWriterII;
+    QString outputDirectory;
+};
+
 [[nodiscard]] QString runtimeSpeedName(RuntimeSpeed speed);
 [[nodiscard]] RuntimeSpeed runtimeSpeedFromName(const QString& name);
 
@@ -61,6 +69,7 @@ public:
     QVector<IwmDeviceConfiguration> iwmDevices;
     QVector<ScsiDeviceConfiguration> scsiDevices;
     QVector<NuBusDeviceConfiguration> nubusDevices;
+    QVector<SerialDeviceConfiguration> serialDevices;
     int ramSizeKiB = 4096;
     int cyclesPerFrame = 130560;
     RuntimeSpeed runtimeSpeed = RuntimeSpeed::Unlimited;

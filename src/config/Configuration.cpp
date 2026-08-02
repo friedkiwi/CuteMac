@@ -207,6 +207,17 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                 }
             }
         }
+        if (const auto* devices = document["serial"]["devices"].as_array()) {
+            for (const auto& node : *devices) {
+                if (const auto* device = node.as_table()) {
+                    configuration.serialDevices.append({
+                        static_cast<int>((*device)["channel"].value_or<std::int64_t>(1)),
+                        SerialDeviceType::ImageWriterII,
+                        fromTomlString((*device)["output_directory"].value_or<std::string>("")),
+                    });
+                }
+            }
+        }
     } catch (const toml::parse_error&) {
         return std::nullopt;
     }
@@ -272,6 +283,14 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             { "absolute_pointer", device.absolutePointer },
         });
     }
+    toml::array serialDevices;
+    for (const auto& device : configuration.serialDevices) {
+        serialDevices.push_back(toml::table {
+            { "channel", device.channel },
+            { "type", "imagewriter_ii" },
+            { "output_directory", toTomlString(device.outputDirectory) },
+        });
+    }
 
     toml::table document {
         { "name", toTomlString(configuration.profileName) },
@@ -292,6 +311,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
         { "iwm", toml::table { { "drives", std::move(iwmDevices) } } },
         { "scsi", toml::table { { "devices", std::move(scsiDevices) } } },
         { "nubus", toml::table { { "devices", std::move(nubusDevices) } } },
+        { "serial", toml::table { { "devices", std::move(serialDevices) } } },
         { "rom_patches", toml::table {
                              { "skip_ram_pattern_test", configuration.skipRamPatternTest },
                          } },

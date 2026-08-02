@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include "cutemac/devices/serial/SerialBus.h"
 
 namespace cutemac::devices::scc {
 
@@ -12,6 +13,8 @@ public:
         B,
     };
 
+    Z8530Scc();
+
     void reset();
 
     [[nodiscard]] std::uint8_t readControl(Channel channel);
@@ -21,6 +24,8 @@ public:
     void writeData(Channel channel, std::uint8_t value);
     void tick(int cycles);
     [[nodiscard]] bool interruptActive() const;
+    void attachEndpoint(Channel channel, std::shared_ptr<serial::SerialEndpoint> endpoint);
+    void receiveByte(Channel channel, std::uint8_t value);
 
 private:
     struct ChannelState {
@@ -31,6 +36,7 @@ private:
         int transmitCycles = 0;
         bool transmitInterruptPending = false;
         bool receiveDataAvailable = false;
+        std::uint8_t transmitData = 0;
     };
 
     [[nodiscard]] ChannelState& state(Channel channel);
@@ -38,6 +44,8 @@ private:
 
     ChannelState m_channelA;
     ChannelState m_channelB;
+    serial::SerialBus m_busA;
+    serial::SerialBus m_busB;
 };
 
 } // namespace cutemac::devices::scc

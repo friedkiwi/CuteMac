@@ -25,6 +25,7 @@ add_library(CuteMacCore
     src/core/EmulationSession.cpp
     src/core/MachineScheduler.cpp
     src/core/SessionRunner.cpp
+    src/devices/cuda/CudaController.cpp
     src/cpu/m68k/M68kCpuCore.cpp
     src/cpu/m68k/engine/m68kcpu.c
     src/cpu/m68k/engine/m68kdasm.c
@@ -36,15 +37,18 @@ add_library(CuteMacCore
     src/devices/adb/AdbTransceiver.cpp
     src/devices/floppy/FloppyDiskImage.cpp
     src/devices/iwm/IwmController.cpp
+    src/devices/printer/ImageWriterII.cpp
     src/devices/nubus/NuBusBus.cpp
     src/devices/rtc/MacRtc.cpp
     src/devices/scsi/ScsiBlockDevice.cpp
     src/devices/scsi/ScsiCdRomDevice.cpp
     src/devices/scsi/ScsiBus.cpp
     src/devices/scsi/ncr5380/Ncr5380.cpp
+    src/devices/scsi/ncr53c94/Ncr53c94.cpp
     src/devices/scc/Z8530Scc.cpp
     src/devices/via6522/Via6522.cpp
     src/devices/video/VideoDevice.cpp
+    src/devices/video/SonoraVideo.cpp
     src/devices/video/nubus/CuteMacVideoCard.cpp
     src/devices/video/nubus/MacintoshIIVideoCard.cpp
     src/machines/MachineCatalog.cpp
@@ -54,6 +58,7 @@ add_library(CuteMacCore
     src/rom/RomPatcher.cpp
     src/rom/RomCatalog.cpp
     src/storage/DiskImageManager.cpp
+    src/storage/PngPageSink.cpp
 )
 
 target_include_directories(CuteMacCore
@@ -64,6 +69,7 @@ target_include_directories(CuteMacCore
 target_link_libraries(CuteMacCore
     PUBLIC
         Qt6::Core
+        Qt6::Gui
         tomlplusplus::tomlplusplus
 )
 
@@ -181,6 +187,9 @@ add_executable(CuteMacPowerMac8100Smoke
 
 target_link_libraries(CuteMacPowerMac8100Smoke PRIVATE CuteMacCore)
 
+add_executable(CuteMacWrapHfsScsi tools/wrap_hfs_scsi.cpp)
+target_link_libraries(CuteMacWrapHfsScsi PRIVATE Qt6::Core)
+
 if(Readline_FOUND AND NOT EMSCRIPTEN)
     add_executable(CuteMacDebugSession
         src/debug/main.cpp
@@ -287,4 +296,8 @@ if(BUILD_TESTING)
     add_executable(CuteMacDebugCpuAccessTests tests/debug_cpu_access_tests.cpp)
     target_link_libraries(CuteMacDebugCpuAccessTests PRIVATE CuteMacCore)
     add_test(NAME debug-cpu-access COMMAND CuteMacDebugCpuAccessTests)
+
+    add_executable(CuteMacImageWriterTests tests/imagewriter_tests.cpp)
+    target_link_libraries(CuteMacImageWriterTests PRIVATE CuteMacCore Qt6::Gui)
+    add_test(NAME imagewriter COMMAND CuteMacImageWriterTests)
 endif()

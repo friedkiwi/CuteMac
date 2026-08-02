@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include <QByteArray>
 #include <QString>
@@ -10,6 +11,7 @@
 #include "cutemac/core/GuestPowerRequest.h"
 #include "cutemac/devices/audio/AudioFrame.h"
 #include "cutemac/devices/video/VideoFrame.h"
+#include "cutemac/devices/serial/SerialEndpoint.h"
 
 namespace cutemac::core {
 
@@ -39,6 +41,7 @@ public:
     [[nodiscard]] virtual devices::audio::AudioFrame takeAudioFrame() { return {}; }
     [[nodiscard]] virtual GuestPowerRequest takePowerRequest() { return GuestPowerRequest::None; }
     virtual void queueInput(const GuestInputEvent& event, std::uint64_t cycle) = 0;
+    virtual void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) = 0;
 };
 
 class IDebugMachineAccess {

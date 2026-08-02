@@ -110,6 +110,22 @@ void testMemoryBranchAndReservation()
     require(s.gpr[7] == 2, "unconditional branch");
 }
 
+void testStringStores()
+{
+    Fixture f;
+    auto s = f.cpu.registers();
+    s.gpr[3] = 0x500; s.gpr[4] = 3; s.gpr[7] = 0x11223344U; s.gpr[8] = 0x55667788U;
+    s.xer = 6; f.cpu.setRegisters(s);
+    f.instruction(0x100, x(7, 3, 4, 661));          // stswx r7,r3,r4
+    f.instruction(0x104, x(7, 3, 5, 725));          // stswi r7,r3,5
+    (void)f.cpu.stepInstruction();
+    require(f.bus.read32(0x503) == 0x11223344U && f.bus.read16(0x507) == 0x5566U,
+        "stswx stores XER-selected bytes across registers");
+    (void)f.cpu.stepInstruction();
+    require(f.bus.read32(0x500) == 0x11223344U && f.bus.read8(0x504) == 0x55U,
+        "stswi stores immediate byte count");
+}
+
 void testExceptionsAndInterrupt()
 {
     Fixture f;
@@ -121,6 +137,14 @@ void testExceptionsAndInterrupt()
     f.cpu.setProgramCounter(0x200); s = f.cpu.registers(); s.msr = Core::msrMe | Core::msrEe; f.cpu.setRegisters(s);
     f.cpu.setExternalInterrupt(true); (void)f.cpu.stepInstruction(); s = f.cpu.registers();
     require(s.pc == 0x500 && s.srr0 == 0x200, "external interrupt exception");
+
+    f.cpu.setExternalInterrupt(false);
+    f.instruction(0x300, 0x4c000064U); // rfi
+    s.pc = 0x300; s.msr = 0xa5a51040U; s.srr0 = 0x404;
+    s.srr1 = 0x0002d072U; // trap cause plus the saved low half of MSR
+    f.cpu.setRegisters(s); (void)f.cpu.stepInstruction(); s = f.cpu.registers();
+    require(s.pc == 0x404 && s.msr == 0xa5a5d072U,
+        "601 rfi restores only SRR1 bits 16-31 and excludes exception causes");
 }
 
 void testBatAndPageTranslation()
@@ -140,6 +164,19 @@ void testBatAndPageTranslation()
     f.bus.write32(pteg + 4, 0x00080002U);
     require(f.cpu.translateForDebug(ea, Core::AccessType::Read) == 0x00080034U, "hashed page translation");
     require((f.bus.read32(pteg + 4) & 0x180U) == 0, "debug translation has no R/C side effects");
+
+    Fixture dsi;
+    auto faultState = dsi.cpu.registers();
+    faultState.msr = Core::msrMe | Core::msrDr;
+    faultState.sdr1 = 0x00010000U;
+    dsi.cpu.setRegisters(faultState);
+    dsi.instruction(0x100, d(32, 3, 0, 0x2000));
+    (void)dsi.cpu.stepInstruction();
+    faultState = dsi.cpu.registers();
+    require(faultState.pc == 0x300 && faultState.dsisr == 0x40000000U,
+        "DSI page-miss cause is reported in DSISR");
+    require((faultState.srr1 & 0x40000000U) == 0,
+        "DSI page-miss cause is not copied into SRR1");
 }
 
 void testTraceAndDisassembly()
@@ -359,6 +396,7 @@ int main(int argc, char** argv)
     if (argc == 3 && std::string(argv[1]) == "--floating-vectors") return runExternalFloatingVectors(argv[2]);
     testResetAndInteger();
     testMemoryBranchAndReservation();
+    testStringStores();
     testExceptionsAndInterrupt();
     testBatAndPageTranslation();
     testTraceAndDisassembly();

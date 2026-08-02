@@ -223,19 +223,23 @@ void PowerPc601Core::emitTrace(TraceEvent event) const
 std::optional<PowerPc601Core::Translation> PowerPc601Core::translate(
     std::uint32_t address, AccessType access, bool sideEffects)
 {
+    const auto sr = m_state.sr[address >> 28];
+    // On the 601, SR[T] selects the I/O-controller interface for data accesses
+    // regardless of MSR[DR].  Both ordinary BUIDs and the special 0x07f
+    // memory-forced BUID bypass BATs and the hashed page table; packet 1 forms
+    // the memory-side address from SR[28:31] and EA[4:31].
+    if (access != AccessType::Instruction && (sr & 0x80000000U) != 0) {
+        const auto physical = (address & 0x0fffffffU) | (sr << 28);
+        emitTrace({ TraceEvent::Kind::Translation, m_cycleCount, m_state.pc, 0, address,
+            physical, 0, m_state.msr, access, TranslationPath::IoController, Exception::Reset, true });
+        return Translation { physical, TranslationPath::IoController, true };
+    }
+
     const bool translated = access == AccessType::Instruction ? (m_state.msr & msrIr) : (m_state.msr & msrDr);
     if (!translated) {
         emitTrace({ TraceEvent::Kind::Translation, m_cycleCount, m_state.pc, 0, address,
             address, 0, m_state.msr, access, TranslationPath::Real, Exception::Reset, true });
         return Translation { address, TranslationPath::Real, false };
-    }
-
-    const auto sr = m_state.sr[address >> 28];
-    if ((sr & 0x80000000U) != 0 && ((sr >> 20) & 0x1ffU) == 0x7fU) {
-        const auto physical = (address & 0x0fffffffU) | (sr << 28);
-        emitTrace({ TraceEvent::Kind::Translation, m_cycleCount, m_state.pc, 0, address,
-            physical, 0, m_state.msr, access, TranslationPath::Page, Exception::Reset, true });
-        return Translation { physical, TranslationPath::Page, true };
     }
 
     if ((sr & 0x80000000U) == 0) {
@@ -252,6 +256,8 @@ std::optional<PowerPc601Core::Translation> PowerPc601Core::translate(
             const auto pp = m_state.batu[i] & 3U;
             const bool writeAccess = access == AccessType::Write;
             const bool denied = (key && (pp == 0 || (pp == 1 && writeAccess))) || (pp == 3 && writeAccess);
+            if (denied && writeAccess && sideEffects && m_bus->handleProtectedWrite(address, 0, 0))
+                return Translation { address, TranslationPath::Bat, true };
             if (denied)
                 break;
             const auto physical = (lower & mask) | (address & ~mask);
@@ -307,13 +313,22 @@ std::optional<PowerPc601Core::Translation> PowerPc601Core::translate(
             fault = 0x08000000U;
     }
     if (fault != 0) {
+        // Some Old World ROM compatibility helpers deliberately access
+        // physical device apertures which are not present in the current
+        // hashed page table.  Give the machine a narrowly-scoped opportunity
+        // to service those writes before turning the access into a guest DSI.
+        if (writeAccess && sideEffects && m_bus->handleProtectedWrite(address, 0, 0))
+            return Translation { address, TranslationPath::Page, true };
         const auto exception = access == AccessType::Instruction ? Exception::InstructionStorage : Exception::DataStorage;
         if (sideEffects) {
             if (exception == Exception::DataStorage) {
                 m_state.dar = address;
                 m_state.dsisr = fault | (writeAccess ? 0x02000000U : 0U);
             }
-            enterException(exception, access == AccessType::Instruction ? address : m_instructionPc, fault);
+            // ISI cause bits are saved in SRR1. DSI cause bits live only in
+            // DSISR; putting them in SRR1 breaks the ROM's nested-fault path.
+            enterException(exception, access == AccessType::Instruction ? address : m_instructionPc,
+                exception == Exception::InstructionStorage ? fault : 0U);
         }
         emitTrace({ TraceEvent::Kind::Translation, m_cycleCount, m_state.pc, 0, address, 0,
             fault, m_state.msr, access, TranslationPath::Fault, exception, false });
@@ -348,9 +363,18 @@ std::optional<std::uint32_t> PowerPc601Core::read(std::uint32_t address, unsigne
         enterException(Exception::Alignment, access == AccessType::Instruction ? address : m_instructionPc);
         return std::nullopt;
     }
+    if (access == AccessType::Read) {
+        if (const auto value = m_bus->compatibilityRead(address, size, m_instructionPc))
+            return value;
+    }
     const auto translated = translate(address, access, true);
     if (!translated)
         return std::nullopt;
+    if (m_bus->accessFault(translated->physicalAddress, size, false,
+            access == AccessType::Instruction)) {
+        enterMachineCheck((access == AccessType::Instruction ? address : m_instructionPc) + 4U);
+        return std::nullopt;
+    }
     switch (size) {
     case 1: return m_bus->read8(translated->physicalAddress);
     case 2: return m_bus->read16(translated->physicalAddress);
@@ -360,9 +384,17 @@ std::optional<std::uint32_t> PowerPc601Core::read(std::uint32_t address, unsigne
 
 bool PowerPc601Core::write(std::uint32_t address, std::uint32_t value, unsigned size)
 {
+    if (m_bus->compatibilityWrite(address, value, size, m_instructionPc)) {
+        m_state.reservationValid = false;
+        return true;
+    }
     const auto translated = translate(address, AccessType::Write, true);
     if (!translated)
         return false;
+    if (m_bus->accessFault(translated->physicalAddress, size, true, false)) {
+        enterMachineCheck(m_instructionPc + 4U);
+        return false;
+    }
     switch (size) {
     case 1: m_bus->write8(translated->physicalAddress, static_cast<std::uint8_t>(value)); break;
     case 2: m_bus->write16(translated->physicalAddress, static_cast<std::uint16_t>(value)); break;
@@ -383,6 +415,21 @@ void PowerPc601Core::enterException(Exception exception, std::uint32_t savedPc, 
     m_state.reservationValid = false;
     emitTrace({ TraceEvent::Kind::Exception, m_cycleCount, savedPc, 0, 0, 0, srr1Bits,
         oldMsr, AccessType::Instruction, TranslationPath::Real, exception, true });
+}
+
+void PowerPc601Core::enterMachineCheck(std::uint32_t nextPc)
+{
+    const auto oldMsr = m_state.msr;
+    m_state.srr0 = nextPc;
+    // The 601 machine-check definition preserves the complete low half of
+    // MSR, unlike the narrower saved-state mask used by precise exceptions.
+    m_state.srr1 = oldMsr & 0x0000ffffU;
+    m_state.msr = (oldMsr & 0xfffb1041U) & ~msrMe;
+    m_state.pc = ((oldMsr & msrIp) ? exceptionPrefixHigh : exceptionPrefixLow)
+        | static_cast<std::uint32_t>(Exception::MachineCheck);
+    m_state.reservationValid = false;
+    emitTrace({ TraceEvent::Kind::Exception, m_cycleCount, nextPc - 4U, 0, 0, 0, 0,
+        oldMsr, AccessType::Read, TranslationPath::Real, Exception::MachineCheck, true });
 }
 
 void PowerPc601Core::programException(std::uint32_t savedPc, std::uint32_t cause)
@@ -579,12 +626,12 @@ int PowerPc601Core::executeOpcode19(std::uint32_t op, std::uint32_t instructionP
     }
     case 50: // rfi
         if (m_state.msr & msrPr) { programException(instructionPc, programPrivileged); return 1; }
-        {
-            constexpr std::uint32_t replaceMask = 0x87c0ff73U;
-            constexpr std::uint32_t powerManagement = 0x00040000U;
-            m_state.msr = (m_state.msr & ~(replaceMask | powerManagement))
-                | (m_state.srr1 & (replaceMask & ~powerManagement));
-        }
+        // The 601 rfi operation copies IBM-numbered bits 16-31: the low
+        // 16 bits of SRR1.  The program/ISI cause fields in SRR1 bits 11-15
+        // are exception metadata and must never leak into the MSR.  Doing so
+        // made the ROM's nanokernel trap-return path accumulate a bogus MSR
+        // state and remain in its trap sentinel.
+        m_state.msr = (m_state.msr & 0xffff0000U) | (m_state.srr1 & 0x0000ffffU);
         m_state.pc = m_state.srr0 & ~3U;
         return 2;
     case 150: // isync
@@ -848,6 +895,18 @@ int PowerPc601Core::executeOpcode31(std::uint32_t op, std::uint32_t instructionP
     case 659: { // mfsrin
         if (m_state.msr & msrPr) { programException(instructionPc, programPrivileged); return 1; }
         finish(rt(op), m_state.sr[b >> 28]); return 1;
+    }
+    case 661: case 725: { // stswx/stswi
+        auto address = xo(op) == 661 ? eaX() : (ra(op) ? a : 0U);
+        auto count = xo(op) == 661 ? (m_state.xer & 0x7fU) : (rb(op) ? rb(op) : 32U);
+        auto reg = rt(op);
+        unsigned byte = 0;
+        while (count--) {
+            const auto value = static_cast<std::uint8_t>(m_state.gpr[reg] >> (24U - byte * 8U));
+            if (!write(address++, value, 1)) break;
+            if (++byte == 4U) { byte = 0; reg = (reg + 1U) & 31U; }
+        }
+        return 4;
     }
     case 662: { const auto value = read(eaX(), 2, AccessType::Read); if (value) m_state.gpr[rt(op)] = byteSwap16(static_cast<std::uint16_t>(*value)); return 2; }
     case 695: case 727: case 759: case 983: { // indexed FP loads/stores subset
@@ -1114,6 +1173,7 @@ QString PowerPc601Core::formatTraceEvent(const TraceEvent& event)
     const auto access = event.access == AccessType::Instruction ? QStringLiteral("execute")
         : event.access == AccessType::Read ? QStringLiteral("read") : QStringLiteral("write");
     const auto path = event.translation == TranslationPath::Real ? QStringLiteral("real")
+        : event.translation == TranslationPath::IoController ? QStringLiteral("io")
         : event.translation == TranslationPath::Bat ? QStringLiteral("bat")
         : event.translation == TranslationPath::Page ? QStringLiteral("page") : QStringLiteral("fault");
     return QStringLiteral("v=1 arch=ppc601 kind=%1 cycle=%2 pc=%3 opcode=%4 ea=%5 pa=%6 detail=%7 msr=%8 access=%9 path=%10 exception=%11 success=%12")
