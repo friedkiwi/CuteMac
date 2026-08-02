@@ -24,6 +24,7 @@ private:
     [[nodiscard]] std::uint32_t blockCount() const;
     [[nodiscard]] ScsiCommandResult read(std::uint32_t lba, std::uint32_t blocks);
     [[nodiscard]] ScsiCommandResult readAppleRaw(std::uint32_t lba, std::uint32_t blocks);
+    [[nodiscard]] ScsiCommandResult modeSelect(bool tenByte, const QByteArray& parameters);
     [[nodiscard]] ScsiCommandResult inquiry(std::uint8_t allocationLength) const;
     [[nodiscard]] ScsiCommandResult requestSense(std::uint8_t allocationLength);
     [[nodiscard]] ScsiCommandResult modeSense(bool tenByte, bool disableBlockDescriptors,
@@ -38,6 +39,7 @@ private:
     std::uint8_t m_senseKey = 0;
     std::uint8_t m_additionalSenseCode = 0;
     bool m_unitAttention = false;
+    std::uint32_t m_logicalBlockSize = 2048;
 };
 
 } // namespace cutemac::devices::scsi

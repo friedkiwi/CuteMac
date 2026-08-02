@@ -83,7 +83,7 @@ void ScsiCdRomDevice::acknowledgeMediaChange()
 
 bool ScsiCdRomDevice::ready() const { return !m_image.isEmpty(); }
 
-ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const QByteArray&)
+ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const QByteArray& dataOut)
 {
     if (cdb.isEmpty()) return checkCondition(senseIllegalRequest, 0x24);
     const auto opcode = static_cast<std::uint8_t>(cdb[0]);
@@ -105,6 +105,7 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
         return read(lba, blocks);
     }
     case 0x12: return inquiry(cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 36);
+    case 0x15: return modeSelect(false, dataOut);
     case 0x1a: return modeSense(false, cdb.size() > 1 && (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
         cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) & 0x3f : 0x3f,
         cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 4);
@@ -118,6 +119,7 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
         if (cdb.size() < 10) return checkCondition(senseIllegalRequest, 0x24);
         return read(be32(cdb, 2), (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[7])) << 8) | static_cast<std::uint8_t>(cdb[8]));
     case 0x43: return readToc(cdb);
+    case 0x55: return modeSelect(true, dataOut);
     case 0x5a:
         if (cdb.size() < 10) return checkCondition(senseIllegalRequest, 0x24);
         return modeSense(true, (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
@@ -169,10 +171,33 @@ std::uint32_t ScsiCdRomDevice::blockCount() const { return static_cast<std::uint
 
 ScsiCommandResult ScsiCdRomDevice::read(std::uint32_t lba, std::uint32_t blocks)
 {
-    if (lba > blockCount() || blocks > blockCount() - lba) return checkCondition(senseIllegalRequest, 0x21);
+    const auto logicalBlocks = static_cast<std::uint64_t>(m_image.size()) / m_logicalBlockSize;
+    if (lba > logicalBlocks || blocks > logicalBlocks - lba) return checkCondition(senseIllegalRequest, 0x21);
     m_senseKey = senseNoSense;
     m_additionalSenseCode = 0;
-    return good(m_image.mid(static_cast<qsizetype>(lba) * blockSize, static_cast<qsizetype>(blocks) * blockSize));
+    return good(m_image.mid(static_cast<qsizetype>(lba) * m_logicalBlockSize,
+        static_cast<qsizetype>(blocks) * m_logicalBlockSize));
+}
+
+ScsiCommandResult ScsiCdRomDevice::modeSelect(bool tenByte, const QByteArray& parameters)
+{
+    const int headerSize = tenByte ? 8 : 4;
+    if (parameters.size() < headerSize) return checkCondition(senseIllegalRequest, 0x26);
+    const auto descriptorLength = tenByte
+        ? (static_cast<std::uint16_t>(static_cast<std::uint8_t>(parameters[6])) << 8)
+            | static_cast<std::uint8_t>(parameters[7])
+        : static_cast<std::uint8_t>(parameters[3]);
+    if (descriptorLength == 0) return good();
+    if (descriptorLength < 8 || parameters.size() < headerSize + descriptorLength)
+        return checkCondition(senseIllegalRequest, 0x26);
+    const auto descriptor = headerSize;
+    const auto requestedBlockSize = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(parameters[descriptor + 5])) << 16)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(parameters[descriptor + 6])) << 8)
+        | static_cast<std::uint8_t>(parameters[descriptor + 7]);
+    if (requestedBlockSize != 512 && requestedBlockSize != 1024 && requestedBlockSize != blockSize)
+        return checkCondition(senseIllegalRequest, 0x26);
+    m_logicalBlockSize = requestedBlockSize;
+    return good();
 }
 
 ScsiCommandResult ScsiCdRomDevice::inquiry(std::uint8_t allocationLength) const
@@ -214,13 +239,14 @@ ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, bool disableBlockDesc
     data[tenByte ? 3 : 2] = static_cast<char>(0x80);
     if (!disableBlockDescriptors) {
         QByteArray descriptor(8, '\0');
-        const auto blocks = std::min<std::uint32_t>(blockCount(), 0x00ffffffU);
+        const auto blocks = std::min<std::uint64_t>(
+            static_cast<std::uint64_t>(m_image.size()) / m_logicalBlockSize, 0x00ffffffU);
         descriptor[1] = static_cast<char>(blocks >> 16);
         descriptor[2] = static_cast<char>(blocks >> 8);
         descriptor[3] = static_cast<char>(blocks);
-        descriptor[5] = static_cast<char>(blockSize >> 16);
-        descriptor[6] = static_cast<char>(blockSize >> 8);
-        descriptor[7] = static_cast<char>(blockSize);
+        descriptor[5] = static_cast<char>(m_logicalBlockSize >> 16);
+        descriptor[6] = static_cast<char>(m_logicalBlockSize >> 8);
+        descriptor[7] = static_cast<char>(m_logicalBlockSize);
         data.append(descriptor);
         data[tenByte ? 7 : 3] = 8;
     }
@@ -240,8 +266,9 @@ ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, bool disableBlockDesc
 ScsiCommandResult ScsiCdRomDevice::readCapacity() const
 {
     QByteArray data;
-    appendBe32(data, blockCount() == 0 ? 0 : blockCount() - 1);
-    appendBe32(data, blockSize);
+    const auto blocks = static_cast<std::uint32_t>(m_image.size() / m_logicalBlockSize);
+    appendBe32(data, blocks == 0 ? 0 : blocks - 1);
+    appendBe32(data, m_logicalBlockSize);
     return good(data);
 }
 

@@ -129,6 +129,20 @@ int main()
     ok &= expect(capacity.data == QByteArray::fromHex("0000000300000800"), "CD-ROM capacity must use 2048-byte blocks");
     const auto cdRead = cdRom.executeCommand(QByteArray::fromHex("28000000000200000100"), {});
     ok &= expect(cdRead.status == 0 && cdRead.data == QByteArray(2048, static_cast<char>(0x5a)), "READ(10) CD sector failed");
+    const auto select512 = cdRom.executeCommand(QByteArray::fromHex("151000000c00"),
+        QByteArray::fromHex("000000080000000000000200"));
+    ok &= expect(select512.status == 0, "CD-ROM MODE SELECT(6) 512-byte negotiation failed");
+    ok &= expect(cdRom.loadImage(isoPath), "runtime CD reload after block-size negotiation failed");
+    cdRom.acknowledgeMediaChange();
+    const auto capacity512 = cdRom.executeCommand(QByteArray::fromHex("25000000000000000000"), {});
+    ok &= expect(capacity512.data == QByteArray::fromHex("0000000f00000200"),
+        "negotiated CD-ROM capacity must use 512-byte logical blocks");
+    const auto cdRead512 = cdRom.executeCommand(QByteArray::fromHex("28000000000800000400"), {});
+    ok &= expect(cdRead512.status == 0 && cdRead512.data == QByteArray(2048, static_cast<char>(0x5a)),
+        "negotiated 512-byte CD reads must map to the correct image bytes");
+    const auto restore2048 = cdRom.executeCommand(QByteArray::fromHex("151000000c00"),
+        QByteArray::fromHex("000000080000000000000800"));
+    ok &= expect(restore2048.status == 0, "CD-ROM 2048-byte block-size restore failed");
     const auto toc = cdRom.executeCommand(QByteArray::fromHex("43000000000000001200"), {});
     ok &= expect(toc.status == 0 && toc.data.size() == 18 && static_cast<std::uint8_t>(toc.data[6]) == 1
             && static_cast<std::uint8_t>(toc.data[14]) == 0xaa,
