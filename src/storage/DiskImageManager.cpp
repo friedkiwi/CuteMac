@@ -9,6 +9,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <sstream>
 
 #include "cutemac/config/Configuration.h"
@@ -41,6 +42,93 @@ DiskImageType inferType(const QFileInfo& file)
     if (suffix == QStringLiteral("dsk") || suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image")) return DiskImageType::Floppy;
     if (file.size() == 400 * 1024 || file.size() == 800 * 1024 || file.size() == 1440 * 1024) return DiskImageType::Floppy;
     return DiskImageType::HardDisk;
+}
+
+std::uint16_t readBe16(const QByteArray& bytes, qsizetype offset)
+{
+    if (offset < 0 || offset + 2 > bytes.size()) return 0;
+    return (static_cast<std::uint16_t>(static_cast<std::uint8_t>(bytes[offset])) << 8)
+        | static_cast<std::uint8_t>(bytes[offset + 1]);
+}
+
+std::uint32_t readBe32(const QByteArray& bytes, qsizetype offset)
+{
+    if (offset < 0 || offset + 4 > bytes.size()) return 0;
+    return (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset])) << 24)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 1])) << 16)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 2])) << 8)
+        | static_cast<std::uint8_t>(bytes[offset + 3]);
+}
+
+QByteArray readAt(QFile& file, qint64 offset, qint64 size)
+{
+    if (offset < 0 || size < 0 || offset > file.size() || size > file.size() - offset || !file.seek(offset)) return {};
+    return file.read(size);
+}
+
+QString classicVolumeName(const QByteArray& volumeBlock)
+{
+    const auto signature = readBe16(volumeBlock, 0);
+    if (signature != 0x4244 && signature != 0xd2d7) return {};
+    if (volumeBlock.size() <= 36) return {};
+    const auto length = std::min<int>(static_cast<std::uint8_t>(volumeBlock[36]), 27);
+    if (37 + length > volumeBlock.size()) return {};
+    return QString::fromLatin1(volumeBlock.constData() + 37, length).trimmed();
+}
+
+QString classicVolumeNameAt(QFile& file, qint64 filesystemOffset)
+{
+    return classicVolumeName(readAt(file, filesystemOffset + 1024, 64));
+}
+
+QString partitionedClassicVolumeName(QFile& file)
+{
+    const auto descriptor = readAt(file, 0, 512);
+    if (readBe16(descriptor, 0) != 0x4552) return {};
+    const auto blockSize = readBe16(descriptor, 2);
+    if (blockSize < 512 || blockSize > 4096) return {};
+    const auto firstPartition = readAt(file, blockSize, blockSize);
+    if (readBe16(firstPartition, 0) != 0x504d) return {};
+    const auto partitionCount = std::min<std::uint32_t>(readBe32(firstPartition, 4), 256);
+    for (std::uint32_t index = 0; index < partitionCount; ++index) {
+        const auto partition = index == 0 ? firstPartition : readAt(file, static_cast<qint64>(index + 1) * blockSize, blockSize);
+        if (readBe16(partition, 0) != 0x504d) break;
+        const auto type = QByteArray(partition.constData() + 48, std::min<qsizetype>(32, partition.size() - 48));
+        if (!type.startsWith("Apple_HFS")) continue;
+        const auto startBlock = readBe32(partition, 8);
+        const auto name = classicVolumeNameAt(file, static_cast<qint64>(startBlock) * blockSize);
+        if (!name.isEmpty()) return name;
+    }
+    return {};
+}
+
+QString isoVolumeIdentifier(QFile& file)
+{
+    const auto descriptor = readAt(file, 16LL * 2048, 2048);
+    if (descriptor.size() < 72 || static_cast<std::uint8_t>(descriptor[0]) != 1 || descriptor.mid(1, 5) != QByteArrayLiteral("CD001")) return {};
+    auto identifier = descriptor.mid(40, 32);
+    while (!identifier.isEmpty() && (identifier.back() == '\0' || identifier.back() == ' ')) identifier.chop(1);
+    return QString::fromLatin1(identifier).trimmed();
+}
+
+QString detectVolumeIdentifier(const QString& path, DiskImageType type)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    if (type == DiskImageType::CdRom) {
+        const auto identifier = isoVolumeIdentifier(file);
+        if (!identifier.isEmpty()) return identifier;
+    }
+    auto identifier = classicVolumeNameAt(file, 0);
+    if (!identifier.isEmpty()) return identifier;
+    const auto diskCopyHeader = readAt(file, 0, 84);
+    const auto dataSize = readBe32(diskCopyHeader, 64);
+    const auto tagSize = readBe32(diskCopyHeader, 68);
+    if (diskCopyHeader.size() == 84 && dataSize >= 3 * 512 && static_cast<qint64>(84) + dataSize + tagSize == file.size()) {
+        identifier = classicVolumeNameAt(file, 84);
+        if (!identifier.isEmpty()) return identifier;
+    }
+    return partitionedClassicVolumeName(file);
 }
 
 QString uniqueDestination(const QDir& directory, const QFileInfo& source)
@@ -259,10 +347,11 @@ void DiskImageManager::registerImage(const QString& path, DiskImageType type)
     const auto absolutePath = QFileInfo(path).absoluteFilePath();
     auto found = std::find_if(m_images.begin(), m_images.end(), [&](const auto& image) { return image.path == absolutePath; });
     if (found == m_images.end()) {
-        m_images.append({ absolutePath, type, QFileInfo(absolutePath).size() });
+        m_images.append({ absolutePath, type, QFileInfo(absolutePath).size(), detectVolumeIdentifier(absolutePath, type) });
     } else {
         found->type = type;
         found->sizeBytes = QFileInfo(absolutePath).size();
+        found->volumeIdentifier = detectVolumeIdentifier(absolutePath, type);
     }
 }
 

@@ -83,8 +83,9 @@ void populateImageTree(QTreeWidget* tree, const storage::DiskImageManager& manag
         auto* item = new QTreeWidgetItem(ensureCollectionItem(tree, collections, collection));
         item->setText(0, relativeInfo.fileName());
         if (showType) {
-            item->setText(1, storage::DiskImageManager::typeName(image.type));
-            item->setText(2, formatSize(image.sizeBytes));
+            item->setText(1, image.volumeIdentifier);
+            item->setText(2, storage::DiskImageManager::typeName(image.type));
+            item->setText(3, formatSize(image.sizeBytes));
         } else {
             item->setText(1, formatSize(image.sizeBytes));
         }
@@ -218,11 +219,13 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
     m_impl->search->setClearButtonEnabled(true);
     layout->addWidget(m_impl->search);
     m_impl->tree = new QTreeWidget;
-    m_impl->tree->setColumnCount(3);
-    m_impl->tree->setHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Type"), QStringLiteral("Size") });
+    m_impl->tree->setColumnCount(4);
+    m_impl->tree->setHeaderLabels(
+        { QStringLiteral("Name"), QStringLiteral("Volume Identifier"), QStringLiteral("Type"), QStringLiteral("Size") });
     m_impl->tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_impl->tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_impl->tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_impl->tree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_impl->tree->setSelectionMode(QAbstractItemView::SingleSelection);
     m_impl->tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
     layout->addWidget(m_impl->tree, 1);

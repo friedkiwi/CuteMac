@@ -16,6 +16,7 @@ struct DiskImageEntry {
     QString path;
     DiskImageType type = DiskImageType::HardDisk;
     qint64 sizeBytes = 0;
+    QString volumeIdentifier;
 };
 
 class DiskImageManager {

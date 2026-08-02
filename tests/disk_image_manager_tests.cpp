@@ -6,6 +6,7 @@
 #include <QTemporaryDir>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 
@@ -17,6 +18,44 @@ void require(bool condition, const char* message)
         std::cerr << message << '\n';
         std::exit(1);
     }
+}
+
+void putBe16(QByteArray& bytes, qsizetype offset, std::uint16_t value)
+{
+    bytes[offset] = static_cast<char>(value >> 8);
+    bytes[offset + 1] = static_cast<char>(value);
+}
+
+void putBe32(QByteArray& bytes, qsizetype offset, std::uint32_t value)
+{
+    bytes[offset] = static_cast<char>(value >> 24);
+    bytes[offset + 1] = static_cast<char>(value >> 16);
+    bytes[offset + 2] = static_cast<char>(value >> 8);
+    bytes[offset + 3] = static_cast<char>(value);
+}
+
+void putHfsVolumeName(QByteArray& bytes, qsizetype filesystemOffset, const QByteArray& name)
+{
+    const auto block = filesystemOffset + 1024;
+    putBe16(bytes, block, 0x4244);
+    bytes[block + 36] = static_cast<char>(name.size());
+    std::copy(name.cbegin(), name.cend(), bytes.begin() + block + 37);
+}
+
+void writeImage(const QString& path, const QByteArray& bytes)
+{
+    QFile file(path);
+    require(file.open(QIODevice::WriteOnly), "volume test image should open");
+    require(file.write(bytes) == bytes.size(), "volume test image should be written");
+}
+
+QString volumeFor(const cutemac::storage::DiskImageManager& manager, const QString& fileName)
+{
+    const auto images = manager.images();
+    const auto found = std::find_if(images.cbegin(), images.cend(), [&](const auto& image) {
+        return QFileInfo(image.path).fileName() == fileName;
+    });
+    return found == images.cend() ? QString() : found->volumeIdentifier;
 }
 
 } // namespace
@@ -86,6 +125,40 @@ int main()
     const auto exportedPath = temporary.filePath(QStringLiteral("exported.iso"));
     require(reloaded.exportImage(importedPath, exportedPath), "export should succeed");
     require(QFileInfo(exportedPath).size() == 4096, "export should preserve image contents");
+
+    const auto volumeLibrary = temporary.filePath(QStringLiteral("volume-library"));
+    require(QDir().mkpath(volumeLibrary), "volume test library should be created");
+    QByteArray rawHfs(800 * 1024, '\0');
+    putHfsVolumeName(rawHfs, 0, "System Tools");
+    writeImage(QDir(volumeLibrary).filePath(QStringLiteral("raw.dsk")), rawHfs);
+
+    QByteArray diskCopy(84 + 800 * 1024, '\0');
+    putBe32(diskCopy, 64, 800 * 1024);
+    putHfsVolumeName(diskCopy, 84, "Utilities 1");
+    writeImage(QDir(volumeLibrary).filePath(QStringLiteral("wrapped.dc42")), diskCopy);
+
+    QByteArray partitioned(16 * 512, '\0');
+    putBe16(partitioned, 0, 0x4552);
+    putBe16(partitioned, 2, 512);
+    putBe16(partitioned, 512, 0x504d);
+    putBe32(partitioned, 516, 1);
+    putBe32(partitioned, 520, 4);
+    const QByteArray partitionType("Apple_HFS");
+    std::copy(partitionType.cbegin(), partitionType.cend(), partitioned.begin() + 512 + 48);
+    putHfsVolumeName(partitioned, 4 * 512, "Macintosh HD");
+    writeImage(QDir(volumeLibrary).filePath(QStringLiteral("partitioned.hda")), partitioned);
+
+    QByteArray iso(17 * 2048, '\0');
+    iso[16 * 2048] = 1;
+    std::copy_n("CD001", 5, iso.begin() + 16 * 2048 + 1);
+    std::copy_n("SYSTEM_7_CD", 11, iso.begin() + 16 * 2048 + 40);
+    writeImage(QDir(volumeLibrary).filePath(QStringLiteral("install.iso")), iso);
+
+    DiskImageManager volumeManager(volumeLibrary);
+    require(volumeFor(volumeManager, QStringLiteral("raw.dsk")) == QStringLiteral("System Tools"), "raw HFS volume names should be detected");
+    require(volumeFor(volumeManager, QStringLiteral("wrapped.dc42")) == QStringLiteral("Utilities 1"), "Disk Copy volume names should be detected");
+    require(volumeFor(volumeManager, QStringLiteral("partitioned.hda")) == QStringLiteral("Macintosh HD"), "partitioned HFS volume names should be detected");
+    require(volumeFor(volumeManager, QStringLiteral("install.iso")) == QStringLiteral("SYSTEM_7_CD"), "ISO volume identifiers should be detected");
 
     return 0;
 }
