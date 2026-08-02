@@ -1,4 +1,5 @@
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/rom/RomPatcher.h"
 
@@ -528,11 +529,15 @@ void MacIIcxMachine::applyInput(const core::GuestInputEvent& event)
         const auto x = static_cast<std::int16_t>(event.first);
         const auto y = static_cast<std::int16_t>(event.second);
         std::shared_ptr<devices::video::nubus::CuteMacVideoCard> integratedVideo;
-        for (int slot = 9; slot <= 14 && !integratedVideo; ++slot) {
+        std::shared_ptr<devices::video::nubus::CuteMacAcceleratedVideoCard> acceleratedVideo;
+        for (int slot = 9; slot <= 14 && !integratedVideo && !acceleratedVideo; ++slot) {
             integratedVideo = std::dynamic_pointer_cast<devices::video::nubus::CuteMacVideoCard>(m_nubus.card(slot));
+            acceleratedVideo = std::dynamic_pointer_cast<devices::video::nubus::CuteMacAcceleratedVideoCard>(m_nubus.card(slot));
         }
         if (integratedVideo && integratedVideo->absolutePointerEnabled()) {
             integratedVideo->setHostPointerPosition(x, y);
+        } else if (acceleratedVideo && acceleratedVideo->absolutePointerEnabled()) {
+            acceleratedVideo->setHostPointerPosition(x, y);
         } else if (m_hostMousePositionValid) {
             m_adbTransceiver.moveMouse(static_cast<std::int16_t>(x - m_hostMouseX),
                 static_cast<std::int16_t>(y - m_hostMouseY));

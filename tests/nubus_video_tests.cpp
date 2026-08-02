@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
+#include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 
 namespace {
@@ -19,6 +20,7 @@ bool expect(bool condition, const char* message)
 int main()
 {
     using cutemac::devices::video::PixelStorage;
+    using cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard;
     using cutemac::devices::video::nubus::CuteMacVideoCard;
     using cutemac::devices::video::nubus::MacintoshIIVideoCard;
     bool ok = true;
@@ -109,6 +111,18 @@ int main()
     ok &= expect((relativeCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 2) == 0
             && relativeCard.read8(CuteMacVideoCard::guestPointerBase) == 0,
         "disabled absolute-pointer integration must not advertise or publish host coordinates");
+    CuteMacAcceleratedVideoCard acceleratedCard(832, 624, 8, 4, true, true);
+    ok &= expect(acceleratedCard.id() == QStringLiteral("nubus-video-cutemac-accelerated")
+            && acceleratedCard.accelerationEnabled()
+            && acceleratedCard.declarationRom() == virtualCard.declarationRom()
+            && acceleratedCard.videoFrame().bitsPerPixel == 1,
+        "accelerated adapter must begin as an independent compatible CuteMac Video variant");
+    acceleratedCard.write8(0x00080000, 3);
+    acceleratedCard.setHostPointerPosition(123, 234);
+    ok &= expect(acceleratedCard.videoFrame().bitsPerPixel == 8
+            && acceleratedCard.read8(CuteMacAcceleratedVideoCard::guestPointerBase + 2) == 0x00
+            && acceleratedCard.read8(CuteMacAcceleratedVideoCard::guestPointerBase + 3) == 123,
+        "accelerated adapter must preserve mode and absolute-pointer behavior");
     virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 1);
     ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
         "CuteMac guest-services power-off must allow the guest to draw its shutdown screen");

@@ -193,9 +193,12 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
             for (const auto& node : *devices) {
                 if (const auto* device = node.as_table()) {
                     const auto type = fromTomlString((*device)["type"].value_or<std::string>("cutemac_video"));
+                    const auto nubusType = type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo
+                        : type == QStringLiteral("cutemac_video_accelerated") ? NuBusDeviceType::CuteMacVideoAccelerated
+                                                                             : NuBusDeviceType::CuteMacVideo;
                     configuration.nubusDevices.append({
                         static_cast<int>((*device)["slot"].value_or<std::int64_t>(9)),
-                        type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo : NuBusDeviceType::CuteMacVideo,
+                        nubusType,
                         fromTomlString((*device)["declaration_rom_path"].value_or<std::string>("")),
                         static_cast<int>((*device)["width"].value_or<std::int64_t>(640)),
                         static_cast<int>((*device)["height"].value_or<std::int64_t>(480)),
@@ -274,7 +277,9 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
     for (const auto& device : configuration.nubusDevices) {
         nubusDevices.push_back(toml::table {
             { "slot", device.slot },
-            { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video" : "cutemac_video" },
+            { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video"
+                    : device.type == NuBusDeviceType::CuteMacVideoAccelerated ? "cutemac_video_accelerated"
+                                                                             : "cutemac_video" },
             { "width", device.width },
             { "height", device.height },
             { "depth", device.depth },

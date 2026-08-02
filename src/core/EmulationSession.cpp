@@ -8,6 +8,7 @@
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
+#include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/devices/printer/ImageWriterII.h"
 #include "cutemac/storage/PngPageSink.h"
@@ -42,6 +43,10 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
                 const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_m2_video"));
                 if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
                 (void)machine->installNuBusCard(device.slot, card);
+            } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
+                (void)machine->installNuBusCard(device.slot,
+                    std::make_shared<devices::video::nubus::CuteMacAcceleratedVideoCard>(device.width,
+                        device.height, device.depth, device.vramMiB, device.acceleration, device.absolutePointer));
             } else {
                 (void)machine->installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
                     device.width, device.height, device.depth, device.vramMiB, device.acceleration, device.absolutePointer));

@@ -21,6 +21,7 @@ enum class ScsiDeviceType {
 enum class NuBusDeviceType {
     MacintoshIIVideo,
     CuteMacVideo,
+    CuteMacVideoAccelerated,
 };
 
 struct IwmDeviceConfiguration {

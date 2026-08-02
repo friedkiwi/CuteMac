@@ -70,6 +70,8 @@ QString nubusCardName(config::NuBusDeviceType type)
     switch (type) {
     case config::NuBusDeviceType::CuteMacVideo:
         return QStringLiteral("CuteMac Video");
+    case config::NuBusDeviceType::CuteMacVideoAccelerated:
+        return QStringLiteral("CuteMac Video Accelerated");
     case config::NuBusDeviceType::MacintoshIIVideo:
         return QStringLiteral("Apple Macintosh II Video Card");
     }
@@ -96,7 +98,8 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     QCheckBox* acceleration = nullptr;
     QCheckBox* absolutePointer = nullptr;
 
-    if (device.type == config::NuBusDeviceType::CuteMacVideo) {
+    if (device.type == config::NuBusDeviceType::CuteMacVideo
+        || device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
         width = new QSpinBox;
         width->setRange(320, 4096);
         width->setValue(device.width);
@@ -129,7 +132,8 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     if (dialog.exec() != QDialog::Accepted) return false;
 
     device.slot = slot->currentData().toInt();
-    if (device.type == config::NuBusDeviceType::CuteMacVideo) {
+    if (device.type == config::NuBusDeviceType::CuteMacVideo
+        || device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
         device.width = width->value();
         device.height = height->value();
         device.depth = depth->currentData().toInt();
@@ -305,6 +309,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     auto* addNuBus = new QPushButton(QStringLiteral("Add Card..."));
     auto* addNuBusMenu = new QMenu(addNuBus);
     auto* addCuteMacVideo = addNuBusMenu->addAction(QStringLiteral("CuteMac Video"));
+    auto* addCuteMacAcceleratedVideo = addNuBusMenu->addAction(QStringLiteral("CuteMac Video Accelerated"));
     auto* addAppleVideo = addNuBusMenu->addAction(QStringLiteral("Apple Macintosh II Video Card"));
     addNuBus->setMenu(addNuBusMenu);
     auto* removeNuBus = new QPushButton(QStringLiteral("Remove"));
@@ -470,6 +475,14 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     });
     connect(addCuteMacVideo, &QAction::triggered, this, [this, refreshNuBus]() {
         config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4, true};
+        if (editNuBusCard(device, this)) {
+            m_impl->nubusDevices.append(device);
+            refreshNuBus();
+        }
+    });
+    connect(addCuteMacAcceleratedVideo, &QAction::triggered, this, [this, refreshNuBus]() {
+        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3),
+            config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 640, 480, 8, 4, true};
         if (editNuBusCard(device, this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
