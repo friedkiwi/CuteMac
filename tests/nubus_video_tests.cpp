@@ -15,6 +15,14 @@ bool expect(bool condition, const char* message)
     return condition;
 }
 
+std::uint32_t readCard32(cutemac::devices::nubus::NuBusCard& card, std::uint32_t address)
+{
+    return (static_cast<std::uint32_t>(card.read8(address)) << 24)
+        | (static_cast<std::uint32_t>(card.read8(address + 1)) << 16)
+        | (static_cast<std::uint32_t>(card.read8(address + 2)) << 8)
+        | card.read8(address + 3);
+}
+
 } // namespace
 
 int main()
@@ -123,6 +131,32 @@ int main()
             && acceleratedCard.read8(CuteMacAcceleratedVideoCard::guestPointerBase + 2) == 0x00
             && acceleratedCard.read8(CuteMacAcceleratedVideoCard::guestPointerBase + 3) == 123,
         "accelerated adapter must preserve mode and absolute-pointer behavior");
+    const auto accel = CuteMacAcceleratedVideoCard::acceleratorBase;
+    using AccelRegister = CuteMacAcceleratedVideoCard::AcceleratorRegister;
+    const auto accelRegister = [accel](AccelRegister reg) { return accel + static_cast<std::uint32_t>(reg); };
+    ok &= expect(readCard32(acceleratedCard, accelRegister(AccelRegister::Signature)) == 0x43564131U
+            && readCard32(acceleratedCard, accelRegister(AccelRegister::Capabilities))
+                == CuteMacAcceleratedVideoCard::capabilityVramCopy,
+        "accelerated adapter must expose the versioned CVA1 copy protocol");
+    for (std::uint32_t index = 0; index < 16; ++index) acceleratedCard.write8(0x100 + index, static_cast<std::uint8_t>(index));
+    acceleratedCard.write32(accelRegister(AccelRegister::SourceOffset), 0x100);
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationOffset), 0x200);
+    acceleratedCard.write32(accelRegister(AccelRegister::StrideBytes), 8);
+    acceleratedCard.write32(accelRegister(AccelRegister::WidthBytes), 4);
+    acceleratedCard.write32(accelRegister(AccelRegister::Height), 2);
+    acceleratedCard.write32(accelRegister(AccelRegister::Flags), 0);
+    acceleratedCard.write32(accelRegister(AccelRegister::Command), CuteMacAcceleratedVideoCard::commandVramCopy);
+    ok &= expect(acceleratedCard.read8(0x200) == 0 && acceleratedCard.read8(0x203) == 3
+            && acceleratedCard.read8(0x208) == 8 && acceleratedCard.read8(0x20b) == 11
+            && readCard32(acceleratedCard, accelRegister(AccelRegister::CommandsCompleted)) == 1
+            && readCard32(acceleratedCard, accelRegister(AccelRegister::BytesCopied)) == 8,
+        "accelerated adapter must synchronously copy validated VRAM rectangles");
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationOffset), 4U * 1024U * 1024U - 2U);
+    acceleratedCard.write32(accelRegister(AccelRegister::Command), CuteMacAcceleratedVideoCard::commandVramCopy);
+    ok &= expect(readCard32(acceleratedCard, accelRegister(AccelRegister::CommandsRejected)) == 1
+            && (readCard32(acceleratedCard, accelRegister(AccelRegister::Status))
+                & CuteMacAcceleratedVideoCard::statusError) != 0,
+        "accelerated adapter must reject out-of-range copies before modifying VRAM");
     virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 1);
     ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
         "CuteMac guest-services power-off must allow the guest to draw its shutdown screen");
