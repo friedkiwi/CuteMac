@@ -152,9 +152,7 @@ set_gray:
         movea.l 20(%a1),%a2
         tst.l   %a2
         beq.w   param_error
-        tst.b   (%a3)                   | 0 = monochrome, 1 = colour
-        seq     %d0
-        move.b  %d0,19(%a2)            | private flag is nonzero for luminance mapping
+        move.b  (%a3),19(%a2)           | nonzero enables luminance mapping
         moveq   #0,%d0
         bra.w   complete
 
@@ -392,11 +390,7 @@ get_gray:
         movea.l 20(%a1),%a2
         tst.l   %a2
         beq.w   param_error
-        moveq   #0,%d0
-        tst.b   19(%a2)
-        seq     %d0                    | colour boolean is inverse of luminance flag
-        andi.b  #1,%d0
-        move.b  %d0,(%a3)
+        move.b  19(%a2),(%a3)
         moveq   #0,%d0
         bra.w   complete
 get_interrupt:

@@ -37,8 +37,8 @@ int main()
         "CuteMac video driver must dereference selector-specific Control and Status parameters");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("26532468001c362a0004342a0006")),
         "CuteMac video driver must read SetEntries through VDSetEntryRecord");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a1357c0")),
-        "CuteMac video driver must translate the colour Boolean to its luminance flag");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("16aa0013")),
+        "CuteMac video driver must return its SetGray luminance flag through the pointed-to record");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31400010247808fc4ed2")),
         "CuteMac video driver must complete queued requests before calling JIODone");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("01030fff")),
