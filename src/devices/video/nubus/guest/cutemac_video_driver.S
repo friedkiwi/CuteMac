@@ -62,21 +62,28 @@ control:
         bra.w   complete
 
 set_mode:
-        move.w  28(%a0),%d1
+        movea.l 28(%a0),%a3            | csParam points to VDSwitchInfo
+        tst.l   %a3
+        beq.w   param_error
+        move.w  (%a3),%d1
         subi.w  #0x80,%d1
         cmpi.w  #5,%d1
         bhi.w   param_error
         bsr.w   card_base
-        move.l  %a2,36(%a0)
+        move.l  %a2,8(%a3)             | csBaseAddr
         adda.l  #0x00080000,%a2
         move.b  %d1,(%a2)
         moveq   #0,%d0
         bra.w   complete
 
 set_entries:
-        movea.l 28(%a0),%a3
-        move.w  32(%a0),%d3
-        move.w  34(%a0),%d2
+        movea.l 28(%a0),%a3            | csParam points to VDSetEntryRecord
+        tst.l   %a3
+        beq.w   param_error
+        movea.l (%a3),%a3
+        movea.l 28(%a0),%a2
+        move.w  4(%a2),%d3
+        move.w  6(%a2),%d2
         tst.l   %a3
         beq.w   param_error
         cmpi.w  #255,%d2
@@ -139,17 +146,24 @@ set_entries_next:
         bra.w   complete
 
 set_gray:
+        movea.l 28(%a0),%a3            | csParam points to VDGrayRecord
+        tst.l   %a3
+        beq.w   param_error
         movea.l 20(%a1),%a2
         tst.l   %a2
         beq.w   param_error
-        move.w  28(%a0),%d0
-        move.b  %d0,19(%a2)
+        tst.b   (%a3)                   | 0 = monochrome, 1 = colour
+        seq     %d0
+        move.b  %d0,19(%a2)            | private flag is nonzero for luminance mapping
         moveq   #0,%d0
         bra.w   complete
 
 set_interrupt:
+        movea.l 28(%a0),%a3            | csParam points to VDFlagRecord
+        tst.l   %a3
+        beq.w   param_error
         move.l  %a0,-(%sp)
-        tst.b   28(%a0)
+        tst.b   (%a3)
         bne.s   set_interrupt_disable
         bsr.w   enable_interrupts
         bra.s   set_interrupt_done
@@ -299,22 +313,29 @@ status:
         bra.w   complete
 
 get_mode:
+        movea.l 28(%a0),%a3            | csParam points to VDSwitchInfo
+        tst.l   %a3
+        beq.w   param_error
         bsr.w   card_base
-        move.l  %a2,36(%a0)
+        move.l  %a2,8(%a3)
         adda.l  #0x00080000,%a2
         moveq   #0,%d1
         move.b  (%a2),%d1
         andi.w  #7,%d1
         addi.w  #0x80,%d1
-        move.w  %d1,28(%a0)
-        clr.w   34(%a0)
+        move.w  %d1,(%a3)
+        clr.w   6(%a3)
         moveq   #0,%d0
         bra.w   complete
 
 get_entries:
-        movea.l 28(%a0),%a3
-        move.w  32(%a0),%d3
-        move.w  34(%a0),%d2
+        movea.l 28(%a0),%a3            | csParam points to VDSetEntryRecord
+        tst.l   %a3
+        beq.w   param_error
+        movea.l (%a3),%a3
+        movea.l 28(%a0),%a2
+        move.w  4(%a2),%d3
+        move.w  6(%a2),%d2
         tst.l   %a3
         beq.w   param_error
         cmpi.w  #255,%d2
@@ -348,29 +369,43 @@ get_entries_index_ready:
         bra.w   complete
 
 get_pages:
-        move.w  #1,34(%a0)
+        movea.l 28(%a0),%a3            | csParam points to VDPageInfo
+        tst.l   %a3
+        beq.w   param_error
+        move.w  #1,6(%a3)
         moveq   #0,%d0
         bra.w   complete
 get_base:
-        tst.w   34(%a0)
+        movea.l 28(%a0),%a3            | csParam points to VDPageInfo
+        tst.l   %a3
+        beq.w   param_error
+        tst.w   6(%a3)
         bne.w   param_error
         bsr.w   card_base
-        move.l  %a2,36(%a0)
+        move.l  %a2,8(%a3)
         moveq   #0,%d0
         bra.w   complete
 get_gray:
+        movea.l 28(%a0),%a3            | csParam points to VDGrayRecord
+        tst.l   %a3
+        beq.w   param_error
         movea.l 20(%a1),%a2
         tst.l   %a2
         beq.w   param_error
         moveq   #0,%d0
-        move.b  19(%a2),%d0
-        move.w  %d0,28(%a0)
+        tst.b   19(%a2)
+        seq     %d0                    | colour boolean is inverse of luminance flag
+        andi.b  #1,%d0
+        move.b  %d0,(%a3)
         moveq   #0,%d0
         bra.w   complete
 get_interrupt:
+        movea.l 28(%a0),%a3            | csParam points to VDFlagRecord
+        tst.l   %a3
+        beq.w   param_error
         bsr.w   card_base
         adda.l  #0x00080001,%a2
-        move.b  (%a2),28(%a0)
+        move.b  (%a2),(%a3)
         moveq   #0,%d0
 
 complete:

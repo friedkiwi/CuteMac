@@ -33,8 +33,12 @@ int main()
         "CuteMac indexed mode parameters must publish the classic base PixMap layout");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
         "CuteMac video driver must map logical low-depth colors across the physical RAMDAC");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a056614")),
-        "CuteMac video driver must treat nonzero SetGray mode as grayscale");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("2668001c4a8b")),
+        "CuteMac video driver must dereference selector-specific Control and Status parameters");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("26532468001c362a0004342a0006")),
+        "CuteMac video driver must read SetEntries through VDSetEntryRecord");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a1357c0")),
+        "CuteMac video driver must translate the colour Boolean to its luminance flag");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31400010247808fc4ed2")),
         "CuteMac video driver must complete queued requests before calling JIODone");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("01030fff")),
