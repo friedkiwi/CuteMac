@@ -128,7 +128,7 @@ int addVideoParameters(SlotRomBuilder& rom, int width, int height, int depth)
     rom.longWord(0);
     rom.word(static_cast<std::uint16_t>(stride));
     rom.word(0); rom.word(0); rom.word(static_cast<std::uint16_t>(height)); rom.word(static_cast<std::uint16_t>(width));
-    rom.word(1); rom.word(0); rom.longWord(0); rom.longWord(0x00480000); rom.longWord(0x00480000);
+    rom.word(0); rom.word(0); rom.longWord(0); rom.longWord(0x00480000); rom.longWord(0x00480000);
     const auto direct = depth >= 16;
     rom.word(direct ? 0x10 : 0);
     rom.word(static_cast<std::uint16_t>(depth));

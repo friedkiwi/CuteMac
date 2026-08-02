@@ -29,8 +29,8 @@ int main()
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc00080002")),
         "CuteMac declaration ROM driver must expose palette operations");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex(
-            "0000002e00000000006800000000027003400001")),
-        "CuteMac indexed mode parameters must publish a version-1 PixMap layout");
+            "0000002e00000000006800000000027003400000")),
+        "CuteMac indexed mode parameters must publish the classic base PixMap layout");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
         "CuteMac video driver must map logical low-depth colors across the physical RAMDAC");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a056614")),
