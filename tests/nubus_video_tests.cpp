@@ -54,12 +54,12 @@ int main()
     virtualCard.write8(0x00080003, 0x12);
     virtualCard.write8(0x00080004, 0x34);
     virtualCard.write8(0x00080005, 0x56);
-    ok &= expect(virtualCard.videoFrame().colorTable[0x2a] == 0xff123456U,
-        "CuteMac RAMDAC must publish guest-programmed indexed color");
+    ok &= expect(virtualCard.videoFrame().colorTable[0x2a] == 0xffedcba9U,
+        "CuteMac RAMDAC must convert its active-low component bus to display RGB");
     virtualCard.write8(0x00080002, 0x2a);
     ok &= expect(virtualCard.read8(0x00080003) == 0x12 && virtualCard.read8(0x00080004) == 0x34
             && virtualCard.read8(0x00080005) == 0x56,
-        "CuteMac RAMDAC palette entries must be readable by GetEntries");
+        "CuteMac RAMDAC palette entries must be readable in active-low guest form by GetEntries");
     ok &= expect(virtualCard.read8(CuteMacVideoCard::guestServicesBase) == 'C'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 1) == 'T'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 2) == 'M'

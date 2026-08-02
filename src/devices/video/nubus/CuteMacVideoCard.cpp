@@ -184,9 +184,9 @@ std::uint8_t CuteMacVideoCard::read8(std::uint32_t offset)
     if (offset == paletteAddressRegister) return static_cast<std::uint8_t>(m_paletteAddress);
     if (offset >= paletteRedRegister && offset <= paletteBlueRegister) {
         const auto color = m_palette[m_paletteAddress];
-        if (offset == paletteRedRegister) return static_cast<std::uint8_t>(color >> 16);
-        if (offset == paletteGreenRegister) return static_cast<std::uint8_t>(color >> 8);
-        return static_cast<std::uint8_t>(color);
+        if (offset == paletteRedRegister) return static_cast<std::uint8_t>(color >> 16) ^ 0xffU;
+        if (offset == paletteGreenRegister) return static_cast<std::uint8_t>(color >> 8) ^ 0xffU;
+        return static_cast<std::uint8_t>(color) ^ 0xffU;
     }
     if (offset >= guestServicesBase && offset < guestServicesBase + guestServicesSignature.size()) {
         return guestServicesSignature[offset - guestServicesBase];
@@ -217,11 +217,11 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
     } else if (offset == paletteAddressRegister) {
         m_paletteAddress = value;
     } else if (offset == paletteRedRegister) {
-        m_paletteLatch[0] = value;
+        m_paletteLatch[0] = value ^ 0xffU;
     } else if (offset == paletteGreenRegister) {
-        m_paletteLatch[1] = value;
+        m_paletteLatch[1] = value ^ 0xffU;
     } else if (offset == paletteBlueRegister) {
-        m_paletteLatch[2] = value;
+        m_paletteLatch[2] = value ^ 0xffU;
         m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
             | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
         m_paletteAddress = (m_paletteAddress + 1) & 0xff;
