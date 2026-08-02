@@ -79,16 +79,9 @@ int main()
     ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
         "CuteMac one-bit mode must span the hardware color table");
     virtualCard.write8(0x00900000, 0x5a);
-    auto dirtyFrame = virtualCard.videoFrame();
     ok &= expect(virtualCard.read8(0x00000000) == 0x5a
-            && static_cast<std::uint8_t>(dirtyFrame.pixels.constData()[0]) == 0x5a
-            && !dirtyFrame.fullRefresh && dirtyFrame.dirtyRegions.size() == 1
-            && dirtyFrame.dirtyRegions[0].y == 0 && dirtyFrame.dirtyRegions[0].height == 1,
+            && static_cast<std::uint8_t>(virtualCard.videoFrame().pixels[0]) == 0x5a,
         "CuteMac video must mirror 24-bit slot-9 framebuffer accesses onto local VRAM");
-    const auto unchangedFrame = virtualCard.videoFrame();
-    ok &= expect(!unchangedFrame.fullRefresh && unchangedFrame.dirtyRegions.isEmpty()
-            && unchangedFrame.pixels.constData() == dirtyFrame.pixels.constData(),
-        "unchanged CuteMac frames must reuse their published snapshot");
     virtualCard.write8(0x00980000, 3);
     ok &= expect(virtualCard.read8(0x00080000) == 3,
         "CuteMac video must mirror control registers through the 24-bit slot-9 alias");

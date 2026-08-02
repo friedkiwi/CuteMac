@@ -42,8 +42,6 @@ private:
     [[nodiscard]] int strideBytes() const;
     [[nodiscard]] ChannelLayout channelLayout() const;
     void initializePalette();
-    void markFullRefresh();
-    void markDirtyBytes(std::uint32_t offset, std::uint32_t length);
 
     int m_width;
     int m_height;
@@ -52,11 +50,6 @@ private:
     bool m_acceleration;
     bool m_absolutePointer;
     QByteArray m_vram;
-    mutable QByteArray m_publishedVram;
-    mutable bool m_fullRefresh = true;
-    mutable bool m_hasDirtyRows = false;
-    mutable int m_firstDirtyRow = 0;
-    mutable int m_lastDirtyRow = 0;
     QByteArray m_declarationRom;
     QVector<std::uint32_t> m_palette;
     int m_paletteAddress = 0;
