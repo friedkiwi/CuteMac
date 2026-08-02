@@ -404,7 +404,7 @@ public:
             if (pressed != m_mouseInputPressed) {
                 m_mouseInputPressed = pressed;
                 m_session.queueMouseButton(pressed);
-                updateInteractiveInputState();
+                updateInteractiveInputState(!pressed);
             }
         });
         m_display->setKeyCallback([this](int keyCode, bool pressed) {
@@ -419,6 +419,10 @@ public:
             }
         });
         setCentralWidget(m_display);
+
+        m_mousePacingReleaseTimer.setSingleShot(true);
+        m_mousePacingReleaseTimer.setInterval(QApplication::doubleClickInterval());
+        connect(&m_mousePacingReleaseTimer, &QTimer::timeout, this, [this]() { updateInteractiveInputState(); });
 
         buildMenus();
         buildToolbar();
@@ -472,9 +476,22 @@ private:
         return 1.0;
     }
 
-    void updateInteractiveInputState()
+    void updateInteractiveInputState(bool preserveDoubleClickWindow = false)
     {
-        m_runner.setInteractiveInputActive(m_mouseInputPressed || !m_pressedInputKeys.isEmpty());
+        const bool inputHeld = m_mouseInputPressed || !m_pressedInputKeys.isEmpty();
+        if (inputHeld) {
+            m_mousePacingReleaseTimer.stop();
+            m_runner.setInteractiveInputActive(true);
+        } else if (preserveDoubleClickWindow) {
+            // Unlimited execution can advance the guest by many seconds in the
+            // short host-time gap between clicks. Keep realtime pacing through
+            // Qt's double-click interval so the guest sees both clicks within
+            // its own DoubleTime window.
+            m_runner.setInteractiveInputActive(true);
+            m_mousePacingReleaseTimer.start();
+        } else if (!m_mousePacingReleaseTimer.isActive()) {
+            m_runner.setInteractiveInputActive(false);
+        }
     }
 
     void buildMenus()
@@ -897,6 +914,7 @@ private:
     QAction* m_zoomCustomAction = nullptr;
     QSet<int> m_pressedInputKeys;
     bool m_mouseInputPressed = false;
+    QTimer m_mousePacingReleaseTimer;
     QTimer m_frameTimer;
     QToolBar* m_toolbar = nullptr;
     QAction* m_pauseAction = nullptr;
