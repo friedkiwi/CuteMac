@@ -11,6 +11,9 @@ constexpr std::uint32_t blockSize = 2048;
 constexpr std::uint8_t senseNoSense = 0x00;
 constexpr std::uint8_t senseNotReady = 0x02;
 constexpr std::uint8_t senseIllegalRequest = 0x05;
+constexpr std::uint8_t senseUnitAttention = 0x06;
+constexpr std::uint8_t ascMediumChanged = 0x28;
+constexpr std::uint8_t ascMediumNotPresent = 0x3a;
 
 void appendBe16(QByteArray& data, std::uint16_t value)
 {
@@ -56,8 +59,8 @@ bool ScsiCdRomDevice::loadImage(const QString& path)
     if (image.isEmpty() || (image.size() % blockSize) != 0) return false;
     m_image = std::move(image);
     m_imagePath = path;
-    m_senseKey = senseNoSense;
-    m_additionalSenseCode = 0;
+    m_senseKey = senseUnitAttention;
+    m_additionalSenseCode = ascMediumChanged;
     m_unitAttention = true;
     return true;
 }
@@ -66,8 +69,8 @@ void ScsiCdRomDevice::eject()
 {
     m_image.clear();
     m_imagePath.clear();
-    m_senseKey = senseNotReady;
-    m_additionalSenseCode = 0x3a;
+    m_senseKey = senseUnitAttention;
+    m_additionalSenseCode = ascMediumChanged;
     m_unitAttention = true;
 }
 
@@ -75,7 +78,7 @@ void ScsiCdRomDevice::acknowledgeMediaChange()
 {
     m_unitAttention = false;
     m_senseKey = ready() ? senseNoSense : senseNotReady;
-    m_additionalSenseCode = ready() ? 0 : 0x3a;
+    m_additionalSenseCode = ready() ? 0 : ascMediumNotPresent;
 }
 
 bool ScsiCdRomDevice::ready() const { return !m_image.isEmpty(); }
@@ -86,9 +89,9 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
     const auto opcode = static_cast<std::uint8_t>(cdb[0]);
     if (m_unitAttention && opcode != 0x03 && opcode != 0x12) {
         m_unitAttention = false;
-        return checkCondition(0x06, 0x28);
+        return checkCondition(senseUnitAttention, ascMediumChanged);
     }
-    if (!ready() && opcode != 0x03 && opcode != 0x12) return checkCondition(senseNotReady, 0x3a);
+    if (!ready() && opcode != 0x03 && opcode != 0x12) return checkCondition(senseNotReady, ascMediumNotPresent);
 
     switch (opcode) {
     case 0x00: return good();
@@ -185,7 +188,7 @@ ScsiCommandResult ScsiCdRomDevice::inquiry(std::uint8_t allocationLength) const
     return good(data);
 }
 
-ScsiCommandResult ScsiCdRomDevice::requestSense(std::uint8_t allocationLength) const
+ScsiCommandResult ScsiCdRomDevice::requestSense(std::uint8_t allocationLength)
 {
     QByteArray data(18, '\0');
     data[0] = 0x70;
@@ -193,6 +196,9 @@ ScsiCommandResult ScsiCdRomDevice::requestSense(std::uint8_t allocationLength) c
     data[7] = 10;
     data[12] = static_cast<char>(m_additionalSenseCode);
     data.truncate(std::min<int>(allocationLength, data.size()));
+    m_unitAttention = false;
+    m_senseKey = ready() ? senseNoSense : senseNotReady;
+    m_additionalSenseCode = ready() ? 0 : ascMediumNotPresent;
     return good(data);
 }
 

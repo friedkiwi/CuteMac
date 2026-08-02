@@ -108,6 +108,14 @@ int main()
     ok &= expect(cdInquiry.data.mid(8, 8) == QByteArrayLiteral("MATSHITA")
             && cdInquiry.data.mid(16, 16) == QByteArrayLiteral("CD-ROM CR-8004  "),
         "AppleCD-compatible identity is wrong");
+    const auto polledMediaChangedSense = cdRom.executeCommand(QByteArray::fromHex("030000001200"), {});
+    ok &= expect(polledMediaChangedSense.status == 0
+            && static_cast<std::uint8_t>(polledMediaChangedSense.data[2]) == 0x06
+            && static_cast<std::uint8_t>(polledMediaChangedSense.data[12]) == 0x28,
+        "directly polled CD insertion sense must report changed media");
+    ok &= expect(cdRom.executeCommand(QByteArray::fromHex("000000000000"), {}).status == 0,
+        "REQUEST SENSE must consume insertion unit attention");
+    ok &= expect(cdRom.loadImage(isoPath), "CD-ROM reload for TEST UNIT READY polling failed");
     const auto mediaChanged = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});
     ok &= expect(mediaChanged.status == 0x02 && mediaChanged.senseKey == 0x06, "CD insertion must report unit attention");
     const auto mediaChangedSense = cdRom.executeCommand(QByteArray::fromHex("030000001200"), {});
@@ -135,6 +143,16 @@ int main()
         "AppleCD 0xD8 raw-sector command failed");
     cdRom.eject();
     ok &= expect(cdRom.selectable() && !cdRom.ready(), "empty CD-ROM drive must remain selectable");
+    const auto polledEjectSense = cdRom.executeCommand(QByteArray::fromHex("030000001200"), {});
+    ok &= expect(polledEjectSense.status == 0
+            && static_cast<std::uint8_t>(polledEjectSense.data[2]) == 0x06
+            && static_cast<std::uint8_t>(polledEjectSense.data[12]) == 0x28,
+        "directly polled CD ejection sense must report changed media");
+    ok &= expect(cdRom.executeCommand(QByteArray::fromHex("000000000000"), {}).senseKey == 0x02,
+        "REQUEST SENSE must consume ejection unit attention");
+    ok &= expect(cdRom.loadImage(isoPath), "CD-ROM reload before ejection TEST UNIT READY failed");
+    cdRom.acknowledgeMediaChange();
+    cdRom.eject();
     const auto ejected = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});
     ok &= expect(ejected.status == 0x02 && ejected.senseKey == 0x06, "CD ejection must report unit attention");
     const auto noMedia = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});

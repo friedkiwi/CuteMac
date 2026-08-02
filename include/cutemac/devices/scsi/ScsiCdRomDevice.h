@@ -25,7 +25,7 @@ private:
     [[nodiscard]] ScsiCommandResult read(std::uint32_t lba, std::uint32_t blocks);
     [[nodiscard]] ScsiCommandResult readAppleRaw(std::uint32_t lba, std::uint32_t blocks);
     [[nodiscard]] ScsiCommandResult inquiry(std::uint8_t allocationLength) const;
-    [[nodiscard]] ScsiCommandResult requestSense(std::uint8_t allocationLength) const;
+    [[nodiscard]] ScsiCommandResult requestSense(std::uint8_t allocationLength);
     [[nodiscard]] ScsiCommandResult modeSense(bool tenByte, std::uint8_t pageCode, std::uint16_t allocationLength) const;
     [[nodiscard]] ScsiCommandResult readCapacity() const;
     [[nodiscard]] ScsiCommandResult readToc(const QByteArray& cdb) const;
