@@ -84,12 +84,27 @@ int main()
     require(manager.images(DiskImageType::HardDisk).size() == 1, "hard disk picker view should only contain hard disks");
     require(manager.images(DiskImageType::CdRom).isEmpty(), "CD picker view should not contain other media");
 
+    const auto largeDsk = temporary.filePath(QStringLiteral("hard-disk-with-dsk-extension.dsk"));
+    require(DiskImageManager::createBlankImage(largeDsk, 20LL * 1024 * 1024), "large DSK fixture should be created");
+    require(DiskImageManager::detectType(largeDsk) == DiskImageType::HardDisk,
+        "large DSK files must not be misidentified as floppies by extension alone");
+    require(DiskImageManager::detectType(floppyPath) == DiskImageType::Floppy,
+        "raw floppy size must identify floppy media");
+
     const auto sourceIso = temporary.filePath(QStringLiteral("install.iso"));
     require(DiskImageManager::createBlankImage(sourceIso, 4096), "test CD image creation should succeed");
     QString importedPath;
     require(manager.importImage(sourceIso, DiskImageType::CdRom, &importedPath), "CD import should succeed");
     require(importedPath.startsWith(libraryPath), "imports should be copied into the library");
     require(manager.images(DiskImageType::CdRom).size() == 1, "imported CD should retain its explicit type");
+
+    const auto autoFloppy = temporary.filePath(QStringLiteral("auto-floppy.img"));
+    require(DiskImageManager::createBlankImage(autoFloppy, 800 * 1024), "automatic floppy fixture should be created");
+    QString autoImportedPath;
+    require(manager.importImage(autoFloppy, &autoImportedPath), "automatic image import should succeed");
+    const auto autoEntry = manager.images(DiskImageType::Floppy);
+    require(std::any_of(autoEntry.cbegin(), autoEntry.cend(), [&](const auto& entry) { return entry.path == autoImportedPath; }),
+        "automatic import must catalog the detected media type");
 
     const auto sourceFloppy1 = temporary.filePath(QStringLiteral("install-1.dsk"));
     const auto sourceFloppy2 = temporary.filePath(QStringLiteral("install-2.dsk"));
@@ -100,7 +115,7 @@ int main()
     require(importedFloppies.size() == 2, "batch import should return every copied image");
     require(std::all_of(importedFloppies.cbegin(), importedFloppies.cend(), [&](const auto& path) { return path.startsWith(libraryPath); }),
         "every batch import should be copied into the designated library folder");
-    require(manager.images(DiskImageType::Floppy).size() == 4, "all imported floppies should be cataloged");
+    require(manager.images(DiskImageType::Floppy).size() == 5, "all imported floppies should be cataloged");
 
     require(manager.createCollection(QStringLiteral("System 6/Install Disks")), "nested collections should be created");
     require(manager.collections().contains(QStringLiteral("System 6")), "parent collections should be listed");
@@ -117,7 +132,7 @@ int main()
 
     DiskImageManager reloaded(libraryPath);
     require(reloaded.images(DiskImageType::CdRom).size() == 1, "catalog type should persist across manager instances");
-    require(reloaded.images(DiskImageType::Floppy).size() == 5, "nested image catalog entries should persist across manager instances");
+    require(reloaded.images(DiskImageType::Floppy).size() == 6, "nested image catalog entries should persist across manager instances");
     const auto discoveredIso = QDir(libraryPath).filePath(QStringLiteral("System 6/discovered.iso"));
     require(DiskImageManager::createBlankImage(discoveredIso, 2048), "nested discovery image should be created");
     require(reloaded.refresh(), "nested library refresh should succeed");

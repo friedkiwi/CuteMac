@@ -32,7 +32,11 @@ public:
     [[nodiscard]] bool createCollection(const QString& relativePath);
     [[nodiscard]] bool importImage(const QString& sourcePath, DiskImageType type, QString* importedPath = nullptr,
         const QString& collection = {});
+    [[nodiscard]] bool importImage(const QString& sourcePath, QString* importedPath = nullptr,
+        const QString& collection = {});
     [[nodiscard]] bool importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths = nullptr,
+        const QString& collection = {});
+    [[nodiscard]] bool importImages(const QStringList& sourcePaths, QStringList* importedPaths = nullptr,
         const QString& collection = {});
     [[nodiscard]] bool exportImage(const QString& imagePath, const QString& destinationPath) const;
     [[nodiscard]] bool createImage(const QString& path, DiskImageType type, qint64 sizeBytes);
@@ -41,6 +45,7 @@ public:
     [[nodiscard]] static bool createBlankImage(const QString& path, qint64 sizeBytes);
     [[nodiscard]] static QString typeName(DiskImageType type);
     [[nodiscard]] static QString typeKey(DiskImageType type);
+    [[nodiscard]] static DiskImageType detectType(const QString& path);
 
 private:
     [[nodiscard]] bool loadCatalog();

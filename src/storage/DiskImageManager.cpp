@@ -39,8 +39,11 @@ DiskImageType inferType(const QFileInfo& file)
 {
     const auto suffix = file.suffix().toLower();
     if (suffix == QStringLiteral("iso") || suffix == QStringLiteral("cdr")) return DiskImageType::CdRom;
-    if (suffix == QStringLiteral("dsk") || suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image")) return DiskImageType::Floppy;
     if (file.size() == 400 * 1024 || file.size() == 800 * 1024 || file.size() == 1440 * 1024) return DiskImageType::Floppy;
+    if (suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image")) return DiskImageType::Floppy;
+    QFile image(file.absoluteFilePath());
+    if (image.open(QIODevice::ReadOnly) && image.seek(16LL * 2048 + 1)
+        && image.read(5) == QByteArrayLiteral("CD001")) return DiskImageType::CdRom;
     return DiskImageType::HardDisk;
 }
 
@@ -230,6 +233,11 @@ bool DiskImageManager::importImage(const QString& sourcePath, DiskImageType type
     return true;
 }
 
+bool DiskImageManager::importImage(const QString& sourcePath, QString* importedPath, const QString& collection)
+{
+    return importImage(sourcePath, detectType(sourcePath), importedPath, collection);
+}
+
 bool DiskImageManager::importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths,
     const QString& collection)
 {
@@ -239,6 +247,20 @@ bool DiskImageManager::importImages(const QStringList& sourcePaths, DiskImageTyp
     for (const auto& sourcePath : sourcePaths) {
         QString importedPath;
         if (importImage(sourcePath, type, &importedPath, collection)) results.append(importedPath);
+        else success = false;
+    }
+    if (importedPaths != nullptr) *importedPaths = results;
+    return success;
+}
+
+bool DiskImageManager::importImages(const QStringList& sourcePaths, QStringList* importedPaths, const QString& collection)
+{
+    if (sourcePaths.isEmpty()) return false;
+    bool success = true;
+    QStringList results;
+    for (const auto& sourcePath : sourcePaths) {
+        QString importedPath;
+        if (importImage(sourcePath, &importedPath, collection)) results.append(importedPath);
         else success = false;
     }
     if (importedPaths != nullptr) *importedPaths = results;
@@ -295,6 +317,11 @@ QString DiskImageManager::typeKey(DiskImageType type)
     case DiskImageType::HardDisk: return QStringLiteral("hard_disk");
     }
     return {};
+}
+
+DiskImageType DiskImageManager::detectType(const QString& path)
+{
+    return inferType(QFileInfo(path));
 }
 
 bool DiskImageManager::loadCatalog()

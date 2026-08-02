@@ -29,26 +29,16 @@ QString formatSize(qint64 bytes)
     return QStringLiteral("%1 KiB").arg(bytes / 1024.0, 0, 'f', 0);
 }
 
-QString imageFilter(storage::DiskImageType type)
-{
-    switch (type) {
-    case storage::DiskImageType::Floppy: return QStringLiteral("Floppy images (*.dsk *.img *.image *.dc42);;All files (*)");
-    case storage::DiskImageType::CdRom: return QStringLiteral("CD images (*.iso *.cdr);;All files (*)");
-    case storage::DiskImageType::HardDisk: return QStringLiteral("Hard disk images (*.hda *.img *.dsk);;All files (*)");
-    }
-    return QStringLiteral("All files (*)");
-}
-
 constexpr int ImagePathRole = Qt::UserRole;
 constexpr int CollectionRole = Qt::UserRole + 1;
 
-bool importWithDialog(storage::DiskImageManager& manager, storage::DiskImageType type, const QString& collection, QWidget* parent)
+bool importWithDialog(storage::DiskImageManager& manager, const QString& collection, QWidget* parent)
 {
-    const auto sources = QFileDialog::getOpenFileNames(parent, QStringLiteral("Import %1 Images").arg(storage::DiskImageManager::typeName(type)),
-        QDir::homePath(), imageFilter(type));
+    const auto sources = QFileDialog::getOpenFileNames(parent, QStringLiteral("Import Disk Images"), QDir::homePath(),
+        QStringLiteral("Disk images (*.dsk *.img *.image *.dc42 *.hda *.iso *.cdr);;All files (*)"));
     if (sources.isEmpty()) return false;
     QStringList importedPaths;
-    const bool success = manager.importImages(sources, type, &importedPaths, collection);
+    const bool success = manager.importImages(sources, &importedPaths, collection);
     if (!success) {
         QMessageBox::warning(parent, QStringLiteral("Import Disk Images"),
             QStringLiteral("%1 of %2 images were copied into the disk image library.").arg(importedPaths.size()).arg(sources.size()));
@@ -114,7 +104,8 @@ void filterImageTree(QTreeWidget* tree, const QString& query)
 QString selectedCollection(QTreeWidget* tree)
 {
     const auto* item = tree->currentItem();
-    return item == nullptr ? QString() : item->data(0, CollectionRole).toString();
+    return item == nullptr || !item->data(0, ImagePathRole).toString().isEmpty()
+        ? QString() : item->data(0, CollectionRole).toString();
 }
 
 class CreateImageDialog final : public QDialog {
@@ -175,8 +166,10 @@ public:
         });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
-            const auto path = m_path->text().trimmed();
+            auto path = m_path->text().trimmed();
             if (path.isEmpty()) { QMessageBox::warning(this, windowTitle(), QStringLiteral("Select an image file.")); return; }
+            if (QFileInfo(path).suffix().isEmpty())
+                path += m_type == storage::DiskImageType::Floppy ? QStringLiteral(".dsk") : QStringLiteral(".hda");
             const qint64 preset = m_preset->currentData().toLongLong();
             const qint64 bytes = preset >= 0 ? preset : qRound64(m_custom->text().toDouble() * m_unit->currentData().toLongLong());
             if (bytes > 4LL * 1024 * 1024 * 1024
@@ -206,7 +199,6 @@ public:
     storage::DiskImageManager manager;
     QTreeWidget* tree = nullptr;
     QLineEdit* search = nullptr;
-    QComboBox* importType = nullptr;
 };
 
 DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent), m_impl(std::make_unique<Impl>())
@@ -230,16 +222,12 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
     m_impl->tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
     layout->addWidget(m_impl->tree, 1);
     auto* controls = new QHBoxLayout;
-    m_impl->importType = new QComboBox;
-    for (const auto type : { storage::DiskImageType::Floppy, storage::DiskImageType::CdRom, storage::DiskImageType::HardDisk })
-        m_impl->importType->addItem(storage::DiskImageManager::typeName(type), static_cast<int>(type));
     auto* import = new QPushButton(QStringLiteral("Import..."));
     auto* newCollection = new QPushButton(QStringLiteral("New Collection..."));
     auto* exportImage = new QPushButton(QStringLiteral("Export..."));
     auto* createFloppy = new QPushButton(QStringLiteral("New Floppy..."));
     auto* createHardDisk = new QPushButton(QStringLiteral("New Hard Disk..."));
     auto* openFolder = new QPushButton(QStringLiteral("Open Folder"));
-    controls->addWidget(m_impl->importType);
     for (auto* button : { import, newCollection, exportImage, createFloppy, createHardDisk }) controls->addWidget(button);
     controls->addStretch();
     controls->addWidget(openFolder);
@@ -251,11 +239,9 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
         const auto images = m_impl->manager.images();
         populateImageTree(m_impl->tree, m_impl->manager, images, true);
         filterImageTree(m_impl->tree, m_impl->search->text());
-        if (m_impl->tree->topLevelItemCount() > 0) m_impl->tree->setCurrentItem(m_impl->tree->topLevelItem(0));
     };
     connect(import, &QPushButton::clicked, this, [this, reload]() {
-        const auto type = static_cast<storage::DiskImageType>(m_impl->importType->currentData().toInt());
-        if (importWithDialog(m_impl->manager, type, selectedCollection(m_impl->tree), this)) reload();
+        if (importWithDialog(m_impl->manager, selectedCollection(m_impl->tree), this)) reload();
     });
     connect(newCollection, &QPushButton::clicked, this, [this, reload]() {
         bool accepted = false;
@@ -326,7 +312,7 @@ DiskImagePickerDialog::DiskImagePickerDialog(storage::DiskImageType type, const 
         if (m_impl->tree->topLevelItemCount() > 0) m_impl->tree->setCurrentItem(m_impl->tree->topLevelItem(0));
     };
     connect(import, &QPushButton::clicked, this, [this, reload]() {
-        if (importWithDialog(m_impl->manager, m_impl->type, selectedCollection(m_impl->tree), this)) reload();
+        if (importWithDialog(m_impl->manager, selectedCollection(m_impl->tree), this)) reload();
     });
     connect(buttons, &QDialogButtonBox::accepted, this, [this]() { if (!selectedImagePath().isEmpty()) accept(); });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
