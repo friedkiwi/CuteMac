@@ -1259,7 +1259,13 @@ private:
                 const auto& access = trace[index];
                 if (amicOnly && access.region
                     != cutemac::machines::powermac8100::PowerMac8100Machine::BusRegion::Amic) continue;
-                if (scsiOnly && (access.address < 0x50f10000U || access.address >= 0x50f11200U)) continue;
+                if (scsiOnly) {
+                    const auto controller = access.address >= 0x50f10000U
+                        && access.address < 0x50f11200U;
+                    const auto dma = access.address >= 0x50f32000U
+                        && access.address < 0x50f32014U;
+                    if (!controller && !dma) continue;
+                }
                 m_out << (access.write ? "write" : "read")
                       << " region=" << static_cast<unsigned>(access.region)
                       << " pc=" << hexValue(access.pc)
@@ -1305,6 +1311,14 @@ private:
         if (m_powerMac8100Machine != nullptr) {
             const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
             if (device.isEmpty() || device == QStringLiteral("scsi")) {
+                const auto dma = m_powerMac8100Machine->scsiDmaDebugState();
+                const auto irq = m_powerMac8100Machine->interruptDebugState();
+                m_out << "scsi-dma base=" << hexValue(dma[0])
+                      << " address=" << hexValue(dma[1])
+                      << " offset=" << hexValue(dma[2])
+                      << " control=" << hexValue(dma[3], 2)
+                      << " via2_ifr=" << hexValue(irq[1], 2)
+                      << " via2_ier=" << hexValue(irq[2], 2) << '\n';
                 for (const auto internal : { false, true }) {
                     const auto& controller = m_powerMac8100Machine->scsiController(internal);
                     const auto scsi = controller.debugState();

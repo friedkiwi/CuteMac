@@ -54,7 +54,13 @@ std::uint8_t Ncr53c94::readRegister(std::uint8_t index)
         }
     case 3: return m_registers[3];
     case 4: return m_status;
-    case 5: { const auto value = m_interruptStatus; m_interruptStatus = 0; m_status &= 0x1fU; return value; }
+    case 5: {
+        const auto value = m_interruptStatus;
+        m_interruptStatus = 0;
+        m_sequenceStep = 0;
+        m_status &= 0x1fU;
+        return value;
+    }
     case 6: return m_sequenceStep;
     case 7: return static_cast<std::uint8_t>(m_fifo.size() & 0x1f);
     case 8: case 0xb: case 0xc: case 0xd: return m_registers[index];
@@ -103,7 +109,6 @@ void Ncr53c94::selectTarget()
         m_commandPhase = true;
         m_sequenceStep = 2;
         m_status = static_cast<std::uint8_t>((m_status & 0xf8U) | 2U);
-        raiseInterrupt(interruptService | interruptSuccess);
         return;
     }
     executeCdb();

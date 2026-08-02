@@ -104,6 +104,8 @@ public:
     [[nodiscard]] std::uint64_t hmcControl() const { return m_hmcControl; }
     [[nodiscard]] const devices::scsi::ncr53c94::Ncr53c94& scsiController(bool internal) const
     { return internal ? m_scsiB : m_scsi; }
+    [[nodiscard]] std::array<std::uint32_t, 4> scsiDmaDebugState() const
+    { return { m_dmaBase, m_scsiDmaAddress, m_scsiDmaOffset, m_scsiDmaControl }; }
     [[nodiscard]] cpu::ppc::PowerPc601Core::RegisterSnapshot cpuRegisters() const { return m_cpu.registers(); }
 
 private:

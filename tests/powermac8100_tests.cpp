@@ -184,14 +184,17 @@ int main(int argc, char** argv)
     scsi.reset(); scsi.attachTarget(0, std::make_shared<TestTarget>());
     for (const auto byte : QByteArray::fromHex("80080000000400")) scsi.writeRegister(2, static_cast<std::uint8_t>(byte));
     scsi.writeRegister(4, 0); scsi.writeRegister(3, 0x42);
-    require(scsi.interruptActive() && (scsi.readRegister(5) & 0x18U), "53C94 selection and service interrupt");
+    require(scsi.interruptActive() && scsi.readRegister(6) == 4U,
+        "53C94 selection reaches the command-complete sequencer step");
+    require((scsi.readRegister(5) & 0x18U) != 0 && scsi.readRegister(6) == 0U,
+        "53C94 interrupt acknowledgement resets the sequencer step");
     scsi.writeRegister(0, 4); scsi.writeRegister(1, 0); scsi.writeRegister(3, 0x90);
     require(scsi.readDmaWord() == 0x0201U && scsi.readDmaWord() == 0x0403U,
         "53C94 pseudo-DMA data transfer");
-    scsi.writeRegister(3, 0x01); scsi.writeRegister(4, 0); scsi.writeRegister(3, 0xc1);
-    require(scsi.interruptActive() && (scsi.readRegister(4) & 7U) == 2U,
-        "53C94 DMA selection can precede command-byte transfer");
     (void)scsi.readRegister(5);
+    scsi.writeRegister(3, 0x01); scsi.writeRegister(4, 0); scsi.writeRegister(3, 0xc1);
+    require(!scsi.interruptActive() && scsi.dmaRequest() && (scsi.readRegister(4) & 7U) == 2U,
+        "53C94 DMA selection waits for command bytes in command phase");
     for (const auto byte : QByteArray::fromHex("080000000100"))
         scsi.writeRegister(2, static_cast<std::uint8_t>(byte));
     require(scsi.scsiCommandCounts()[0x08] == 1,
