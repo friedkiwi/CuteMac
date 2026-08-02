@@ -33,8 +33,10 @@ int main()
         "CuteMac indexed mode parameters must publish a version-1 PixMap layout");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
         "CuteMac video driver must map logical low-depth colors across the physical RAMDAC");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a056714")),
-        "CuteMac video driver must treat SetGray mode zero as monochrome");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a056614")),
+        "CuteMac video driver must treat nonzero SetGray mode as grayscale");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("01030fff")),
+        "CuteMac video driver must preserve the indexed white and black endpoints");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray(".CuteMac\0", 9))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a895")),
         "CuteMac declaration ROM must advertise guest services and install its shutdown callback");

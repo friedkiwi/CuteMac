@@ -96,10 +96,21 @@ set_entries_sequential:
         move.w  %d3,%d1
         addq.w  #1,%d3
 set_entries_index_ready:
+        tst.w   %d1
+        beq.s   set_entries_next        | QuickDraw reserves logical white
+        moveq   #0,%d0
+        move.b  -2(%a2),%d0             | current indexed mode
+        cmpi.w  #3,%d0
+        bls.s   set_entries_mode_valid
+        moveq   #3,%d0
+set_entries_mode_valid:
+        move.b  palette_maxima(%pc,%d0.w),%d0
+        cmp.w   %d0,%d1
+        beq.s   set_entries_next        | preserve logical black
         bsr.w   physical_palette_index
         move.b  %d1,(%a2)
         tst.b   %d5
-        beq.s   set_entries_gray
+        bne.s   set_entries_gray
         move.b  2(%a3),1(%a2)
         move.b  4(%a3),2(%a2)
         move.b  6(%a3),3(%a2)
@@ -244,6 +255,9 @@ palette_mode_indexed:
         rts
 palette_multipliers:
         .word   255,85,17,1
+palette_maxima:
+        .byte   1,3,15,255
+        .even
 
 install_guest_helpers:
         lea     service_base(%pc),%a2
