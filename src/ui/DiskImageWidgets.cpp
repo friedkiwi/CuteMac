@@ -218,9 +218,10 @@ DiskImagePickerDialog::DiskImagePickerDialog(storage::DiskImageType type, const 
     setWindowTitle(title);
     resize(620, 360);
     auto* layout = new QVBoxLayout(this);
-    m_impl->table = new QTableWidget(0, 3);
-    m_impl->table->setHorizontalHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Size"), QStringLiteral("Location") });
-    m_impl->table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_impl->table = new QTableWidget(0, 2);
+    m_impl->table->setHorizontalHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Size") });
+    m_impl->table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_impl->table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_impl->table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_impl->table->setSelectionMode(QAbstractItemView::SingleSelection);
     m_impl->table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -237,7 +238,6 @@ DiskImagePickerDialog::DiskImagePickerDialog(storage::DiskImageType type, const 
             name->setData(Qt::UserRole, images[row].path);
             m_impl->table->setItem(row, 0, name);
             m_impl->table->setItem(row, 1, new QTableWidgetItem(formatSize(images[row].sizeBytes)));
-            m_impl->table->setItem(row, 2, new QTableWidgetItem(images[row].path));
         }
         if (!images.isEmpty()) m_impl->table->selectRow(0);
     };
