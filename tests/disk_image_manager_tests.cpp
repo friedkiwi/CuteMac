@@ -33,11 +33,14 @@ int main()
     const auto floppyPath = temporary.filePath(QStringLiteral("blank-800k.dsk"));
     require(manager.createImage(floppyPath, DiskImageType::Floppy, 800 * 1024), "800K floppy creation should succeed");
     require(QFileInfo(floppyPath).size() == 800 * 1024, "800K floppy should have the requested size");
+    const auto highDensityFloppyPath = temporary.filePath(QStringLiteral("blank-1440k.dsk"));
+    require(manager.createImage(highDensityFloppyPath, DiskImageType::Floppy, 1440 * 1024), "1.44 MB floppy creation should succeed");
+    require(QFileInfo(highDensityFloppyPath).size() == 1440 * 1024, "1.44 MB floppy should have the requested size");
 
     const auto hdPath = temporary.filePath(QStringLiteral("blank.hda"));
     require(manager.createImage(hdPath, DiskImageType::HardDisk, 20LL * 1024 * 1024), "hard disk creation should succeed");
     require(QFileInfo(hdPath).size() == 20LL * 1024 * 1024, "hard disk should have the requested size");
-    require(manager.images(DiskImageType::Floppy).size() == 1, "floppy picker view should only contain floppies");
+    require(manager.images(DiskImageType::Floppy).size() == 2, "floppy picker view should only contain floppies");
     require(manager.images(DiskImageType::HardDisk).size() == 1, "hard disk picker view should only contain hard disks");
     require(manager.images(DiskImageType::CdRom).isEmpty(), "CD picker view should not contain other media");
 
@@ -57,7 +60,7 @@ int main()
     require(importedFloppies.size() == 2, "batch import should return every copied image");
     require(std::all_of(importedFloppies.cbegin(), importedFloppies.cend(), [&](const auto& path) { return path.startsWith(libraryPath); }),
         "every batch import should be copied into the designated library folder");
-    require(manager.images(DiskImageType::Floppy).size() == 3, "all imported floppies should be cataloged");
+    require(manager.images(DiskImageType::Floppy).size() == 4, "all imported floppies should be cataloged");
 
     DiskImageManager reloaded(libraryPath);
     require(reloaded.images(DiskImageType::CdRom).size() == 1, "catalog type should persist across manager instances");

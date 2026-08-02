@@ -47,6 +47,7 @@ int main(int argc, char** argv)
         return 1;
     }
     machine.reset();
+    if (qEnvironmentVariableIsSet("CUTEMAC_IICX_SWIM_TRACE")) machine.setSwimTraceEnabled(true);
     if (qEnvironmentVariableIsSet("CUTEMAC_IICX_STOP_BAD_STACK")) {
         struct TraceEntry {
             std::uint64_t cycle;
@@ -268,6 +269,14 @@ int main(int argc, char** argv)
     std::cout << "io scsi=" << io.scsiReads << '/' << io.scsiWrites
               << " swim=" << io.swimReads << '/' << io.swimWrites
               << " nubus=" << io.nubusReads << '/' << io.nubusWrites << '\n';
+    const auto swim = machine.swimDebugState();
+    std::cout << "swim mode=" << (swim.highDensity ? "mfm-hd" : "gcr")
+              << " inserted=" << swim.diskInserted << " motor=" << swim.motorOn
+              << " track=" << swim.track << " side=" << swim.side
+              << " format=" << swim.imageFormat.toStdString()
+              << " data=" << swim.dataReads << " handshake=" << swim.handshakeReads
+              << " writes=" << swim.dataWrites << '\n';
+    for (const auto& event : machine.swimTraceEvents()) std::cout << "swim-trace " << event.toStdString() << '\n';
     std::cout << "mouse-lowmem";
     for (std::uint32_t address = 0x0828; address <= 0x0836; address += 2) {
         std::cout << " 0x" << std::hex << address << "=0x" << machine.read16(address);

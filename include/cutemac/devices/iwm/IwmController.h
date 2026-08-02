@@ -22,6 +22,7 @@ public:
         bool internalSelected = true;
         bool diskInserted = false;
         bool doubleSided = false;
+        bool highDensity = false;
         bool writable = false;
         int track = 0;
         int side = 0;
@@ -73,6 +74,7 @@ private:
     void setLine(std::uint8_t line, bool on);
     void updateSelectedDriveRegister();
     void applyDriveStrobe();
+    void applySwimPhases(std::uint8_t phases);
     [[nodiscard]] std::uint8_t selectedDriveRegister() const;
     [[nodiscard]] bool driveSenseHigh();
     [[nodiscard]] std::uint8_t lineMask() const;
@@ -104,6 +106,7 @@ private:
     std::array<std::uint8_t, 16> m_swimParameters {};
     std::uint8_t m_swimParameterIndex = 0;
     std::uint8_t m_swimError = 0;
+    bool m_swimPhaseStrobe = false;
 };
 
 } // namespace cutemac::devices::iwm

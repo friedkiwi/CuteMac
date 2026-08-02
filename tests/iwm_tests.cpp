@@ -49,6 +49,16 @@ bool create800KImage(const QString& path)
     return file.write(QByteArray(800 * 1024, '\0')) == 800 * 1024;
 }
 
+bool create1440KImage(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    QByteArray bytes(1440 * 1024, '\0');
+    bytes[0] = 'L';
+    bytes[1] = 'K';
+    return file.write(bytes) == bytes.size();
+}
+
 } // namespace
 
 int main()
@@ -83,6 +93,22 @@ int main()
     (void)iwm.access(8); // IWM enable off must not undo the drive command.
     ok &= expect(iwm.debugState().motorOn, "IWM disable must not stop the latched drive motor");
     ok &= expect((readStatus(iwm) & 0x80) == 0, "running drive must report MOTORON true");
+
+    IwmController swim;
+    swim.reset();
+    const auto hdImagePath = directory.filePath(QStringLiteral("test-1440.dsk"));
+    ok &= expect(create1440KImage(hdImagePath) && swim.loadFloppyImage(hdImagePath, true), "1.44 MB image must load");
+    ok &= expect(swim.debugState().highDensity, "1.44 MB media must report high density");
+    ok &= expect(swim.debugState().imageFormat == QStringLiteral("raw-1440k"), "1.44 MB format name");
+
+    // Enter ISM mode with the unmodified ROM's 1,0,1,1 sequence.
+    for (const auto value : { 0x40, 0x00, 0x40, 0x40 }) (void)swim.access(15, static_cast<std::uint8_t>(value), true);
+    (void)swim.access(7, 0xc2, true); // ISM + motor + internal drive
+    (void)swim.access(7, 0x08, true); // read ACTION
+    const auto handshake = swim.access(15);
+    ok &= expect((handshake & 0x80) != 0, "MFM read action must make a byte available");
+    ok &= expect((handshake & 0x01) != 0, "first synchronized MFM byte must be a mark");
+    ok &= expect(swim.access(9) == 0xa1, "MFM address mark must begin with an illegal-clock A1 byte");
 
     return ok ? 0 : 1;
 }

@@ -1307,6 +1307,14 @@ private:
             }
             if (device.isEmpty() || device == QStringLiteral("swim")) {
                 m_out << "swim_reads=" << io.swimReads << " swim_writes=" << io.swimWrites << '\n';
+                const auto swim = m_iicxMachine->swimDebugState();
+                m_out << "swim_media=" << swim.imageFormat
+                      << " inserted=" << (swim.diskInserted ? "yes" : "no")
+                      << " density=" << (swim.highDensity ? "high" : "double")
+                      << " motor=" << (swim.motorOn ? "on" : "off")
+                      << " track=" << swim.track << " side=" << swim.side
+                      << " data=" << swim.dataReads << " handshake=" << swim.handshakeReads
+                      << " writes=" << swim.dataWrites << '\n';
             }
             return;
         }

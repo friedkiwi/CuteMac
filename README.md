@@ -8,7 +8,7 @@ The repository is currently early emulator bringup work:
 - Mac Plus IWM/floppy image loading for raw 400K/800K and Disk Copy 4.2 media
 - pluggable CPU cores for 68k and PowerPC targets
 - machine profiles composed from reusable devices
-- Macintosh IIcx boot support for System 6 raw 800K floppies, NuBus, ADB, SWIM1, NCR5380 SCSI, ASC, and dual VIAs
+- Macintosh IIcx boot support for System 6/7 raw 800K GCR and 1.44 MB MFM floppies, NuBus, ADB, SWIM1, NCR5380 SCSI, ASC, and dual VIAs
 - NuBus video using configurable CuteMac Video or the authentic Apple Macintosh II Video Card (630-0153)
 - TOML configuration files for emulator and machine settings
 - portable CMake/Qt 6 builds for Linux, Windows, macOS, and WebAssembly

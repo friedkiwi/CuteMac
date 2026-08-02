@@ -68,7 +68,7 @@ public:
         m_preset = new QComboBox;
         if (type == storage::DiskImageType::Floppy) {
             m_preset->addItem(QStringLiteral("800K (double-sided Macintosh)"), 800LL * 1024);
-            m_preset->addItem(QStringLiteral("1.4 MB (high-density Macintosh)"), 1440LL * 1024);
+            m_preset->addItem(QStringLiteral("1.44 MB (high-density Macintosh)"), 1440LL * 1024);
         } else {
             for (const auto size : { 20, 40, 80, 160, 230, 500, 1024 })
                 m_preset->addItem(size == 1024 ? QStringLiteral("1 GB") : QStringLiteral("%1 MB").arg(size), static_cast<qint64>(size) * 1024 * 1024);

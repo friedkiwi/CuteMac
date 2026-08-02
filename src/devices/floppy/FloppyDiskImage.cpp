@@ -16,6 +16,7 @@ constexpr int encodedPayloadBytes = bytesPerSector + tagBytesPerSector;
 constexpr int tracksPerSide = 80;
 constexpr int raw400KBytes = 400 * 1024;
 constexpr int raw800KBytes = 800 * 1024;
+constexpr int raw1440KBytes = 1440 * 1024;
 constexpr qsizetype maxTraceEvents = 4096;
 constexpr qsizetype maxLastNibbles = 4096;
 
@@ -87,6 +88,47 @@ void appendRepeated(QByteArray& bytes, std::uint8_t value, int count)
     for (int i = 0; i < count; ++i) {
         bytes.append(static_cast<char>(value));
     }
+}
+
+std::uint16_t mfmCrc(const QByteArray& bytes)
+{
+    std::uint16_t crc = 0xffff;
+    for (const auto byte : bytes) {
+        crc ^= static_cast<std::uint16_t>(static_cast<std::uint8_t>(byte)) << 8;
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = static_cast<std::uint16_t>((crc & 0x8000) != 0 ? (crc << 1) ^ 0x1021 : crc << 1);
+        }
+    }
+    return crc;
+}
+
+void appendMfmByte(QByteArray& bytes, QVector<bool>& marks, std::uint8_t value, bool mark = false)
+{
+    bytes.append(static_cast<char>(value));
+    marks.append(mark);
+}
+
+void appendMfmRepeated(QByteArray& bytes, QVector<bool>& marks, std::uint8_t value, int count)
+{
+    for (int i = 0; i < count; ++i) appendMfmByte(bytes, marks, value);
+}
+
+void appendMfmField(QByteArray& bytes, QVector<bool>& marks, std::uint8_t type, const QByteArray& payload)
+{
+    QByteArray crcBytes;
+    for (int i = 0; i < 3; ++i) {
+        appendMfmByte(bytes, marks, 0xa1, true);
+        crcBytes.append(static_cast<char>(0xa1));
+    }
+    appendMfmByte(bytes, marks, type);
+    crcBytes.append(static_cast<char>(type));
+    for (const auto byte : payload) {
+        appendMfmByte(bytes, marks, static_cast<std::uint8_t>(byte));
+        crcBytes.append(byte);
+    }
+    const auto crc = mfmCrc(crcBytes);
+    appendMfmByte(bytes, marks, static_cast<std::uint8_t>(crc >> 8));
+    appendMfmByte(bytes, marks, static_cast<std::uint8_t>(crc));
 }
 
 void appendGcr(QByteArray& bytes, std::uint8_t value)
@@ -162,6 +204,9 @@ bool FloppyDiskImage::load(const QString& path, bool readOnly)
     if (bytes.size() == raw800KBytes) {
         return loadRaw(path, bytes, Kind::Raw800K);
     }
+    if (bytes.size() == raw1440KBytes) {
+        return loadRaw(path, bytes, Kind::Raw1440K);
+    }
     if (bytes.size() >= 84) {
         return loadDiskCopy42(path, bytes);
     }
@@ -177,6 +222,7 @@ void FloppyDiskImage::eject()
     m_tags.clear();
     m_writable = false;
     m_doubleSided = false;
+    m_highDensity = false;
     m_motorOn = false;
     m_currentTrack = 0;
     m_currentSide = 0;
@@ -186,6 +232,7 @@ void FloppyDiskImage::eject()
 bool FloppyDiskImage::inserted() const { return m_kind != Kind::Empty; }
 bool FloppyDiskImage::writable() const { return m_writable; }
 bool FloppyDiskImage::doubleSided() const { return m_doubleSided; }
+bool FloppyDiskImage::highDensity() const { return m_highDensity; }
 FloppyDiskImage::Kind FloppyDiskImage::kind() const { return m_kind; }
 QString FloppyDiskImage::path() const { return m_path; }
 std::uint32_t FloppyDiskImage::blockCount() const { return static_cast<std::uint32_t>(m_data.size() / bytesPerSector); }
@@ -202,6 +249,8 @@ QString FloppyDiskImage::formatName() const
         return QStringLiteral("raw-400k");
     case Kind::Raw800K:
         return QStringLiteral("raw-800k");
+    case Kind::Raw1440K:
+        return QStringLiteral("raw-1440k");
     case Kind::DiskCopy42:
         return QStringLiteral("diskcopy-4.2");
     case Kind::Empty:
@@ -240,17 +289,31 @@ void FloppyDiskImage::setMotorOn(bool on)
 
 std::uint8_t FloppyDiskImage::nextNibble()
 {
+    return nextDiskByte().value;
+}
+
+FloppyDiskImage::DiskByte FloppyDiskImage::peekDiskByte()
+{
     if (!inserted() || !m_motorOn) {
-        return 0x00;
+        return {};
     }
     if (m_trackCache.bytes.isEmpty() || m_trackCache.track != m_currentTrack || m_trackCache.side != m_currentSide) {
         rebuildTrackCache();
     }
     if (m_trackCache.bytes.isEmpty()) {
-        return 0x00;
+        return {};
     }
+    return {
+        static_cast<std::uint8_t>(m_trackCache.bytes[m_trackCache.cursor]),
+        m_trackCache.cursor < m_trackCache.marks.size() && m_trackCache.marks[m_trackCache.cursor],
+    };
+}
 
-    const auto value = static_cast<std::uint8_t>(m_trackCache.bytes[m_trackCache.cursor]);
+FloppyDiskImage::DiskByte FloppyDiskImage::nextDiskByte()
+{
+    const auto diskByte = peekDiskByte();
+    if (!inserted() || !m_motorOn || m_trackCache.bytes.isEmpty()) return diskByte;
+    const auto value = diskByte.value;
     m_trackCache.cursor = (m_trackCache.cursor + 1) % m_trackCache.bytes.size();
     if (m_traceEnabled) {
         m_lastNibbles.append(static_cast<char>(value));
@@ -272,7 +335,7 @@ std::uint8_t FloppyDiskImage::nextNibble()
                                      .arg(m_trackCache.cursor));
         }
     }
-    return value;
+    return diskByte;
 }
 
 void FloppyDiskImage::invalidateTrackCache()
@@ -288,6 +351,7 @@ FloppyDiskImage::DebugState FloppyDiskImage::debugState() const
         inserted(),
         m_writable,
         m_doubleSided,
+        m_highDensity,
         m_motorOn,
         m_currentTrack,
         m_currentSide,
@@ -298,7 +362,13 @@ FloppyDiskImage::DebugState FloppyDiskImage::debugState() const
 
 QByteArray FloppyDiskImage::trackBytesForDebug(int track, int side) const
 {
-    return buildTrackBytes(std::clamp(track, 0, tracksPerSide - 1), m_doubleSided ? std::clamp(side, 0, 1) : 0);
+    const auto clampedTrack = std::clamp(track, 0, tracksPerSide - 1);
+    const auto clampedSide = m_doubleSided ? std::clamp(side, 0, 1) : 0;
+    if (!m_highDensity) return buildTrackBytes(clampedTrack, clampedSide);
+    QByteArray bytes;
+    QVector<bool> marks;
+    buildMfmTrack(clampedTrack, clampedSide, bytes, marks);
+    return bytes;
 }
 
 void FloppyDiskImage::setTraceEnabled(bool enabled)
@@ -330,7 +400,8 @@ bool FloppyDiskImage::loadRaw(const QString& path, const QByteArray& bytes, Kind
     m_data = bytes;
     m_tags.clear();
     m_writable = !m_forceReadOnly && QFileInfo(path).isWritable();
-    m_doubleSided = kind == Kind::Raw800K;
+    m_doubleSided = kind != Kind::Raw400K;
+    m_highDensity = kind == Kind::Raw1440K;
     m_currentTrack = 0;
     m_currentSide = 0;
     invalidateTrackCache();
@@ -341,7 +412,8 @@ bool FloppyDiskImage::loadDiskCopy42(const QString& path, const QByteArray& byte
 {
     const auto dataSize = readBe32(bytes, 64);
     const auto tagSize = readBe32(bytes, 68);
-    if ((dataSize != raw400KBytes && dataSize != raw800KBytes) || bytes.size() < static_cast<qsizetype>(84 + dataSize + tagSize)) {
+    if ((dataSize != raw400KBytes && dataSize != raw800KBytes && dataSize != raw1440KBytes)
+        || bytes.size() < static_cast<qsizetype>(84 + dataSize + tagSize)) {
         return false;
     }
     if (tagSize != 0 && tagSize != static_cast<std::uint32_t>((dataSize / bytesPerSector) * tagBytesPerSector)) {
@@ -361,7 +433,8 @@ bool FloppyDiskImage::loadDiskCopy42(const QString& path, const QByteArray& byte
         }
     }
     m_writable = !m_forceReadOnly && QFileInfo(path).isWritable();
-    m_doubleSided = dataSize == raw800KBytes;
+    m_doubleSided = dataSize != raw400KBytes;
+    m_highDensity = dataSize == raw1440KBytes;
     m_currentTrack = 0;
     m_currentSide = 0;
     invalidateTrackCache();
@@ -373,7 +446,33 @@ void FloppyDiskImage::rebuildTrackCache()
     m_trackCache.track = m_currentTrack;
     m_trackCache.side = m_currentSide;
     m_trackCache.cursor = 0;
-    m_trackCache.bytes = buildTrackBytes(m_currentTrack, m_currentSide);
+    m_trackCache.bytes.clear();
+    m_trackCache.marks.clear();
+    if (m_highDensity) buildMfmTrack(m_currentTrack, m_currentSide, m_trackCache.bytes, m_trackCache.marks);
+    else m_trackCache.bytes = buildTrackBytes(m_currentTrack, m_currentSide);
+}
+
+void FloppyDiskImage::buildMfmTrack(int physicalTrack, int side, QByteArray& bytes, QVector<bool>& marks) const
+{
+    constexpr int sectorsPerTrack = 18;
+    appendMfmRepeated(bytes, marks, 0x4e, 80);
+    appendMfmRepeated(bytes, marks, 0x00, 12);
+    appendMfmField(bytes, marks, 0xfc, {});
+    appendMfmRepeated(bytes, marks, 0x4e, 50);
+    for (int sector = 0; sector < sectorsPerTrack; ++sector) {
+        appendMfmRepeated(bytes, marks, 0x00, 12);
+        QByteArray address;
+        address.append(static_cast<char>(physicalTrack));
+        address.append(static_cast<char>(side));
+        address.append(static_cast<char>(sector + 1));
+        address.append(static_cast<char>(2)); // 512-byte sectors
+        appendMfmField(bytes, marks, 0xfe, address);
+        appendMfmRepeated(bytes, marks, 0x4e, 22);
+        appendMfmRepeated(bytes, marks, 0x00, 12);
+        const auto block = (physicalTrack * 2 + side) * sectorsPerTrack + sector;
+        appendMfmField(bytes, marks, 0xfb, m_data.mid(block * bytesPerSector, bytesPerSector));
+        appendMfmRepeated(bytes, marks, 0x4e, 84);
+    }
 }
 
 QByteArray FloppyDiskImage::buildTrackBytes(int physicalTrack, int side) const

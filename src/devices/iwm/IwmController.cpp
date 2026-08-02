@@ -1,5 +1,7 @@
 #include "cutemac/devices/iwm/IwmController.h"
 
+#include <algorithm>
+
 namespace cutemac::devices::iwm {
 
 namespace {
@@ -29,6 +31,7 @@ void IwmController::reset()
     m_swimParameters.fill(0);
     m_swimParameterIndex = 0;
     m_swimError = 0;
+    m_swimPhaseStrobe = false;
     m_internalDrive.setMotorOn(false);
     m_externalDrive.setMotorOn(false);
 }
@@ -73,6 +76,14 @@ std::uint8_t IwmController::access(std::uint8_t registerIndex, std::uint8_t valu
 std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t value, bool write)
 {
     const auto reg = static_cast<std::uint8_t>(registerIndex & 7);
+    const auto previousMode = m_swimModeRegister;
+    if (m_traceEnabled && reg != 4 && reg != 7) {
+        appendTraceEvent(QStringLiteral("swim %1 reg=%2 value=0x%3 mode=0x%4")
+                             .arg(write ? QStringLiteral("write") : QStringLiteral("read"))
+                             .arg(reg)
+                             .arg(value, 2, 16, QLatin1Char('0'))
+                             .arg(m_swimModeRegister, 2, 16, QLatin1Char('0')));
+    }
     if (write) {
         switch (reg) {
         case 0:
@@ -87,7 +98,7 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
             break;
         case 4:
             m_swimPhases = value;
-            for (std::uint8_t line = 0; line < 4; ++line) setLine(line, (value & (1U << line)) != 0);
+            applySwimPhases(value);
             break;
         case 5:
             m_swimSetup = value;
@@ -102,15 +113,31 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
             break;
         }
         if (m_swimModeRegister & 0x01) m_swimError = 0;
-        m_internalDrive.setMotorOn((m_swimModeRegister & 0x80) != 0);
+        m_internalDrive.setMotorOn((m_swimModeRegister & 0x82) == 0x82);
+        m_externalDrive.setMotorOn((m_swimModeRegister & 0x84) == 0x84);
+        if ((previousMode & 0x08) == 0 && (m_swimModeRegister & 0x18) == 0x08) {
+            // On a read ACTION the SWIM synchronizer consumes gap bytes and
+            // presents the first illegal-clock mark byte to the FIFO.
+            auto& drive = selectedDrive();
+            const auto bytesOnTrack = std::max<qsizetype>(
+                drive.trackBytesForDebug(drive.currentTrack(), drive.currentSide()).size(), 1);
+            for (qsizetype scanned = 0; scanned < bytesOnTrack && !drive.peekDiskByte().mark; ++scanned) {
+                (void)drive.nextDiskByte();
+            }
+        }
         return 0xff;
     }
 
     switch (reg) {
-    case 0:
+    case 0: {
+        ++m_dataReads;
+        const auto diskByte = selectedDrive().nextDiskByte();
+        if (diskByte.mark) m_swimError = static_cast<std::uint8_t>(m_swimError | 0x02);
+        return diskByte.value;
+    }
     case 1:
         ++m_dataReads;
-        return selectedDrive().nextNibble();
+        return selectedDrive().nextDiskByte().value;
     case 2: {
         const auto error = m_swimError;
         m_swimError = 0;
@@ -125,8 +152,18 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
     case 5: return m_swimSetup;
     case 6: return m_swimModeRegister;
     case 7: {
-        std::uint8_t handshake = 0xc0;
-        if (!selectedDrive().inserted() || !selectedDrive().writable()) handshake |= 0x0c;
+        ++m_handshakeReads;
+        std::uint8_t handshake = 0;
+        if ((m_swimModeRegister & 0x08) != 0 && selectedDrive().inserted() && selectedDrive().motorOn()) {
+            const auto diskByte = selectedDrive().peekDiskByte();
+            handshake |= 0xc0;
+            if (diskByte.mark) handshake |= 0x01;
+        }
+        // In Apple drives SENSE is multiplexed by the phase lines. RDDATA is
+        // tied to the same input while the drive is being interrogated, so
+        // both handshake bits reflect the selected drive-status register.
+        if (driveSenseHigh()) handshake |= 0x0c;
+        if (selectedDrive().motorOn()) handshake |= 0x10;
         if (m_swimError) handshake |= 0x20;
         return handshake;
     }
@@ -175,6 +212,7 @@ IwmController::DebugState IwmController::debugState() const
         !m_lines[SelectDrive],
         floppy.inserted,
         floppy.doubleSided,
+        floppy.highDensity,
         floppy.writable,
         floppy.track,
         floppy.side,
@@ -345,6 +383,41 @@ void IwmController::applyDriveStrobe()
     }
 }
 
+void IwmController::applySwimPhases(std::uint8_t phases)
+{
+    const auto strobe = (phases & 0x08) != 0;
+    m_selectedDriveRegister = static_cast<std::uint8_t>((phases & 0x07) | (m_sideSelect ? 0x08 : 0x00));
+    selectedDrive().setCurrentSide(m_sideSelect ? 1 : 0);
+    if (strobe && !m_swimPhaseStrobe) {
+        switch (m_selectedDriveRegister) {
+        case 0x00:
+            m_stepTowardTrackZero = false;
+            break;
+        case 0x01:
+            selectedDrive().step(m_stepTowardTrackZero);
+            break;
+        case 0x02:
+            selectedDrive().setMotorOn(true);
+            break;
+        case 0x04:
+            m_stepTowardTrackZero = true;
+            break;
+        case 0x06:
+            selectedDrive().setMotorOn(false);
+            break;
+        case 0x07:
+            selectedDrive().eject();
+            break;
+        case 0x09: // select MFM mode
+        case 0x0c: // clear disk-change latch
+        case 0x0d: // select GCR mode
+        default:
+            break;
+        }
+    }
+    m_swimPhaseStrobe = strobe;
+}
+
 std::uint8_t IwmController::selectedDriveRegister() const
 {
     return static_cast<std::uint8_t>((m_lines[Ca0] ? 0x04 : 0x00)
@@ -356,6 +429,29 @@ std::uint8_t IwmController::selectedDriveRegister() const
 bool IwmController::driveSenseHigh()
 {
     const auto& drive = selectedDrive();
+    if (m_swimMode) {
+        switch (m_selectedDriveRegister & 0x0f) {
+        case 0x00: return m_stepTowardTrackZero;
+        case 0x01: return true;
+        case 0x02: return !drive.motorOn();
+        case 0x03: return !drive.inserted();
+        case 0x04:
+        case 0x0c: return true; // index is not timing-sensitive in the block-image model
+        case 0x05: return true; // the IIcx has a SuperDrive
+        case 0x06: return drive.doubleSided();
+        case 0x07: return false; // active-low drive-present indication
+        case 0x08: return !drive.inserted();
+        case 0x09: return drive.writable();
+        case 0x0a: return !drive.trackZero();
+        case 0x0b:
+            m_tach = !m_tach;
+            return m_tach;
+        case 0x0d: return drive.highDensity(); // current emulated encoding is MFM
+        case 0x0e: return drive.inserted() && drive.motorOn();
+        case 0x0f: return !drive.highDensity(); // active-low HD aperture
+        default: return false;
+        }
+    }
     switch (m_selectedDriveRegister & 0x0f) {
     case 0x02:
         return !drive.inserted();
@@ -378,6 +474,10 @@ bool IwmController::driveSenseHigh()
     case 0x0e:
         m_tach = !m_tach;
         return m_tach;
+    case 0x0f:
+        // The SuperDrive's HD sense is active low: double-density media
+        // reports high, while a 1.44 MB disk with an HD aperture reports low.
+        return !drive.highDensity();
     default:
         return true;
     }

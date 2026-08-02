@@ -11,12 +11,18 @@ namespace cutemac::devices::floppy {
 
 class FloppyDiskImage {
 public:
+    struct DiskByte {
+        std::uint8_t value = 0;
+        bool mark = false;
+    };
+
     struct DebugState {
         QString imagePath;
         QString imageFormat;
         bool inserted = false;
         bool writable = false;
         bool doubleSided = false;
+        bool highDensity = false;
         bool motorOn = false;
         int track = 0;
         int side = 0;
@@ -28,6 +34,7 @@ public:
         Empty,
         Raw400K,
         Raw800K,
+        Raw1440K,
         DiskCopy42,
     };
 
@@ -37,6 +44,7 @@ public:
     [[nodiscard]] bool inserted() const;
     [[nodiscard]] bool writable() const;
     [[nodiscard]] bool doubleSided() const;
+    [[nodiscard]] bool highDensity() const;
     [[nodiscard]] Kind kind() const;
     [[nodiscard]] QString path() const;
     [[nodiscard]] QString formatName() const;
@@ -53,6 +61,8 @@ public:
     [[nodiscard]] bool trackZero() const;
 
     [[nodiscard]] std::uint8_t nextNibble();
+    [[nodiscard]] DiskByte nextDiskByte();
+    [[nodiscard]] DiskByte peekDiskByte();
     void invalidateTrackCache();
     [[nodiscard]] DebugState debugState() const;
     [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
@@ -66,6 +76,7 @@ private:
         int track = -1;
         int side = -1;
         QByteArray bytes;
+        QVector<bool> marks;
         qsizetype cursor = 0;
     };
 
@@ -73,6 +84,7 @@ private:
     [[nodiscard]] bool loadDiskCopy42(const QString& path, const QByteArray& bytes);
     void rebuildTrackCache();
     [[nodiscard]] QByteArray buildTrackBytes(int physicalTrack, int side) const;
+    void buildMfmTrack(int physicalTrack, int side, QByteArray& bytes, QVector<bool>& marks) const;
     void appendSector(QByteArray& trackBytes, int physicalTrack, int side, int logicalSector) const;
     [[nodiscard]] QByteArray sectorPayload(int physicalTrack, int side, int logicalSector) const;
 
@@ -83,6 +95,7 @@ private:
     bool m_writable = false;
     bool m_forceReadOnly = false;
     bool m_doubleSided = false;
+    bool m_highDensity = false;
     bool m_motorOn = false;
     int m_currentTrack = 0;
     int m_currentSide = 0;
