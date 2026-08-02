@@ -298,7 +298,7 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
     bool mirrorBankB = false;
 
     switch (memorySize / (1024U * 1024U)) {
-    case 1: case 16: case 32: case 64:
+    case 1: case 16:
         noMirror = true;
         break;
     case 2:
@@ -348,7 +348,25 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
         break;
     }
 
-    const std::size_t bankBLocation = std::size_t {1} << (20 + ((m_glueRamSize >> 6) * 2));
+    // GLUE moves bank B while the ROM probes the installed SIMM depth:
+    // PA7:PA6 00/01/10/11 select 1/2/8/32 MiB respectively.
+    constexpr std::array<std::size_t, 4> bankBLocations {
+        1U * 1024U * 1024U,
+        2U * 1024U * 1024U,
+        8U * 1024U * 1024U,
+        32U * 1024U * 1024U,
+    };
+    const auto bankBLocation = bankBLocations[m_glueRamSize >> 6];
+
+    // The FDHD/IIx/IIcx ROM requires some RAM before it starts sizing, but
+    // exposing the complete allocation in an oversized GLUE window makes it
+    // mis-detect the SIMMs.  Match the hardware-visible probe window used by
+    // MAME: retain only the first MiB until the selected window fits.
+    if (bankBLocation > memorySize)
+        return address < std::min<std::size_t>(memorySize, 1U * 1024U * 1024U)
+            ? std::optional<std::size_t>(address)
+            : std::nullopt;
+
     if (address < memorySize) return address;
     if (!noMirror && address < memorySize + (mirrorBankB ? bankBSize : bankASize)) {
         return (mirrorBankB ? bankASize : 0) + (address - memorySize);

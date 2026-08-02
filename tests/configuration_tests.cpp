@@ -107,6 +107,13 @@ int main()
         "catalog must accept a valid IIcx bank configuration");
     ok &= expect(!cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-iicx"), 24576),
         "catalog must reject an invalid IIcx bank configuration");
+    const auto iicx = cutemac::machines::MachineCatalog::find(QStringLiteral("mac-iicx"));
+    const QVector<int> validIIcxRamSizes {
+        1024, 2048, 4096, 5120, 8192, 16384, 17408, 20480,
+        32768, 65536, 66560, 69632, 81920, 131072,
+    };
+    ok &= expect(iicx && iicx->supportedRamSizesKiB == validIIcxRamSizes,
+        "IIcx RAM combo must contain only complete four-SIMM bank configurations");
 
     QFile malformed(path);
     ok &= expect(malformed.open(QIODevice::WriteOnly | QIODevice::Truncate), "malformed fixture open failed");
