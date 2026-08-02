@@ -31,9 +31,9 @@ constexpr std::uint32_t lowMemoryMouse = 0x000830;
 constexpr std::uint32_t lowMemoryCrsrNew = 0x0008ce;
 constexpr std::uint32_t lowMemoryCrsrCouple = 0x0008cf;
 constexpr std::uint32_t screenBytes = 512 * 342 / 8;
-constexpr std::uint32_t soundBytes = 370;
-constexpr std::uint32_t soundBufferTailBytes = 0x300;
-constexpr std::uint32_t soundPageDistance = 0x200000;
+constexpr std::uint32_t soundSamples = 370;
+constexpr std::uint32_t soundMainOffset = 0x300;
+constexpr std::uint32_t soundAlternateOffset = 0x5f00;
 constexpr int soundSampleRate = 22255;
 constexpr std::uint64_t cyclesPerVideoFrame = 130560;
 constexpr qsizetype maxPendingAudioBytes = soundSampleRate / 2; // About 250 ms of mono S16.
@@ -690,10 +690,10 @@ std::uint32_t MacPlusMachine::framebufferHash() const
 QByteArray MacPlusMachine::soundBufferBytes() const
 {
     QByteArray bytes;
-    bytes.resize(soundBytes);
+    bytes.resize(soundSamples);
     const auto base = soundBufferBase(true);
-    for (std::uint32_t i = 0; i < soundBytes; ++i) {
-        bytes[static_cast<qsizetype>(i)] = static_cast<char>(debugRead8(base + i));
+    for (std::uint32_t i = 0; i < soundSamples; ++i) {
+        bytes[static_cast<qsizetype>(i)] = static_cast<char>(debugRead8(base + i * 2));
     }
     return bytes;
 }
@@ -976,7 +976,7 @@ void MacPlusMachine::recordSoundBufferWrite(std::uint32_t address, std::uint8_t 
         return;
     }
     const auto base = soundBufferBase(true);
-    if (address < base || address >= base + soundBytes) {
+    if (address < base || address >= base + soundSamples * 2 || ((address - base) & 1U) != 0) {
         return;
     }
     if (m_soundCapture.size() >= maxSoundCaptureBytes) {
@@ -988,18 +988,18 @@ void MacPlusMachine::recordSoundBufferWrite(std::uint32_t address, std::uint8_t 
 
 void MacPlusMachine::advanceAudio(int cycles)
 {
-    m_audioCyclePhase += static_cast<std::uint64_t>(cycles) * soundBytes;
+    m_audioCyclePhase += static_cast<std::uint64_t>(cycles) * soundSamples;
     while (m_audioCyclePhase >= cyclesPerVideoFrame) {
         m_audioCyclePhase -= cyclesPerVideoFrame;
 
         std::int16_t sample = 0;
-        if (m_soundEnabled && m_soundVolume != 0) {
+        if (m_soundEnabled) {
             const auto base = soundBufferBase((m_viaPortA & viaSoundPageBit) != 0);
-            const auto source = static_cast<int>(debugRead8(base + m_audioBufferIndex)) - 128;
-            sample = static_cast<std::int16_t>(source * 256 * m_soundVolume / 7);
+            const auto source = static_cast<int>(debugRead8(base + m_audioBufferIndex * 2)) - 128;
+            sample = static_cast<std::int16_t>(source * 256 / (8 - m_soundVolume));
         }
         m_pendingAudio.append(reinterpret_cast<const char*>(&sample), sizeof(sample));
-        m_audioBufferIndex = (m_audioBufferIndex + 1) % soundBytes;
+        m_audioBufferIndex = (m_audioBufferIndex + 1) % soundSamples;
     }
 
     if (m_pendingAudio.size() > maxPendingAudioBytes) {
@@ -1009,8 +1009,9 @@ void MacPlusMachine::advanceAudio(int cycles)
 
 std::uint32_t MacPlusMachine::soundBufferBase(bool mainPage) const
 {
-    const auto mainBase = static_cast<std::uint32_t>(m_ram.size()) - soundBufferTailBytes;
-    return !mainPage && mainBase >= soundPageDistance ? mainBase - soundPageDistance : mainBase;
+    const auto offset = mainPage ? soundMainOffset : soundAlternateOffset;
+    return static_cast<std::uint32_t>(m_ram.size()) >= offset
+        ? static_cast<std::uint32_t>(m_ram.size()) - offset : 0;
 }
 
 QString MacPlusMachine::regionName(Region region) const
