@@ -79,5 +79,16 @@ int main()
     image = cutemac::session::FramebufferRenderer::render(xrgb8888);
     ok &= expect(isColor(image, 0, qRgb(0x78, 0x9a, 0xbc)), "32-bit direct color must render channel masks");
 
+    VideoFrame incremental { 2, 2, 2, PixelStorage::Indexed, 8, ByteOrder::BigEndian,
+        BitOrder::MostSignificantFirst, QByteArray::fromHex("004000c0"), clut, {}, {}, false,
+        { { 0, 1, 2, 1 } } };
+    QImage cached(2, 2, QImage::Format_RGB32);
+    cached.fill(qRgb(1, 2, 3));
+    ok &= expect(cutemac::session::FramebufferRenderer::update(cached, incremental),
+        "incremental framebuffer update must accept a valid snapshot");
+    ok &= expect(cached.pixel(0, 0) == qRgb(1, 2, 3) && cached.pixel(0, 1) == qRgb(255, 255, 255)
+            && cached.pixel(1, 1) == qRgb(0, 255, 0),
+        "incremental framebuffer update must preserve clean rows and convert dirty rows");
+
     return ok ? 0 : 1;
 }

@@ -101,6 +101,7 @@ void CuteMacVideoCard::reset()
     m_powerRequest = core::GuestPowerRequest::None;
     m_deferredPowerRequest = core::GuestPowerRequest::None;
     m_powerRequestDelayCycles = 0;
+    markFullRefresh();
     setIrq(false);
 }
 
@@ -165,7 +166,10 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
     offset &= standardSlotLocalMask;
     if (offset == modeRegister) {
         constexpr std::array<int, 6> depths { 1, 2, 4, 8, 16, 32 };
-        if (value < depths.size() && depths[value] <= m_maximumDepth) m_depth = depths[value];
+        if (value < depths.size() && depths[value] <= m_maximumDepth && m_depth != depths[value]) {
+            m_depth = depths[value];
+            markFullRefresh();
+        }
     } else if (offset == interruptRegister) {
         m_vblEnabled = value == 0;
         if (m_vblEnabled) setIrq(false);
@@ -180,6 +184,7 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         if (m_paletteAddress != 0 && m_paletteAddress != 255) {
             m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
                 | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
+            markFullRefresh();
         }
         m_paletteAddress = (m_paletteAddress + 1) & 0xff;
     } else if (offset == grayScreenRegister) {
@@ -194,6 +199,7 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         } else {
             std::fill(m_vram.begin(), m_vram.begin() + required, static_cast<char>(0x88));
         }
+        markDirtyBytes(0, static_cast<std::uint32_t>(required));
     } else if (offset == guestServicesCommand) {
         if (value == 1) {
             // The Shutdown Manager callback runs before System 6 draws its
@@ -203,7 +209,63 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
             m_powerRequestDelayCycles = cleanShutdownGraceCycles;
         }
         else if (value == 2) m_powerRequest = core::GuestPowerRequest::Restart;
-    } else if (offset < static_cast<std::uint32_t>(m_vram.size())) m_vram[static_cast<qsizetype>(offset)] = static_cast<char>(value);
+    } else if (offset < static_cast<std::uint32_t>(m_vram.size())) {
+        if (m_vram[static_cast<qsizetype>(offset)] != static_cast<char>(value)) {
+            m_vram[static_cast<qsizetype>(offset)] = static_cast<char>(value);
+            markDirtyBytes(offset, 1);
+        }
+    }
+}
+
+void CuteMacVideoCard::acceleratedVramCopy(std::uint32_t sourceOffset, std::uint32_t destinationOffset,
+    std::uint32_t sourceStride, std::uint32_t destinationStride,
+    std::uint32_t widthBytes, std::uint32_t height, bool backward)
+{
+    for (std::uint32_t rowIndex = 0; rowIndex < height; ++rowIndex) {
+        const auto row = backward ? height - 1 - rowIndex : rowIndex;
+        auto* destination = m_vram.data() + destinationOffset + row * destinationStride;
+        const auto* source = m_vram.constData() + sourceOffset + row * sourceStride;
+        std::memmove(destination, source, widthBytes);
+    }
+    if (height != 0) {
+        markDirtyBytes(destinationOffset,
+            static_cast<std::uint32_t>((static_cast<std::uint64_t>(height - 1) * destinationStride) + widthBytes));
+    }
+}
+
+void CuteMacVideoCard::acceleratedVramFill(std::uint32_t destinationOffset,
+    std::uint32_t destinationStride, std::uint32_t widthBytes, std::uint32_t height, std::uint8_t value)
+{
+    for (std::uint32_t row = 0; row < height; ++row)
+        std::memset(m_vram.data() + destinationOffset + row * destinationStride, value, widthBytes);
+    if (height != 0) markDirtyBytes(destinationOffset,
+        static_cast<std::uint32_t>((static_cast<std::uint64_t>(height - 1) * destinationStride) + widthBytes));
+}
+
+void CuteMacVideoCard::acceleratedMonochromeExpand(std::uint32_t sourceOffset, std::uint32_t destinationOffset,
+    std::uint32_t sourceStride, std::uint32_t destinationStride, std::uint32_t sourceBitOffset,
+    std::uint32_t widthPixels, std::uint32_t height, std::uint32_t destinationDepth,
+    std::uint8_t foreground, std::uint8_t background)
+{
+    const auto pixelMask = static_cast<std::uint8_t>((1U << destinationDepth) - 1U);
+    for (std::uint32_t y = 0; y < height; ++y) {
+        const auto sourceRow = sourceOffset + y * sourceStride;
+        const auto destinationRow = destinationOffset + y * destinationStride;
+        for (std::uint32_t x = 0; x < widthPixels; ++x) {
+            const auto sourceBit = sourceBitOffset + x;
+            const auto set = (static_cast<std::uint8_t>(m_vram[static_cast<qsizetype>(sourceRow + sourceBit / 8)])
+                & (0x80U >> (sourceBit & 7U))) != 0;
+            const auto pixel = static_cast<std::uint8_t>((set ? foreground : background) & pixelMask);
+            const auto destinationBit = x * destinationDepth;
+            auto& byte = m_vram[static_cast<qsizetype>(destinationRow + destinationBit / 8)];
+            const auto shift = 8U - destinationDepth - (destinationBit & 7U);
+            const auto mask = static_cast<std::uint8_t>(pixelMask << shift);
+            byte = static_cast<char>((static_cast<std::uint8_t>(byte) & ~mask) | (pixel << shift));
+        }
+    }
+    if (height != 0) markDirtyBytes(destinationOffset,
+        static_cast<std::uint32_t>((static_cast<std::uint64_t>(height - 1) * destinationStride)
+            + ((widthPixels * destinationDepth + 7) / 8)));
 }
 
 void CuteMacVideoCard::setHostPointerPosition(std::int16_t x, std::int16_t y)
@@ -230,6 +292,18 @@ VideoFrame CuteMacVideoCard::videoFrame() const
     const auto stride = strideBytes();
     const auto required = static_cast<qsizetype>(stride) * m_height;
     if (required > m_vram.size()) return {};
+    bool fullRefresh = m_fullRefresh || m_publishedVram.size() != required;
+    QVector<VideoDirtyRegion> dirtyRegions;
+    if (fullRefresh) {
+        m_publishedVram = m_vram.left(required);
+    } else if (m_hasDirtyRows) {
+        const auto first = static_cast<qsizetype>(m_firstDirtyRow) * stride;
+        const auto length = static_cast<qsizetype>(m_lastDirtyRow - m_firstDirtyRow + 1) * stride;
+        std::memcpy(m_publishedVram.data() + first, m_vram.constData() + first, static_cast<std::size_t>(length));
+        dirtyRegions.append({ 0, m_firstDirtyRow, m_width, m_lastDirtyRow - m_firstDirtyRow + 1 });
+    }
+    m_fullRefresh = false;
+    m_hasDirtyRows = false;
     if (m_depth <= 8) {
         QVector<std::uint16_t> mapping(1 << m_depth);
         const auto maximum = mapping.size() - 1;
@@ -237,10 +311,35 @@ VideoFrame CuteMacVideoCard::videoFrame() const
             mapping[value] = static_cast<std::uint16_t>(value * 255 / maximum);
         }
         return { m_width, m_height, stride, PixelStorage::Indexed, m_depth, ByteOrder::BigEndian,
-            BitOrder::MostSignificantFirst, m_vram.left(required), m_palette, mapping, {} };
+            BitOrder::MostSignificantFirst, m_publishedVram, m_palette, mapping, {}, fullRefresh, dirtyRegions };
     }
     return { m_width, m_height, stride, PixelStorage::Direct, m_depth, ByteOrder::BigEndian,
-        BitOrder::MostSignificantFirst, m_vram.left(required), {}, {}, channelLayout() };
+        BitOrder::MostSignificantFirst, m_publishedVram, {}, {}, channelLayout(), fullRefresh, dirtyRegions };
+}
+
+void CuteMacVideoCard::markFullRefresh()
+{
+    m_fullRefresh = true;
+    m_hasDirtyRows = false;
+}
+
+void CuteMacVideoCard::markDirtyBytes(std::uint32_t offset, std::uint32_t length)
+{
+    if (m_fullRefresh || length == 0) return;
+    const auto stride = strideBytes();
+    const auto visibleBytes = static_cast<std::uint64_t>(stride) * m_height;
+    if (offset >= visibleBytes) return;
+    const auto end = std::min<std::uint64_t>(visibleBytes, static_cast<std::uint64_t>(offset) + length);
+    const auto firstRow = static_cast<int>(offset / static_cast<std::uint32_t>(stride));
+    const auto lastRow = static_cast<int>((end - 1) / static_cast<std::uint32_t>(stride));
+    if (!m_hasDirtyRows) {
+        m_firstDirtyRow = firstRow;
+        m_lastDirtyRow = lastRow;
+        m_hasDirtyRows = true;
+    } else {
+        m_firstDirtyRow = std::min(m_firstDirtyRow, firstRow);
+        m_lastDirtyRow = std::max(m_lastDirtyRow, lastRow);
+    }
 }
 
 int CuteMacVideoCard::strideBytes() const { return ((m_width * m_depth + 31) / 32) * 4; }

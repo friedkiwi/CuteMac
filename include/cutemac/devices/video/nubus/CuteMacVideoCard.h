@@ -27,12 +27,23 @@ public:
     [[nodiscard]] const QByteArray& declarationRom() const { return m_declarationRom; }
     [[nodiscard]] bool absolutePointerEnabled() const { return m_absolutePointer; }
     void setHostPointerPosition(std::int16_t x, std::int16_t y);
+    void acceleratedVramCopy(std::uint32_t sourceOffset, std::uint32_t destinationOffset,
+        std::uint32_t sourceStrideBytes, std::uint32_t destinationStrideBytes,
+        std::uint32_t widthBytes, std::uint32_t height, bool backward);
+    void acceleratedVramFill(std::uint32_t destinationOffset, std::uint32_t destinationStrideBytes,
+        std::uint32_t widthBytes, std::uint32_t height, std::uint8_t value);
+    void acceleratedMonochromeExpand(std::uint32_t sourceOffset, std::uint32_t destinationOffset,
+        std::uint32_t sourceStrideBytes, std::uint32_t destinationStrideBytes,
+        std::uint32_t sourceBitOffset, std::uint32_t widthPixels, std::uint32_t height,
+        std::uint32_t destinationDepth, std::uint8_t foreground, std::uint8_t background);
 
 private:
     [[nodiscard]] static QByteArray buildDeclarationRom(int width, int height, int vramBytes, int maximumDepth);
     [[nodiscard]] int strideBytes() const;
     [[nodiscard]] ChannelLayout channelLayout() const;
     void initializePalette();
+    void markFullRefresh();
+    void markDirtyBytes(std::uint32_t offset, std::uint32_t length);
 
     int m_width;
     int m_height;
@@ -41,6 +52,11 @@ private:
     bool m_acceleration;
     bool m_absolutePointer;
     QByteArray m_vram;
+    mutable QByteArray m_publishedVram;
+    mutable bool m_fullRefresh = true;
+    mutable bool m_hasDirtyRows = false;
+    mutable int m_firstDirtyRow = 0;
+    mutable int m_lastDirtyRow = 0;
     QByteArray m_declarationRom;
     QVector<std::uint32_t> m_palette;
     int m_paletteAddress = 0;

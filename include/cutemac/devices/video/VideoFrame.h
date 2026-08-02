@@ -18,6 +18,13 @@ struct ChannelLayout {
     std::uint32_t alphaMask = 0;
 };
 
+struct VideoDirtyRegion {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
 struct VideoFrame {
     int width = 0;
     int height = 0;
@@ -30,6 +37,10 @@ struct VideoFrame {
     QVector<std::uint32_t> colorTable;
     QVector<std::uint16_t> pixelToColorIndex;
     ChannelLayout channels;
+    // Legacy producers default to a complete refresh. Producers that retain a
+    // published snapshot can set this false and describe incremental changes.
+    bool fullRefresh = true;
+    QVector<VideoDirtyRegion> dirtyRegions;
 
     [[nodiscard]] bool valid() const
     {

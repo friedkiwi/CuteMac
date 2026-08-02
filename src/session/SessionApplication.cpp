@@ -127,9 +127,10 @@ public:
 
     void setFramebuffer(const cutemac::devices::video::VideoFrame& frame)
     {
-        const auto image = cutemac::session::FramebufferRenderer::render(frame);
-        if (!image.isNull()) m_image = image;
-        update();
+        if (cutemac::session::FramebufferRenderer::update(m_image, frame)
+            && (frame.fullRefresh || !frame.dirtyRegions.isEmpty())) {
+            update();
+        }
     }
 
     [[nodiscard]] QSize framebufferSize() const { return m_image.size(); }

@@ -55,6 +55,25 @@ int channel(std::uint32_t value, std::uint32_t mask)
     return static_cast<int>(((value >> shift) & mask) * 255U / mask);
 }
 
+void renderRows(QImage& image, const devices::video::VideoFrame& frame, int firstRow, int lastRow)
+{
+    firstRow = std::clamp(firstRow, 0, frame.height);
+    lastRow = std::clamp(lastRow, firstRow, frame.height);
+    for (int y = firstRow; y < lastRow; ++y) {
+        const auto* source = reinterpret_cast<const std::uint8_t*>(frame.pixels.constData() + y * frame.strideBytes);
+        auto* destination = reinterpret_cast<QRgb*>(image.scanLine(y));
+        for (int x = 0; x < frame.width; ++x) {
+            if (frame.storage == devices::video::PixelStorage::Indexed) {
+                destination[x] = indexedColor(frame, indexedValue(frame, source, x));
+            } else {
+                const auto value = directValue(frame, source, x);
+                destination[x] = qRgb(channel(value, frame.channels.redMask), channel(value, frame.channels.greenMask),
+                    channel(value, frame.channels.blueMask));
+            }
+        }
+    }
+}
+
 } // namespace
 
 QImage FramebufferRenderer::renderMonochrome(const QByteArray& bytes, int width, int height)
@@ -80,20 +99,23 @@ QImage FramebufferRenderer::render(const devices::video::VideoFrame& frame)
         return {};
     }
     QImage image(frame.width, frame.height, QImage::Format_RGB32);
-    for (int y = 0; y < frame.height; ++y) {
-        const auto* source = reinterpret_cast<const std::uint8_t*>(frame.pixels.constData() + y * frame.strideBytes);
-        auto* destination = reinterpret_cast<QRgb*>(image.scanLine(y));
-        for (int x = 0; x < frame.width; ++x) {
-            if (frame.storage == devices::video::PixelStorage::Indexed) {
-                destination[x] = indexedColor(frame, indexedValue(frame, source, x));
-            } else {
-                const auto value = directValue(frame, source, x);
-                destination[x] = qRgb(channel(value, frame.channels.redMask), channel(value, frame.channels.greenMask),
-                    channel(value, frame.channels.blueMask));
-            }
-        }
-    }
+    renderRows(image, frame, 0, frame.height);
     return image;
+}
+
+bool FramebufferRenderer::update(QImage& image, const devices::video::VideoFrame& frame)
+{
+    if (!frame.valid()) return false;
+    if (frame.fullRefresh || image.size() != QSize(frame.width, frame.height)
+        || image.format() != QImage::Format_RGB32) {
+        image = render(frame);
+        return !image.isNull();
+    }
+    for (const auto& region : frame.dirtyRegions) {
+        if (region.width <= 0 || region.height <= 0) continue;
+        renderRows(image, frame, region.y, region.y + region.height);
+    }
+    return true;
 }
 
 } // namespace cutemac::session
