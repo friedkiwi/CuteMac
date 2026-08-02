@@ -113,11 +113,10 @@ set_entries:
         move.w  6(%a2),%d2
         tst.l   %a3
         beq.w   param_error
-        cmpi.w  #256,%d2
+        cmpi.w  #255,%d2
         bhi.w   param_error
-        tst.w   %d2                    | csCount is a count, not count minus one
-        beq.w   set_entries_done
-        subq.w  #1,%d2                 | DBRA uses a zero-based terminal value
+        | Video Manager passes csCount as the zero-based last record number.
+        | A value of zero therefore still describes one ColorSpec.
         bsr.w   card_base
         adda.l  #0x00080002,%a2
 set_entries_loop:
@@ -130,20 +129,14 @@ set_entries_sequential:
         addq.w  #1,%d3
 set_entries_index_ready:
         andi.w  #0x00ff,%d1            | ColorSpec.value may carry flags above the CLUT index
-        tst.w   %d1
-        beq.s   set_entries_next        | QuickDraw reserves logical white
-        cmpi.w  #255,%d1
-        beq.s   set_entries_next        | physical endpoint remains black
         move.b  %d1,(%a2)
         | System 6 supplies either a colour or grayscale table. Program its
         | RGB values verbatim: SetGray may be ordered after SetEntries.
         move.b  2(%a3),1(%a2)
         move.b  4(%a3),2(%a2)
         move.b  6(%a3),3(%a2)
-set_entries_next:
         adda.w  #8,%a3
         dbra    %d2,set_entries_loop
-set_entries_done:
         moveq   #0,%d0
         bra.w   complete
 
@@ -351,11 +344,10 @@ get_entries:
         move.w  6(%a2),%d2
         tst.l   %a3
         beq.w   param_error
-        cmpi.w  #256,%d2
+        cmpi.w  #255,%d2
         bhi.w   param_error
-        tst.w   %d2                    | csCount is the number of records
-        beq.w   get_entries_done
-        subq.w  #1,%d2
+        | As in SetEntries, csCount is zero-based and can be used directly
+        | as DBRA's terminal counter.
         bsr.w   card_base
         adda.l  #0x00080002,%a2
 get_entries_loop:
@@ -381,7 +373,6 @@ get_entries_index_ready:
         move.b  %d0,7(%a3)
         adda.w  #8,%a3
         dbra    %d2,get_entries_loop
-get_entries_done:
         moveq   #0,%d0
         bra.w   complete
 

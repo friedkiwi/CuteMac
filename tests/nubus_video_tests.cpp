@@ -55,11 +55,11 @@ int main()
         "CuteMac video driver must translate the System 6 colour Boolean to its luminance flag");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31400010247808fc4ed2")),
         "CuteMac video driver must complete queued requests before calling JIODone");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a41671a0c4100ff6714")),
-        "CuteMac video driver must preserve the indexed white and black endpoints");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("0c4201006200"))
-            && virtualCard.declarationRom().contains(QByteArray::fromHex("4a42670000465342")),
-        "CuteMac video driver must accept 256-entry CLUT requests and convert csCount for DBRA");
+    ok &= expect(!virtualCard.declarationRom().contains(QByteArray::fromHex("4a41671a0c4100ff6714")),
+        "CuteMac video driver must let QuickDraw program every indexed palette entry");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("0c4200ff6200"))
+            && !virtualCard.declarationRom().contains(QByteArray::fromHex("4a426700")),
+        "CuteMac video driver must treat csCount as a zero-based DBRA terminal value");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("024100ff")),
         "CuteMac video driver must mask ColorSpec flags before addressing endpoint entries");
     ok &= expect(!virtualCard.declarationRom().contains(QByteArray::fromHex("c0fc004d"))
@@ -117,8 +117,14 @@ int main()
     virtualCard.write8(0x00080003, 0x00);
     virtualCard.write8(0x00080004, 0xff);
     virtualCard.write8(0x00080005, 0x00);
-    ok &= expect(virtualCard.videoFrame().colorTable[0xff] == 0xff000000U,
-        "CuteMac RAMDAC must keep the physical black endpoint immutable");
+    ok &= expect(virtualCard.videoFrame().colorTable[0xff] == 0xff00ff00U,
+        "CuteMac RAMDAC must program the final palette entry");
+    virtualCard.write8(0x00080002, 0x00);
+    virtualCard.write8(0x00080003, 0x12);
+    virtualCard.write8(0x00080004, 0x34);
+    virtualCard.write8(0x00080005, 0x56);
+    ok &= expect(virtualCard.videoFrame().colorTable[0x00] == 0xff123456U,
+        "CuteMac RAMDAC must program the first palette entry");
     ok &= expect(virtualCard.read8(CuteMacVideoCard::guestServicesBase) == 'C'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 1) == 'T'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 2) == 'M'

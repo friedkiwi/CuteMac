@@ -177,10 +177,8 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         m_paletteLatch[1] = value;
     } else if (offset == paletteBlueRegister) {
         m_paletteLatch[2] = value;
-        if (m_paletteAddress != 0 && m_paletteAddress != 255) {
-            m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
-                | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
-        }
+        m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
+            | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
         m_paletteAddress = (m_paletteAddress + 1) & 0xff;
     } else if (offset == grayScreenRegister) {
         const auto stride = strideBytes();
