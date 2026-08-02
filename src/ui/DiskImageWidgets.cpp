@@ -9,11 +9,13 @@
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMap>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QTableWidget>
+#include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -37,18 +39,81 @@ QString imageFilter(storage::DiskImageType type)
     return QStringLiteral("All files (*)");
 }
 
-bool importWithDialog(storage::DiskImageManager& manager, storage::DiskImageType type, QWidget* parent)
+constexpr int ImagePathRole = Qt::UserRole;
+constexpr int CollectionRole = Qt::UserRole + 1;
+
+bool importWithDialog(storage::DiskImageManager& manager, storage::DiskImageType type, const QString& collection, QWidget* parent)
 {
     const auto sources = QFileDialog::getOpenFileNames(parent, QStringLiteral("Import %1 Images").arg(storage::DiskImageManager::typeName(type)),
         QDir::homePath(), imageFilter(type));
     if (sources.isEmpty()) return false;
     QStringList importedPaths;
-    const bool success = manager.importImages(sources, type, &importedPaths);
+    const bool success = manager.importImages(sources, type, &importedPaths, collection);
     if (!success) {
         QMessageBox::warning(parent, QStringLiteral("Import Disk Images"),
             QStringLiteral("%1 of %2 images were copied into the disk image library.").arg(importedPaths.size()).arg(sources.size()));
     }
     return !importedPaths.isEmpty();
+}
+
+QTreeWidgetItem* ensureCollectionItem(QTreeWidget* tree, QMap<QString, QTreeWidgetItem*>& items, const QString& collection)
+{
+    if (collection.isEmpty()) return tree->invisibleRootItem();
+    if (items.contains(collection)) return items.value(collection);
+    const QFileInfo info(collection);
+    const auto parentPath = info.path() == QStringLiteral(".") ? QString() : info.path();
+    auto* item = new QTreeWidgetItem(ensureCollectionItem(tree, items, parentPath));
+    item->setText(0, info.fileName());
+    item->setData(0, CollectionRole, collection);
+    items.insert(collection, item);
+    return item;
+}
+
+void populateImageTree(QTreeWidget* tree, const storage::DiskImageManager& manager,
+    const QVector<storage::DiskImageEntry>& images, bool showType)
+{
+    tree->clear();
+    QMap<QString, QTreeWidgetItem*> collections;
+    for (const auto& collection : manager.collections()) ensureCollectionItem(tree, collections, collection);
+    const QDir library(manager.libraryPath());
+    for (const auto& image : images) {
+        const auto relativePath = library.relativeFilePath(image.path);
+        const QFileInfo relativeInfo(relativePath);
+        const auto collection = relativeInfo.path() == QStringLiteral(".") ? QString() : relativeInfo.path();
+        auto* item = new QTreeWidgetItem(ensureCollectionItem(tree, collections, collection));
+        item->setText(0, relativeInfo.fileName());
+        if (showType) {
+            item->setText(1, storage::DiskImageManager::typeName(image.type));
+            item->setText(2, formatSize(image.sizeBytes));
+        } else {
+            item->setText(1, formatSize(image.sizeBytes));
+        }
+        item->setData(0, ImagePathRole, image.path);
+        item->setData(0, CollectionRole, collection);
+    }
+    tree->expandAll();
+}
+
+bool filterTreeItem(QTreeWidgetItem* item, const QString& query, bool ancestorMatches = false)
+{
+    bool matches = query.isEmpty() || ancestorMatches;
+    for (int column = 0; !matches && column < item->columnCount(); ++column)
+        matches = item->text(column).contains(query, Qt::CaseInsensitive);
+    bool childMatches = false;
+    for (int index = 0; index < item->childCount(); ++index) childMatches |= filterTreeItem(item->child(index), query, matches);
+    item->setHidden(!matches && !childMatches);
+    return matches || childMatches;
+}
+
+void filterImageTree(QTreeWidget* tree, const QString& query)
+{
+    for (int index = 0; index < tree->topLevelItemCount(); ++index) filterTreeItem(tree->topLevelItem(index), query.trimmed());
+}
+
+QString selectedCollection(QTreeWidget* tree)
+{
+    const auto* item = tree->currentItem();
+    return item == nullptr ? QString() : item->data(0, CollectionRole).toString();
 }
 
 class CreateImageDialog final : public QDialog {
@@ -138,7 +203,8 @@ private:
 class DiskImageManagerDialog::Impl {
 public:
     storage::DiskImageManager manager;
-    QTableWidget* table = nullptr;
+    QTreeWidget* tree = nullptr;
+    QLineEdit* search = nullptr;
     QComboBox* importType = nullptr;
 };
 
@@ -147,24 +213,31 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
     setWindowTitle(QStringLiteral("Disk Image Manager"));
     resize(760, 440);
     auto* layout = new QVBoxLayout(this);
-    m_impl->table = new QTableWidget(0, 4);
-    m_impl->table->setHorizontalHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Type"), QStringLiteral("Size"), QStringLiteral("Location") });
-    m_impl->table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    m_impl->table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_impl->table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_impl->table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    layout->addWidget(m_impl->table, 1);
+    m_impl->search = new QLineEdit;
+    m_impl->search->setPlaceholderText(QStringLiteral("Search disk images..."));
+    m_impl->search->setClearButtonEnabled(true);
+    layout->addWidget(m_impl->search);
+    m_impl->tree = new QTreeWidget;
+    m_impl->tree->setColumnCount(3);
+    m_impl->tree->setHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Type"), QStringLiteral("Size") });
+    m_impl->tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_impl->tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_impl->tree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_impl->tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_impl->tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    layout->addWidget(m_impl->tree, 1);
     auto* controls = new QHBoxLayout;
     m_impl->importType = new QComboBox;
     for (const auto type : { storage::DiskImageType::Floppy, storage::DiskImageType::CdRom, storage::DiskImageType::HardDisk })
         m_impl->importType->addItem(storage::DiskImageManager::typeName(type), static_cast<int>(type));
     auto* import = new QPushButton(QStringLiteral("Import..."));
+    auto* newCollection = new QPushButton(QStringLiteral("New Collection..."));
     auto* exportImage = new QPushButton(QStringLiteral("Export..."));
     auto* createFloppy = new QPushButton(QStringLiteral("New Floppy..."));
     auto* createHardDisk = new QPushButton(QStringLiteral("New Hard Disk..."));
     auto* openFolder = new QPushButton(QStringLiteral("Open Folder"));
     controls->addWidget(m_impl->importType);
-    for (auto* button : { import, exportImage, createFloppy, createHardDisk }) controls->addWidget(button);
+    for (auto* button : { import, newCollection, exportImage, createFloppy, createHardDisk }) controls->addWidget(button);
     controls->addStretch();
     controls->addWidget(openFolder);
     layout->addLayout(controls);
@@ -173,31 +246,39 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
     const auto reload = [this]() {
         (void)m_impl->manager.refresh();
         const auto images = m_impl->manager.images();
-        m_impl->table->setRowCount(images.size());
-        for (int row = 0; row < images.size(); ++row) {
-            auto* name = new QTableWidgetItem(QFileInfo(images[row].path).fileName());
-            name->setData(Qt::UserRole, images[row].path);
-            m_impl->table->setItem(row, 0, name);
-            m_impl->table->setItem(row, 1, new QTableWidgetItem(storage::DiskImageManager::typeName(images[row].type)));
-            m_impl->table->setItem(row, 2, new QTableWidgetItem(formatSize(images[row].sizeBytes)));
-            m_impl->table->setItem(row, 3, new QTableWidgetItem(images[row].path));
-        }
-        if (!images.isEmpty()) m_impl->table->selectRow(0);
+        populateImageTree(m_impl->tree, m_impl->manager, images, true);
+        filterImageTree(m_impl->tree, m_impl->search->text());
+        if (m_impl->tree->topLevelItemCount() > 0) m_impl->tree->setCurrentItem(m_impl->tree->topLevelItem(0));
     };
     connect(import, &QPushButton::clicked, this, [this, reload]() {
         const auto type = static_cast<storage::DiskImageType>(m_impl->importType->currentData().toInt());
-        if (importWithDialog(m_impl->manager, type, this)) reload();
+        if (importWithDialog(m_impl->manager, type, selectedCollection(m_impl->tree), this)) reload();
+    });
+    connect(newCollection, &QPushButton::clicked, this, [this, reload]() {
+        bool accepted = false;
+        const auto name = QInputDialog::getText(this, QStringLiteral("New Collection"), QStringLiteral("Collection name:"),
+            QLineEdit::Normal, {}, &accepted).trimmed();
+        if (!accepted || name.isEmpty()) return;
+        if (name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\'))) {
+            QMessageBox::warning(this, windowTitle(), QStringLiteral("Collection names cannot contain path separators."));
+            return;
+        }
+        const auto parent = selectedCollection(m_impl->tree);
+        const auto path = parent.isEmpty() ? name : parent + QLatin1Char('/') + name;
+        if (!m_impl->manager.createCollection(path)) QMessageBox::critical(this, windowTitle(), QStringLiteral("Could not create the collection."));
+        else reload();
     });
     connect(exportImage, &QPushButton::clicked, this, [this]() {
-        const int row = m_impl->table->currentRow();
-        if (row < 0) return;
-        const auto source = m_impl->table->item(row, 0)->data(Qt::UserRole).toString();
+        const auto* item = m_impl->tree->currentItem();
+        const auto source = item == nullptr ? QString() : item->data(0, ImagePathRole).toString();
+        if (source.isEmpty()) return;
         const auto destination = QFileDialog::getSaveFileName(this, QStringLiteral("Export Disk Image"), QFileInfo(source).fileName());
         if (!destination.isEmpty() && !m_impl->manager.exportImage(source, destination)) QMessageBox::critical(this, windowTitle(), QStringLiteral("Could not export the disk image."));
     });
     connect(createFloppy, &QPushButton::clicked, this, [this, reload]() { if (!createDiskImage(storage::DiskImageType::Floppy, this).isEmpty()) reload(); });
     connect(createHardDisk, &QPushButton::clicked, this, [this, reload]() { if (!createDiskImage(storage::DiskImageType::HardDisk, this).isEmpty()) reload(); });
     connect(openFolder, &QPushButton::clicked, this, [this]() { QDesktopServices::openUrl(QUrl::fromLocalFile(m_impl->manager.libraryPath())); });
+    connect(m_impl->search, &QLineEdit::textChanged, this, [this](const QString& text) { filterImageTree(m_impl->tree, text); });
     connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
     reload();
 }
@@ -208,7 +289,8 @@ class DiskImagePickerDialog::Impl {
 public:
     storage::DiskImageType type;
     storage::DiskImageManager manager;
-    QTableWidget* table = nullptr;
+    QTreeWidget* tree = nullptr;
+    QLineEdit* search = nullptr;
 };
 
 DiskImagePickerDialog::DiskImagePickerDialog(storage::DiskImageType type, const QString& title, QWidget* parent)
@@ -218,33 +300,37 @@ DiskImagePickerDialog::DiskImagePickerDialog(storage::DiskImageType type, const 
     setWindowTitle(title);
     resize(620, 360);
     auto* layout = new QVBoxLayout(this);
-    m_impl->table = new QTableWidget(0, 2);
-    m_impl->table->setHorizontalHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Size") });
-    m_impl->table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_impl->table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_impl->table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_impl->table->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_impl->table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    layout->addWidget(m_impl->table, 1);
+    m_impl->search = new QLineEdit;
+    m_impl->search->setPlaceholderText(QStringLiteral("Search disk images..."));
+    m_impl->search->setClearButtonEnabled(true);
+    layout->addWidget(m_impl->search);
+    m_impl->tree = new QTreeWidget;
+    m_impl->tree->setColumnCount(2);
+    m_impl->tree->setHeaderLabels({ QStringLiteral("Name"), QStringLiteral("Size") });
+    m_impl->tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_impl->tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_impl->tree->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_impl->tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    layout->addWidget(m_impl->tree, 1);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel);
     auto* import = buttons->addButton(QStringLiteral("Import..."), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
     const auto reload = [this]() {
         (void)m_impl->manager.refresh();
         const auto images = m_impl->manager.images(m_impl->type);
-        m_impl->table->setRowCount(images.size());
-        for (int row = 0; row < images.size(); ++row) {
-            auto* name = new QTableWidgetItem(QFileInfo(images[row].path).fileName());
-            name->setData(Qt::UserRole, images[row].path);
-            m_impl->table->setItem(row, 0, name);
-            m_impl->table->setItem(row, 1, new QTableWidgetItem(formatSize(images[row].sizeBytes)));
-        }
-        if (!images.isEmpty()) m_impl->table->selectRow(0);
+        populateImageTree(m_impl->tree, m_impl->manager, images, false);
+        filterImageTree(m_impl->tree, m_impl->search->text());
+        if (m_impl->tree->topLevelItemCount() > 0) m_impl->tree->setCurrentItem(m_impl->tree->topLevelItem(0));
     };
-    connect(import, &QPushButton::clicked, this, [this, reload]() { if (importWithDialog(m_impl->manager, m_impl->type, this)) reload(); });
-    connect(buttons, &QDialogButtonBox::accepted, this, [this]() { if (m_impl->table->currentRow() >= 0) accept(); });
+    connect(import, &QPushButton::clicked, this, [this, reload]() {
+        if (importWithDialog(m_impl->manager, m_impl->type, selectedCollection(m_impl->tree), this)) reload();
+    });
+    connect(buttons, &QDialogButtonBox::accepted, this, [this]() { if (!selectedImagePath().isEmpty()) accept(); });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(m_impl->table, &QTableWidget::cellDoubleClicked, this, [this](int, int) { accept(); });
+    connect(m_impl->tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int) {
+        if (!item->data(0, ImagePathRole).toString().isEmpty()) accept();
+    });
+    connect(m_impl->search, &QLineEdit::textChanged, this, [this](const QString& text) { filterImageTree(m_impl->tree, text); });
     reload();
 }
 
@@ -252,8 +338,8 @@ DiskImagePickerDialog::~DiskImagePickerDialog() = default;
 
 QString DiskImagePickerDialog::selectedImagePath() const
 {
-    const int row = m_impl->table->currentRow();
-    return row < 0 ? QString() : m_impl->table->item(row, 0)->data(Qt::UserRole).toString();
+    const auto* item = m_impl->tree->currentItem();
+    return item == nullptr ? QString() : item->data(0, ImagePathRole).toString();
 }
 
 QString DiskImagePickerDialog::getImage(storage::DiskImageType type, const QString& title, QWidget* parent)

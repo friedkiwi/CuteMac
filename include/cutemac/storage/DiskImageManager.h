@@ -25,10 +25,14 @@ public:
     [[nodiscard]] QString libraryPath() const;
     [[nodiscard]] QVector<DiskImageEntry> images() const;
     [[nodiscard]] QVector<DiskImageEntry> images(DiskImageType type) const;
+    [[nodiscard]] QStringList collections() const;
 
     [[nodiscard]] bool refresh();
-    [[nodiscard]] bool importImage(const QString& sourcePath, DiskImageType type, QString* importedPath = nullptr);
-    [[nodiscard]] bool importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths = nullptr);
+    [[nodiscard]] bool createCollection(const QString& relativePath);
+    [[nodiscard]] bool importImage(const QString& sourcePath, DiskImageType type, QString* importedPath = nullptr,
+        const QString& collection = {});
+    [[nodiscard]] bool importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths = nullptr,
+        const QString& collection = {});
     [[nodiscard]] bool exportImage(const QString& imagePath, const QString& destinationPath) const;
     [[nodiscard]] bool createImage(const QString& path, DiskImageType type, qint64 sizeBytes);
     [[nodiscard]] bool forgetImage(const QString& path);

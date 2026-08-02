@@ -1,5 +1,6 @@
 #include "cutemac/storage/DiskImageManager.h"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -62,8 +63,26 @@ int main()
         "every batch import should be copied into the designated library folder");
     require(manager.images(DiskImageType::Floppy).size() == 4, "all imported floppies should be cataloged");
 
+    require(manager.createCollection(QStringLiteral("System 6/Install Disks")), "nested collections should be created");
+    require(manager.collections().contains(QStringLiteral("System 6")), "parent collections should be listed");
+    require(manager.collections().contains(QStringLiteral("System 6/Install Disks")), "nested collections should be listed");
+    require(!manager.createCollection(QStringLiteral("../outside")), "collections must remain inside the image library");
+    const auto collectionSource = temporary.filePath(QStringLiteral("system-tools.dsk"));
+    require(DiskImageManager::createBlankImage(collectionSource, 800 * 1024), "collection import source should be created");
+    QString collectionImage;
+    require(manager.importImage(collectionSource, DiskImageType::Floppy, &collectionImage, QStringLiteral("System 6/Install Disks")),
+        "images should import into a collection");
+    require(QFileInfo(collectionImage).absolutePath()
+            == QFileInfo(QDir(libraryPath).filePath(QStringLiteral("System 6/Install Disks/placeholder"))).absolutePath(),
+        "collection imports should use the selected nested directory");
+
     DiskImageManager reloaded(libraryPath);
     require(reloaded.images(DiskImageType::CdRom).size() == 1, "catalog type should persist across manager instances");
+    require(reloaded.images(DiskImageType::Floppy).size() == 5, "nested image catalog entries should persist across manager instances");
+    const auto discoveredIso = QDir(libraryPath).filePath(QStringLiteral("System 6/discovered.iso"));
+    require(DiskImageManager::createBlankImage(discoveredIso, 2048), "nested discovery image should be created");
+    require(reloaded.refresh(), "nested library refresh should succeed");
+    require(reloaded.images(DiskImageType::CdRom).size() == 2, "refresh should discover uncataloged images in collections");
     const auto exportedPath = temporary.filePath(QStringLiteral("exported.iso"));
     require(reloaded.exportImage(importedPath, exportedPath), "export should succeed");
     require(QFileInfo(exportedPath).size() == 4096, "export should preserve image contents");

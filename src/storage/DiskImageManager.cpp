@@ -1,6 +1,7 @@
 #include "cutemac/storage/DiskImageManager.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -52,6 +53,19 @@ QString uniqueDestination(const QDir& directory, const QFileInfo& source)
     return candidate;
 }
 
+bool normalizeCollectionPath(const QString& path, QString* normalized)
+{
+    const auto clean = QDir::cleanPath(path.trimmed());
+    if (clean.isEmpty() || clean == QStringLiteral(".")) {
+        *normalized = {};
+        return true;
+    }
+    if (path.contains(QLatin1Char('\\')) || QDir::isAbsolutePath(clean) || clean == QStringLiteral("..")
+        || clean.startsWith(QStringLiteral("../"))) return false;
+    *normalized = clean;
+    return true;
+}
+
 } // namespace
 
 DiskImageManager::DiskImageManager(QString libraryPath)
@@ -72,30 +86,52 @@ QVector<DiskImageEntry> DiskImageManager::images(DiskImageType type) const
     return result;
 }
 
+QStringList DiskImageManager::collections() const
+{
+    QStringList result;
+    const QDir library(m_libraryPath);
+    QDirIterator iterator(m_libraryPath, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) result.append(library.relativeFilePath(iterator.next()));
+    result.sort(Qt::CaseInsensitive);
+    return result;
+}
+
 bool DiskImageManager::refresh()
 {
     const bool loaded = loadCatalog();
     m_images.erase(std::remove_if(m_images.begin(), m_images.end(), [](const auto& image) { return !QFileInfo(image.path).isFile(); }), m_images.end());
 
     const QDir directory(m_libraryPath);
-    const auto files = directory.entryInfoList(QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
-    for (const auto& file : files) {
+    QDirIterator iterator(m_libraryPath, QDir::Files | QDir::Readable, QDirIterator::Subdirectories);
+    while (iterator.hasNext()) {
+        const QFileInfo file(iterator.next());
         if (file.fileName() == QStringLiteral("library.toml")) continue;
         const auto absolutePath = file.absoluteFilePath();
         const auto found = std::find_if(m_images.cbegin(), m_images.cend(), [&](const auto& image) { return image.path == absolutePath; });
         if (found == m_images.cend()) registerImage(absolutePath, inferType(file));
     }
-    std::sort(m_images.begin(), m_images.end(), [](const auto& left, const auto& right) {
-        return QFileInfo(left.path).fileName().compare(QFileInfo(right.path).fileName(), Qt::CaseInsensitive) < 0;
+    std::sort(m_images.begin(), m_images.end(), [&](const auto& left, const auto& right) {
+        return directory.relativeFilePath(left.path).compare(directory.relativeFilePath(right.path), Qt::CaseInsensitive) < 0;
     });
     return saveCatalog() && loaded;
 }
 
-bool DiskImageManager::importImage(const QString& sourcePath, DiskImageType type, QString* importedPath)
+bool DiskImageManager::createCollection(const QString& relativePath)
+{
+    QString normalized;
+    if (!normalizeCollectionPath(relativePath, &normalized) || normalized.isEmpty()) return false;
+    return QDir(m_libraryPath).mkpath(normalized);
+}
+
+bool DiskImageManager::importImage(const QString& sourcePath, DiskImageType type, QString* importedPath, const QString& collection)
 {
     const QFileInfo source(sourcePath);
     if (!source.isFile()) return false;
-    const auto destination = uniqueDestination(QDir(m_libraryPath), source);
+    QString normalized;
+    if (!normalizeCollectionPath(collection, &normalized)) return false;
+    QDir destinationDirectory(m_libraryPath);
+    if (!normalized.isEmpty() && (!destinationDirectory.mkpath(normalized) || !destinationDirectory.cd(normalized))) return false;
+    const auto destination = uniqueDestination(destinationDirectory, source);
     if (!QFile::copy(source.absoluteFilePath(), destination)) return false;
     registerImage(destination, type);
     if (!saveCatalog()) {
@@ -106,14 +142,15 @@ bool DiskImageManager::importImage(const QString& sourcePath, DiskImageType type
     return true;
 }
 
-bool DiskImageManager::importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths)
+bool DiskImageManager::importImages(const QStringList& sourcePaths, DiskImageType type, QStringList* importedPaths,
+    const QString& collection)
 {
     if (sourcePaths.isEmpty()) return false;
     bool success = true;
     QStringList results;
     for (const auto& sourcePath : sourcePaths) {
         QString importedPath;
-        if (importImage(sourcePath, type, &importedPath)) results.append(importedPath);
+        if (importImage(sourcePath, type, &importedPath, collection)) results.append(importedPath);
         else success = false;
     }
     if (importedPaths != nullptr) *importedPaths = results;
