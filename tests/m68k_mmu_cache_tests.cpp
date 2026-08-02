@@ -1,0 +1,144 @@
+#include <array>
+#include <cstdint>
+#include <iostream>
+
+#include "cutemac/cpu/m68k/M68kBus.h"
+#include "cutemac/cpu/m68k/M68kCpuCore.h"
+
+extern "C" {
+#include "m68kcpu.h"
+}
+
+namespace {
+
+class TestBus final : public cutemac::cpu::m68k::M68kBus {
+public:
+    std::uint8_t read8(std::uint32_t address) override
+    {
+        ++reads;
+        return memory[address & (memory.size() - 1)];
+    }
+
+    std::uint16_t read16(std::uint32_t address) override
+    {
+        return static_cast<std::uint16_t>((read8(address) << 8) | read8(address + 1));
+    }
+
+    std::uint32_t read32(std::uint32_t address) override
+    {
+        return (static_cast<std::uint32_t>(read16(address)) << 16) | read16(address + 2);
+    }
+
+    void write8(std::uint32_t address, std::uint8_t value) override
+    {
+        memory[address & (memory.size() - 1)] = value;
+    }
+
+    void write16(std::uint32_t address, std::uint16_t value) override
+    {
+        write8(address, static_cast<std::uint8_t>(value >> 8));
+        write8(address + 1, static_cast<std::uint8_t>(value));
+    }
+
+    void write32(std::uint32_t address, std::uint32_t value) override
+    {
+        write16(address, static_cast<std::uint16_t>(value >> 16));
+        write16(address + 2, static_cast<std::uint16_t>(value));
+    }
+
+    std::array<std::uint8_t, 0x4000> memory {};
+    unsigned int reads = 0;
+};
+
+bool expect(bool condition, const char* message)
+{
+    if (!condition) std::cerr << "FAIL: " << message << '\n';
+    return condition;
+}
+
+} // namespace
+
+int main()
+{
+    TestBus bus;
+    cutemac::cpu::m68k::M68kCpuCore core;
+    core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68030);
+    core.setBus(&bus);
+
+    // Ignore no address bits and use four A-table bits. Early termination at
+    // that table produces 256 MiB mappings, making cache behavior explicit.
+    m68ki_cpu.mmu_tc = 0x82004000U;
+    m68ki_cpu.mmu_crp_limit = 2;
+    m68ki_cpu.mmu_crp_aptr = 0x1000;
+    m68ki_cpu.mmu_srp_limit = 2;
+    m68ki_cpu.mmu_srp_aptr = 0x2000;
+    m68ki_cpu.pmmu_enabled = 1;
+    bus.write32(0x1008, 0x10000001U);
+    bus.write32(0x2008, 0x20000001U);
+    m68k_pmmu_atc_flush();
+    m68k_pmmu_atc_reset_statistics();
+    bus.reads = 0;
+
+    m68ki_cpu.s_flag = 0;
+    const auto userFirst = pmmu_translate_addr(0x21234567U);
+    const auto descriptorReads = bus.reads;
+    const auto userSecond = pmmu_translate_addr(0x21234678U);
+    bool ok = expect(userFirst == 0x11234567U && userSecond == 0x11234678U,
+        "ATC must preserve offsets within the translated page");
+    ok &= expect(descriptorReads != 0 && bus.reads == descriptorReads
+            && m68k_get_pmmu_atc_hits() == 1 && m68k_get_pmmu_atc_misses() == 1,
+        "a repeated user-page translation must hit without rereading descriptors");
+
+    m68ki_cpu.s_flag = SFLAG_SET;
+    const auto supervisor = pmmu_translate_addr(0x21234567U);
+    ok &= expect(supervisor == 0x21234567U && m68k_get_pmmu_atc_misses() == 2,
+        "supervisor and user translations must occupy distinct ATC entries");
+
+    m68ki_cpu.s_flag = 0;
+    bus.write32(0x1008, 0x30000001U);
+    ok &= expect(pmmu_translate_addr(0x21234567U) == userFirst,
+        "descriptor changes must remain cached until an architectural flush");
+    m68k_pmmu_atc_flush();
+    ok &= expect(pmmu_translate_addr(0x21234567U) == 0x31234567U,
+        "an architectural flush must expose changed page-table descriptors");
+
+    bus.write32(0x1008, 0x40000001U);
+    bus.write16(0x0100, 0xf000U);
+    bus.write16(0x0102, 0x2400U); // PFLUSH, flush all function codes.
+    m68ki_cpu.pmmu_enabled = 0;
+    core.setProgramCounter(0x0100);
+    (void)core.stepInstruction();
+    m68ki_cpu.pmmu_enabled = 1;
+    ok &= expect(pmmu_translate_addr(0x21234567U) == 0x41234567U,
+        "executing a 68030 PFLUSH instruction must invalidate cached translations");
+
+    // System 7.5.3 on the IIcx programs TC=0x80f84500: IS=8, A=4,
+    // B=5, C=0. That makes each terminal B-table entry a 32 KiB page.
+    // Exercise the exact layout so the cache cannot accidentally assume the
+    // much larger early-termination page used by the checks above.
+    constexpr std::uint32_t s7Address = 0x40826cc0U;
+    m68ki_cpu.mmu_tc = 0x80f84500U;
+    m68ki_cpu.mmu_crp_limit = 2;
+    m68ki_cpu.mmu_crp_aptr = 0x1000;
+    m68ki_cpu.s_flag = 0;
+    const auto aIndex = (s7Address << 8) >> 28;
+    const auto bIndex = (s7Address << 12) >> 27;
+    bus.write32(0x1000 + aIndex * 4, 0x00003002U);
+    bus.write32(0x3000 + bIndex * 4, 0x50000001U);
+    bus.write32(0x3000 + (bIndex + 1) * 4, 0x60000001U);
+    m68k_pmmu_atc_flush();
+    m68k_pmmu_atc_reset_statistics();
+    const auto s7First = pmmu_translate_addr(s7Address);
+    const auto s7SamePage = pmmu_translate_addr(s7Address + 0x123U);
+    const auto s7NextPage = pmmu_translate_addr((s7Address & ~0x7fffU) + 0x8000U);
+    ok &= expect(s7First == 0x50006cc0U && s7SamePage == 0x50006de3U,
+        "the System 7 TC layout must cache translations at 32 KiB granularity");
+    ok &= expect(s7NextPage == 0x60000000U
+            && m68k_get_pmmu_atc_hits() == 1 && m68k_get_pmmu_atc_misses() == 2,
+        "adjacent System 7 pages must not alias in the ATC");
+
+    core.reset();
+    ok &= expect(m68k_get_pmmu_atc_hits() == 0 && m68k_get_pmmu_atc_misses() == 0,
+        "CPU reset must flush the ATC and reset its statistics");
+    return ok ? 0 : 1;
+}

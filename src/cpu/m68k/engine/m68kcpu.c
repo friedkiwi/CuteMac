@@ -759,6 +759,39 @@ unsigned int m68k_translate_address(unsigned int address)
 	return ADDRESS_68K(address);
 }
 
+void m68k_pmmu_atc_flush(void)
+{
+#if M68K_EMULATE_PMMU
+	pmmu_atc_flush();
+#endif
+}
+
+void m68k_pmmu_atc_reset_statistics(void)
+{
+#if M68K_EMULATE_PMMU
+	m68ki_cpu.mmu_atc_hits = 0;
+	m68ki_cpu.mmu_atc_misses = 0;
+#endif
+}
+
+unsigned int m68k_get_pmmu_atc_hits(void)
+{
+#if M68K_EMULATE_PMMU
+	return m68ki_cpu.mmu_atc_hits;
+#else
+	return 0;
+#endif
+}
+
+unsigned int m68k_get_pmmu_atc_misses(void)
+{
+#if M68K_EMULATE_PMMU
+	return m68ki_cpu.mmu_atc_misses;
+#else
+	return 0;
+#endif
+}
+
 /* Set the callbacks */
 void m68k_set_int_ack_callback(int  (*callback)(int int_level))
 {
@@ -1146,6 +1179,8 @@ void m68k_pulse_reset(void)
 {
 	/* Disable the PMMU on reset */
 	m68ki_cpu.pmmu_enabled = 0;
+	pmmu_atc_flush();
+	m68k_pmmu_atc_reset_statistics();
 
 	/* Clear all stop levels and eat up all remaining cycles */
 	CPU_STOPPED = 0;

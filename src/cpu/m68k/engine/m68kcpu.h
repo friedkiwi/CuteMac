@@ -935,6 +935,17 @@ typedef union
 	double f;
 } fp_reg;
 
+#define M68K_MMU_ATC_ENTRIES 256
+
+typedef struct
+{
+	uint logical_page;
+	uint physical_page;
+	uint8 page_shift;
+	uint8 supervisor;
+	uint8 valid;
+} m68ki_mmu_atc_entry;
+
 typedef struct
 {
 	uint cpu_type;     /* CPU Type: 68000, 68008, 68010, 68EC020, 68020, 68EC030, 68030, 68EC040, or 68040 */
@@ -997,6 +1008,9 @@ typedef struct
 	uint mmu_srp_aptr, mmu_srp_limit;
 	uint mmu_tc;
 	uint16 mmu_sr;
+	m68ki_mmu_atc_entry mmu_atc[M68K_MMU_ATC_ENTRIES];
+	uint mmu_atc_hits;
+	uint mmu_atc_misses;
 
 	const uint8* cyc_instruction;
 	const uint8* cyc_exception;
@@ -1049,6 +1063,7 @@ char* m68ki_disassemble_quick(unsigned int pc, unsigned int cpu_type);
 /* ---------------------------- Read Immediate ---------------------------- */
 
 extern uint pmmu_translate_addr(uint addr_in);
+extern void pmmu_atc_flush(void);
 
 /* Handles all immediate reads, does address error check, function code setting,
  * and prefetching if they are enabled in m68kconf.h

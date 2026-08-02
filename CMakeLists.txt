@@ -337,6 +337,11 @@ if(BUILD_TESTING)
     target_link_libraries(CuteMacPhysicalMemoryMapTests PRIVATE CuteMacCore)
     add_test(NAME physical-memory-map COMMAND CuteMacPhysicalMemoryMapTests)
 
+    add_executable(CuteMacM68kMmuCacheTests tests/m68k_mmu_cache_tests.cpp)
+    target_include_directories(CuteMacM68kMmuCacheTests PRIVATE src/cpu/m68k/engine)
+    target_link_libraries(CuteMacM68kMmuCacheTests PRIVATE CuteMacCore)
+    add_test(NAME m68k-mmu-cache COMMAND CuteMacM68kMmuCacheTests)
+
     add_executable(CuteMacScsiBlockDeviceTests tests/scsi_block_device_tests.cpp)
     target_link_libraries(CuteMacScsiBlockDeviceTests PRIVATE CuteMacCore)
     add_test(NAME scsi-block-device COMMAND CuteMacScsiBlockDeviceTests)

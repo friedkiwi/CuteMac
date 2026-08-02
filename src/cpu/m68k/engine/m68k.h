@@ -388,6 +388,10 @@ void m68k_set_reg(m68k_register_t reg, unsigned int value);
 unsigned int m68k_get_pmmu_enabled(void);
 unsigned int m68k_get_pmmu_tc(void);
 unsigned int m68k_translate_address(unsigned int address);
+void m68k_pmmu_atc_flush(void);
+void m68k_pmmu_atc_reset_statistics(void);
+unsigned int m68k_get_pmmu_atc_hits(void);
+unsigned int m68k_get_pmmu_atc_misses(void);
 
 /* Check if an instruction is valid for the specified CPU type */
 unsigned int m68k_is_valid_instruction(unsigned int instruction, unsigned int cpu_type);

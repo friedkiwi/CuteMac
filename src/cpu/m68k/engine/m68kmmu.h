@@ -10,11 +10,48 @@
 /*
 	pmmu_translate_addr: perform 68851/68030-style PMMU address translation
 */
+void pmmu_atc_flush(void)
+{
+	uint entry;
+	for (entry = 0; entry < M68K_MMU_ATC_ENTRIES; ++entry)
+		m68ki_cpu.mmu_atc[entry].valid = 0;
+}
+
+static uint pmmu_atc_page_shift(void)
+{
+	const uint table_bits = ((m68ki_cpu.mmu_tc >> 16) & 0xf)
+		+ ((m68ki_cpu.mmu_tc >> 12) & 0xf)
+		+ ((m68ki_cpu.mmu_tc >> 8) & 0xf)
+		+ ((m68ki_cpu.mmu_tc >> 4) & 0xf);
+	if (table_bits >= 32)
+		return 8;
+	if (32 - table_bits < 8)
+		return 8;
+	if (32 - table_bits > 31)
+		return 31;
+	return 32 - table_bits;
+}
+
 uint pmmu_translate_addr(uint addr_in)
 {
 	uint32 addr_out, tbl_entry = 0, tbl_entry2, tamode = 0, tbmode = 0, tcmode = 0;
 	uint root_aptr, root_limit, tofs, is, abits, bbits, cbits;
-	uint resolved, tptr, shift;
+	uint resolved, tptr, shift, page_shift, page_mask, supervisor, atc_index;
+	m68ki_mmu_atc_entry *atc_entry;
+
+	page_shift = pmmu_atc_page_shift();
+	page_mask = 0xffffffffU >> (32 - page_shift);
+	supervisor = (m68ki_get_sr() & 0x2000) != 0;
+	atc_index = ((addr_in >> page_shift) ^ (supervisor ? 0x80U : 0U)) & (M68K_MMU_ATC_ENTRIES - 1);
+	atc_entry = &m68ki_cpu.mmu_atc[atc_index];
+	if (atc_entry->valid && atc_entry->page_shift == page_shift
+		&& atc_entry->supervisor == supervisor
+		&& atc_entry->logical_page == (addr_in & ~page_mask))
+	{
+		++m68ki_cpu.mmu_atc_hits;
+		return atc_entry->physical_page | (addr_in & page_mask);
+	}
+	++m68ki_cpu.mmu_atc_misses;
 
 	resolved = 0;
 	addr_out = addr_in;
@@ -166,7 +203,11 @@ uint pmmu_translate_addr(uint addr_in)
 	}
 
 
-//	fprintf(stderr,"PMMU: [%08x] => [%08x]\n", addr_in, addr_out);
+	atc_entry->logical_page = addr_in & ~page_mask;
+	atc_entry->physical_page = addr_out & ~page_mask;
+	atc_entry->page_shift = (uint8)page_shift;
+	atc_entry->supervisor = (uint8)supervisor;
+	atc_entry->valid = 1;
 
 	return addr_out;
 }
@@ -208,12 +249,12 @@ void m68881_mmu_ops(void)
 				}
 				else if ((modes & 0xe200) == 0x2000)	// PFLUSH
 				{
-					fprintf(stderr,"680x0: unhandled PFLUSH PC=%x\n", REG_PC);
+					pmmu_atc_flush();
 					return;
 				}
 				else if (modes == 0xa000)	// PFLUSHR
 				{
-					fprintf(stderr,"680x0: unhandled PFLUSHR\n");
+					pmmu_atc_flush();
 					return;
 				}
 				else if (modes == 0x2800)	// PVALID (FORMAT 1)
@@ -264,6 +305,7 @@ void m68881_mmu_ops(void)
 								{
 									case 0:	// translation control register
 										m68ki_cpu.mmu_tc = READ_EA_32(ea);
+										pmmu_atc_flush();
 
 										if (m68ki_cpu.mmu_tc & 0x80000000)
 										{
@@ -279,12 +321,14 @@ void m68881_mmu_ops(void)
 										temp64 = READ_EA_64(ea);
 										m68ki_cpu.mmu_srp_limit = (temp64>>32) & 0xffffffff;
 										m68ki_cpu.mmu_srp_aptr = temp64 & 0xffffffff;
+										pmmu_atc_flush();
 										break;
 
 									case 3:	// CPU root pointer
 										temp64 = READ_EA_64(ea);
 										m68ki_cpu.mmu_crp_limit = (temp64>>32) & 0xffffffff;
 										m68ki_cpu.mmu_crp_aptr = temp64 & 0xffffffff;
+										pmmu_atc_flush();
 										break;
 
 									default:
@@ -318,4 +362,3 @@ void m68881_mmu_ops(void)
 		}
 	}
 }
-
