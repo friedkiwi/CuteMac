@@ -570,6 +570,7 @@ private:
             QStringLiteral("help"), QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("reset"),
             QStringLiteral("run"), QStringLiteral("step"), QStringLiteral("run-until"), QStringLiteral("state"),
             QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("screen"), QStringLiteral("devices"),
+            QStringLiteral("mouse"),
             QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
         };
         if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
@@ -893,6 +894,21 @@ private:
     {
         if (m_cpuDebug) return m_cpuDebug->debugRead8(address);
         return m_machine != nullptr ? m_machine->debugRead8(address) : m_iicxMachine->read8(address);
+    }
+
+    [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const
+    {
+        return static_cast<std::uint16_t>((debugRead8(address) << 8) | debugRead8(address + 1));
+    }
+
+    [[nodiscard]] std::uint32_t debugRead32(std::uint32_t address) const
+    {
+        return (static_cast<std::uint32_t>(debugRead16(address)) << 16) | debugRead16(address + 2);
+    }
+
+    [[nodiscard]] std::uint32_t dereferenceHandle(std::uint32_t handle) const
+    {
+        return debugRead32(handle & 0x00ffffffU) & 0x00ffffffU;
     }
 
     [[nodiscard]] QString debugDisassemble(std::uint32_t address) const
@@ -1285,6 +1301,16 @@ private:
                       << " irq=" << (via1.interruptActive ? "yes" : "no") << '\n';
                 m_out << "via2_ifr=" << hexValue(via2.interruptFlags, 2) << " ier=" << hexValue(via2.interruptEnable, 2)
                       << " irq=" << (via2.interruptActive ? "yes" : "no") << '\n';
+                const auto adb = m_iicxMachine->adbDebugState();
+                m_out << "adb state=" << static_cast<int>(adb.state)
+                      << " command=" << hexValue(adb.command, 2)
+                      << " response=" << adb.responseBytes
+                      << " cycles=" << adb.transferCycles
+                      << " pending=" << (adb.commandPending ? "yes" : "no")
+                      << " tx=" << (adb.transmittingFromVia ? "yes" : "no")
+                      << " dx=" << adb.pendingMouseDx << " dy=" << adb.pendingMouseDy
+                      << " keyboard=" << static_cast<int>(adb.keyboardAddress)
+                      << " mouse=" << static_cast<int>(adb.mouseAddress) << '\n';
             }
             if (device.isEmpty() || device == QStringLiteral("scsi")) {
                 m_out << "scsi_reads=" << io.scsiReads << " scsi_writes=" << io.scsiWrites << '\n';
@@ -1443,6 +1469,21 @@ private:
             m_out << "screen=" << label << " hash=" << hexValue(hash) << " zero_bytes=" << zeroBytes
                   << " full_bytes=" << fullBytes << " size=" << frame.width << 'x' << frame.height
                   << " depth=" << frame.bitsPerPixel << '\n';
+            if (m_iicxMachine != nullptr) {
+                const auto device = dereferenceHandle(debugRead32(0x08a8));
+                const auto pixMapHandle = device == 0 ? 0 : debugRead32(device + 0x16);
+                const auto pixMap = pixMapHandle == 0 ? 0 : dereferenceHandle(pixMapHandle);
+                if (device != 0 && pixMap != 0) {
+                    m_out << "gdevice=" << hexValue(device)
+                          << " mode=" << hexValue(debugRead32(device + 0x2a))
+                          << " pixmap=" << hexValue(pixMap)
+                          << " base=" << hexValue(debugRead32(pixMap))
+                          << " row_bytes=" << (debugRead16(pixMap + 4) & 0x3fffU)
+                          << " pixel_size=" << debugRead16(pixMap + 0x20)
+                          << " cmp_count=" << debugRead16(pixMap + 0x22)
+                          << " cmp_size=" << debugRead16(pixMap + 0x24) << '\n';
+                }
+            }
             return;
         }
         if (parts.size() >= 3 && parts[1] == QStringLiteral("export")) {
@@ -1625,9 +1666,11 @@ private:
     void handleMouse(const QStringList& parts)
     {
         if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
-            m_out << "mouse x=" << m_machine->mouseX()
-                  << " y=" << m_machine->mouseY()
-                  << " button=" << (m_machine->mouseButtonPressed() ? "down" : "up") << '\n';
+            const auto x = m_machine ? m_machine->mouseX() : m_debugMouseX;
+            const auto y = m_machine ? m_machine->mouseY() : m_debugMouseY;
+            const auto pressed = m_machine ? m_machine->mouseButtonPressed() : m_debugMouseButton;
+            m_out << "mouse x=" << x << " y=" << y
+                  << " button=" << (pressed ? "down" : "up") << '\n';
             return;
         }
         if (parts.size() >= 4 && parts[1] == QStringLiteral("move")) {
@@ -1637,19 +1680,27 @@ private:
                 m_out << "invalid mouse coordinates\n";
                 return;
             }
-            m_machine->setMousePosition(static_cast<std::int16_t>(*x), static_cast<std::int16_t>(*y));
+            m_debugMouseX = static_cast<std::int16_t>(*x);
+            m_debugMouseY = static_cast<std::int16_t>(*y);
+            if (m_machine) m_machine->setMousePosition(m_debugMouseX, m_debugMouseY);
+            else m_session->queueMousePosition(m_debugMouseX, m_debugMouseY);
             handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
             return;
         }
         if (parts.size() >= 4 && parts[1] == QStringLiteral("delta")) {
             const auto dx = parts[2].toInt();
             const auto dy = parts[3].toInt();
-            m_machine->moveMouse(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
+            m_debugMouseX = static_cast<std::int16_t>(m_debugMouseX + dx);
+            m_debugMouseY = static_cast<std::int16_t>(m_debugMouseY + dy);
+            if (m_machine) m_machine->moveMouse(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
+            else m_session->queueMouseDelta(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
             handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
             return;
         }
         if (parts.size() >= 2 && (parts[1] == QStringLiteral("down") || parts[1] == QStringLiteral("up"))) {
-            m_machine->setMouseButton(parts[1] == QStringLiteral("down"));
+            m_debugMouseButton = parts[1] == QStringLiteral("down");
+            if (m_machine) m_machine->setMouseButton(m_debugMouseButton);
+            else m_session->queueMouseButton(m_debugMouseButton);
             handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
             return;
         }
@@ -2274,6 +2325,9 @@ private:
     QTextStream m_out { stdout };
     bool m_romLoaded = false;
     bool m_gdbEnabled = false;
+    std::int16_t m_debugMouseX = 0;
+    std::int16_t m_debugMouseY = 0;
+    bool m_debugMouseButton = false;
     quint16 m_gdbPort = 1234;
     std::set<std::uint32_t> m_breakpoints;
     QStringList m_watches;
