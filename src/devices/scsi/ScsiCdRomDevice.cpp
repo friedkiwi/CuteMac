@@ -205,6 +205,10 @@ ScsiCommandResult ScsiCdRomDevice::requestSense(std::uint8_t allocationLength)
 ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, std::uint8_t pageCode, std::uint16_t allocationLength) const
 {
     QByteArray data(tenByte ? 8 : 4, '\0');
+    // The device-specific parameter byte is byte 2 in a MODE SENSE(6)
+    // header and byte 3 in a MODE SENSE(10) header.  Bit 7 advertises
+    // write protection; classic Mac OS uses it to avoid desktop-file writes.
+    data[tenByte ? 3 : 2] = static_cast<char>(0x80);
     if (pageCode == 0x0d || pageCode == 0x3f) data.append(QByteArray::fromHex("0d06000d003c004b"));
     if (pageCode == 0x2a || pageCode == 0x3f) data.append(QByteArray::fromHex("2a0e0000000328000562000000400562"));
     if (data.size() == (tenByte ? 8 : 4)) return { {}, 0x02, 0, senseIllegalRequest };

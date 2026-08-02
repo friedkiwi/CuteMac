@@ -137,6 +137,11 @@ int main()
     ok &= expect(cdMode.status == 0 && cdMode.data.contains(QByteArray::fromHex("0d06000d003c004b"))
             && cdMode.data.contains(QByteArray::fromHex("2a0e")),
         "CD-ROM mode pages are missing");
+    ok &= expect((static_cast<std::uint8_t>(cdMode.data[2]) & 0x80) != 0,
+        "CD-ROM MODE SENSE(6) must advertise write protection");
+    const auto cdMode10 = cdRom.executeCommand(QByteArray::fromHex("5a003f0000000000ff00"), {});
+    ok &= expect(cdMode10.status == 0 && (static_cast<std::uint8_t>(cdMode10.data[3]) & 0x80) != 0,
+        "CD-ROM MODE SENSE(10) must advertise write protection");
     const auto appleRaw = cdRom.executeCommand(QByteArray::fromHex("d80000000002000000010000"), {});
     ok &= expect(appleRaw.status == 0 && appleRaw.data.size() == 2352
             && appleRaw.data.mid(16, 2048) == QByteArray(2048, static_cast<char>(0x5a)),
