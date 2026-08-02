@@ -52,6 +52,8 @@ control:
         beq.w   set_mode
         cmpi.w  #3,%d0
         beq.w   set_entries
+        cmpi.w  #6,%d0
+        beq.w   set_gray
         cmpi.w  #7,%d0
         beq.w   set_interrupt
         cmpi.w  #26,%d0                | CuteMac: install guest helpers
@@ -79,8 +81,12 @@ set_entries:
         beq.w   param_error
         cmpi.w  #255,%d2
         bhi.w   param_error
+        movem.l %d4-%d5/%a4,-(%sp)
         bsr.w   card_base
         adda.l  #0x00080002,%a2
+        moveq   #0,%d5
+        movea.l 20(%a1),%a4
+        move.b  19(%a4),%d5
 set_entries_loop:
         cmpi.w  #-1,%d3
         bne.s   set_entries_sequential
@@ -90,12 +96,43 @@ set_entries_sequential:
         move.w  %d3,%d1
         addq.w  #1,%d3
 set_entries_index_ready:
+        bsr.w   physical_palette_index
         move.b  %d1,(%a2)
+        tst.b   %d5
+        bne.s   set_entries_gray
         move.b  2(%a3),1(%a2)
         move.b  4(%a3),2(%a2)
         move.b  6(%a3),3(%a2)
+        bra.s   set_entries_next
+set_entries_gray:
+        moveq   #0,%d0
+        move.b  2(%a3),%d0
+        mulu.w  #77,%d0
+        moveq   #0,%d4
+        move.b  4(%a3),%d4
+        mulu.w  #150,%d4
+        add.l   %d4,%d0
+        moveq   #0,%d4
+        move.b  6(%a3),%d4
+        mulu.w  #29,%d4
+        add.l   %d4,%d0
+        lsr.l   #8,%d0
+        move.b  %d0,1(%a2)
+        move.b  %d0,2(%a2)
+        move.b  %d0,3(%a2)
+set_entries_next:
         adda.w  #8,%a3
         dbra    %d2,set_entries_loop
+        movem.l (%sp)+,%d4-%d5/%a4
+        moveq   #0,%d0
+        bra.w   complete
+
+set_gray:
+        movea.l 20(%a1),%a2
+        tst.l   %a2
+        beq.w   param_error
+        move.w  28(%a0),%d0
+        move.b  %d0,19(%a2)
         moveq   #0,%d0
         bra.w   complete
 
@@ -194,6 +231,20 @@ card_base:
         movea.l %d0,%a2
         rts
 
+physical_palette_index:
+        moveq   #0,%d0
+        move.b  -2(%a2),%d0             | current mode: 0=1, 1=2, 2=4, 3=8 bpp
+        cmpi.w  #3,%d0
+        bls.s   palette_mode_indexed
+        moveq   #3,%d0                  | direct modes do not normally use the CLUT
+palette_mode_indexed:
+        lsl.w   #1,%d0
+        move.w  palette_multipliers(%pc,%d0.w),%d0
+        mulu.w  %d0,%d1                 | logical index -> physical 0..255 RAMDAC index
+        rts
+palette_multipliers:
+        .word   255,85,17,1
+
 install_guest_helpers:
         lea     service_base(%pc),%a2
         move.l  %a2,-(%sp)
@@ -266,6 +317,7 @@ get_entries_sequential:
         move.w  %d1,(%a3)
         addq.w  #1,%d3
 get_entries_index_ready:
+        bsr.w   physical_palette_index
         move.b  %d1,(%a2)
         move.b  1(%a2),%d0
         move.b  %d0,2(%a3)
@@ -293,7 +345,12 @@ get_base:
         moveq   #0,%d0
         bra.w   complete
 get_gray:
-        clr.b   28(%a0)
+        movea.l 20(%a1),%a2
+        tst.l   %a2
+        beq.w   param_error
+        moveq   #0,%d0
+        move.b  19(%a2),%d0
+        move.w  %d0,28(%a0)
         moveq   #0,%d0
         bra.w   complete
 get_interrupt:
