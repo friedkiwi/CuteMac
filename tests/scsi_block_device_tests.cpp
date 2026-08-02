@@ -33,6 +33,7 @@ public:
 
 void sendByte(cutemac::devices::scsi::ncr5380::Ncr5380& controller, std::uint8_t value, bool dataOut)
 {
+    if (dataOut) (void)controller.readRegister(5, false);
     controller.writeRegister(0, dataOut, value);
     if (dataOut) return;
     controller.writeRegister(1, false, 0x11);
@@ -167,12 +168,13 @@ int main()
     for (const auto byte : QByteArray::fromHex("00000000")) sendByte(controller, static_cast<std::uint8_t>(byte), true);
     ok &= expect(controller.debugState().phase == QStringLiteral("data-out")
             && (controller.readRegister(5, false) & 0x08) != 0
-            && (controller.readRegister(5, false) & 0x40) == 0,
-        "pseudo-DMA DATA OUT must retain phase match while its final byte drains");
+            && (controller.readRegister(5, false) & 0x40) != 0,
+        "pseudo-DMA DATA OUT must retain phase match and final DRQ until DMA stops");
+    controller.writeRegister(2, false, 0x00);
     ok &= expect(controller.debugState().phase == QStringLiteral("status")
             && (controller.readRegister(5, false) & 0x08) == 0
             && target->lastDataOut == QByteArray::fromHex("00000000"),
-        "the drained pseudo-DMA byte must advance to STATUS and report a phase mismatch");
+        "stopping pseudo-DMA must advance to STATUS and report a phase mismatch");
 
     target->responseData = QByteArray(36, static_cast<char>(0x5a));
     controller.reset();
@@ -185,7 +187,11 @@ int main()
     ok &= expect(!controller.debugState().request && (controller.readRegister(4, false) & 0x20) == 0
             && controller.debugState().request,
         "pseudo-DMA DATA IN must expose a REQ release before the next byte");
-    for (int byte = 1; byte < 36; ++byte) pseudoDmaInquiry.append(static_cast<char>(controller.readRegister(6, true)));
+    for (int byte = 1; byte < 36; ++byte) {
+        ok &= expect((controller.readRegister(5, false) & 0x40) != 0,
+            "pseudo-DMA DATA IN must reassert DRQ before each byte");
+        pseudoDmaInquiry.append(static_cast<char>(controller.readRegister(6, true)));
+    }
     ok &= expect(pseudoDmaInquiry == target->responseData,
         "pseudo-DMA DATA IN must transfer every INQUIRY byte");
     ok &= expect(controller.debugState().phase == QStringLiteral("status"),

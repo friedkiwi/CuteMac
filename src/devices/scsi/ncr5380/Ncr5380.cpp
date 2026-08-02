@@ -55,7 +55,6 @@ void Ncr5380::reset()
     m_request = false;
     m_requestReassertPending = false;
     m_dataOutCompletionPending = false;
-    m_dataOutDrainStatusReads = 0;
     m_previousAck = false;
     m_commandReady = false;
     m_lastCommand.clear();
@@ -86,10 +85,11 @@ std::uint8_t Ncr5380::readRegister(std::uint8_t registerIndex, bool dack)
 {
     registerIndex &= 0x07;
     if (dack) {
-        if (m_requestReassertPending) {
-            m_request = true;
-            m_requestReassertPending = false;
-        }
+        // DACK only completes a transfer for a currently asserted REQ.  It
+        // must not make the target's next REQ visible by itself: the Mac ROM
+        // polls the bus/status register between bytes, and repeated or
+        // restarted aperture reads before that poll must not consume data.
+        if (!m_request) return 0;
         const auto value = readDataByte();
         if (m_phase == Phase::DataIn && m_request) {
             m_request = false;
@@ -124,10 +124,7 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
 {
     registerIndex &= 0x07;
     if (dack) {
-        if (m_requestReassertPending) {
-            m_request = true;
-            m_requestReassertPending = false;
-        }
+        if (!m_request) return;
         writeDataByte(value);
         if (m_phase == Phase::DataOut && m_request) {
             m_request = false;
@@ -207,7 +204,6 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
     case mode:
         if ((m_registers[mode] & modeDma) != 0 && (value & modeDma) == 0 && m_dataOutCompletionPending) {
             m_dataOutCompletionPending = false;
-            m_dataOutDrainStatusReads = 0;
             completeDataOutCommand();
         }
         m_registers[mode] = value;
@@ -245,7 +241,6 @@ void Ncr5380::setPhase(Phase phase, bool request)
         m_dataIndex = 0;
         m_expectedDataOut = 0;
         m_dataOutCompletionPending = false;
-        m_dataOutDrainStatusReads = 0;
         m_commandReady = false;
         m_activeTargetId = 0xff;
     }
@@ -328,13 +323,13 @@ void Ncr5380::finishDataPhaseIfDone()
         }
         if ((m_registers[mode] & modeDma) != 0) {
             m_dataOutCompletionPending = true;
-            m_dataOutDrainStatusReads = 2;
+            m_request = true;
         }
         else completeDataOutCommand();
     } else if (m_phase == Phase::DataOut && m_dataOut.size() >= m_expectedDataOut) {
         if ((m_registers[mode] & modeDma) != 0) {
             m_dataOutCompletionPending = true;
-            m_dataOutDrainStatusReads = 2;
+            m_request = true;
         }
         else completeDataOutCommand();
     }
@@ -397,6 +392,10 @@ std::uint8_t Ncr5380::currentBusStatus()
 
 std::uint8_t Ncr5380::busAndStatus()
 {
+    if (m_requestReassertPending) {
+        m_request = true;
+        m_requestReassertPending = false;
+    }
     std::uint8_t status = phaseMatchesTargetCommand() ? bsrPhaseMatch : 0;
     if (m_request) {
         status |= bsrReqPhaseMatch;
@@ -406,19 +405,6 @@ std::uint8_t Ncr5380::busAndStatus()
     }
     if (m_previousAck) {
         status |= bsrAck;
-    }
-    if (m_requestReassertPending) {
-        m_request = true;
-        m_requestReassertPending = false;
-    }
-    // The final pseudo-DMA send access loads the 5380's output path before
-    // ACK is released on the SCSI bus. Preserve the old phase long enough for
-    // the ROM's paired DRQ/phase polls, then let the target advance. This also
-    // lets a loaded disk driver observe the subsequent phase mismatch without
-    // requiring it to clear DMA mode first.
-    if (m_dataOutCompletionPending && m_dataOutDrainStatusReads > 0 && --m_dataOutDrainStatusReads == 0) {
-        m_dataOutCompletionPending = false;
-        completeDataOutCommand();
     }
     return status;
 }
