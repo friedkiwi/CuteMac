@@ -74,10 +74,10 @@ void MacPlusMachine::attachSerialEndpoint(int channel, std::shared_ptr<devices::
 MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(ramSize), 0)
     , m_scsiBus(m_scsi, {
-          .registerLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
-          .pseudoDmaLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
-          .pseudoDmaBurst = false,
-          .waitForDrq = true,
+          devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
+          devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
+          false,
+          true,
       })
 {
     (void)m_rtc.setNvramImagePath(nvramPath);

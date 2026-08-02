@@ -32,10 +32,10 @@ bool isScsiDma(std::uint32_t address)
 MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(std::max<std::size_t>(ramSize, 1024 * 1024)), 0)
     , m_scsiBus(m_scsi, {
-          .registerLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::MostSignificant,
-          .pseudoDmaLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::MostSignificant,
-          .pseudoDmaBurst = true,
-          .waitForDrq = true,
+          devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::MostSignificant,
+          devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::MostSignificant,
+          true,
+          true,
       })
 {
     (void)m_rtc.setNvramImagePath(nvramPath);

@@ -250,16 +250,16 @@ int main()
     controller.reset();
     controller.writeRegister(0, false, 0xa5);
     MacintoshBus plusBus(controller, {
-        .registerLane = MacintoshBus::RegisterLane::LeastSignificant,
-        .pseudoDmaLane = MacintoshBus::RegisterLane::LeastSignificant,
-        .pseudoDmaBurst = false,
-        .waitForDrq = true,
+        MacintoshBus::RegisterLane::LeastSignificant,
+        MacintoshBus::RegisterLane::LeastSignificant,
+        false,
+        true,
     });
     MacintoshBus macIIBus(controller, {
-        .registerLane = MacintoshBus::RegisterLane::MostSignificant,
-        .pseudoDmaLane = MacintoshBus::RegisterLane::MostSignificant,
-        .pseudoDmaBurst = true,
-        .waitForDrq = true,
+        MacintoshBus::RegisterLane::MostSignificant,
+        MacintoshBus::RegisterLane::MostSignificant,
+        true,
+        true,
     });
     ok &= expect(plusBus.readRegister(6, 2) == 0x00a5,
         "Mac Plus word register reads must place one byte on the low lane");
