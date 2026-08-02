@@ -333,6 +333,18 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         access->setCurrentIndex(device.readOnly ? 1 : 0);
         m_impl->scsi->setCellWidget(row, 3, access);
     };
+    const auto firstAvailableScsiId = [this](int preferred) {
+        QSet<int> occupied;
+        for (int row = 0; row < m_impl->scsi->rowCount(); ++row) {
+            const auto* selector = qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 0));
+            if (selector != nullptr) occupied.insert(selector->currentData().toInt());
+        }
+        for (int offset = 0; offset < 7; ++offset) {
+            const auto id = (preferred + offset) % 7;
+            if (!occupied.contains(id)) return id;
+        }
+        return -1;
+    };
     for (const auto& device : m_impl->original.scsiDevices) addScsiRow(device);
 
     m_impl->nubusDevices = m_impl->original.nubusDevices;
@@ -423,20 +435,38 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         const auto path = createDiskImage(storage::DiskImageType::Floppy, this);
         if (!path.isEmpty()) m_impl->floppy->setText(path);
     });
-    connect(addDisk, &QPushButton::clicked, this, [this, addScsiRow]() {
+    connect(addDisk, &QPushButton::clicked, this, [this, addScsiRow, firstAvailableScsiId]() {
         const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::HardDisk, QStringLiteral("Select Hard Disk Image"), this);
-        if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::HardDisk, path, false });
+        if (path.isEmpty()) return;
+        const auto id = firstAvailableScsiId(0);
+        if (id < 0) {
+            QMessageBox::warning(this, windowTitle(), QStringLiteral("All SCSI IDs are already in use."));
+            return;
+        }
+        addScsiRow({ id, config::ScsiDeviceType::HardDisk, path, false });
     });
-    connect(addCd, &QPushButton::clicked, this, [this, addScsiRow]() {
+    connect(addCd, &QPushButton::clicked, this, [this, addScsiRow, firstAvailableScsiId]() {
         const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::CdRom, QStringLiteral("Select CD-ROM Image"), this);
-        if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::CdRom, path, true });
+        if (path.isEmpty()) return;
+        const auto id = firstAvailableScsiId(3);
+        if (id < 0) {
+            QMessageBox::warning(this, windowTitle(), QStringLiteral("All SCSI IDs are already in use."));
+            return;
+        }
+        addScsiRow({ id, config::ScsiDeviceType::CdRom, path, true });
     });
     connect(remove, &QPushButton::clicked, this, [this]() {
         if (m_impl->scsi->currentRow() >= 0) m_impl->scsi->removeRow(m_impl->scsi->currentRow());
     });
-    connect(create, &QPushButton::clicked, this, [this, addScsiRow]() {
+    connect(create, &QPushButton::clicked, this, [this, addScsiRow, firstAvailableScsiId]() {
         const auto path = createDiskImage(storage::DiskImageType::HardDisk, this);
-        if (!path.isEmpty()) addScsiRow({ m_impl->scsi->rowCount() % 7, config::ScsiDeviceType::HardDisk, path, false });
+        if (path.isEmpty()) return;
+        const auto id = firstAvailableScsiId(0);
+        if (id < 0) {
+            QMessageBox::warning(this, windowTitle(), QStringLiteral("All SCSI IDs are already in use."));
+            return;
+        }
+        addScsiRow({ id, config::ScsiDeviceType::HardDisk, path, false });
     });
     connect(addCuteMacVideo, &QAction::triggered, this, [this, refreshNuBus]() {
         config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4, true};
