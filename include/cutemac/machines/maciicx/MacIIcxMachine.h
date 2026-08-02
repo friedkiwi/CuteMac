@@ -14,6 +14,7 @@
 #include "cutemac/core/IMachine.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/core/MachineScheduler.h"
+#include "cutemac/core/PhysicalMemoryMap.h"
 #include "cutemac/cpu/m68k/M68kBus.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/audio/AppleSoundChip.h"
@@ -103,6 +104,7 @@ private:
     void updateViaInputs();
     void advanceDevices(int cpuCycles);
     [[nodiscard]] std::optional<std::size_t> ramIndex(std::uint32_t address) const;
+    void rebuildPhysicalMemoryMap();
 
     cpu::m68k::M68kCpuCore m_cpu;
     QVector<std::uint8_t> m_ram;
@@ -120,6 +122,7 @@ private:
     std::array<std::shared_ptr<devices::scsi::ScsiBlockDevice>, 7> m_scsiDisks;
     std::array<std::shared_ptr<devices::scsi::ScsiCdRomDevice>, 7> m_scsiCdRoms;
     core::MachineScheduler m_scheduler;
+    core::PhysicalMemoryMap m_physicalMemoryMap;
     QString m_romPath;
     QString m_floppyPath;
     bool m_romLoaded = false;

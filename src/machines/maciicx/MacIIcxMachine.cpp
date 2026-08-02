@@ -17,6 +17,7 @@ constexpr std::uint32_t ioMirrorMask = 0x00f00000;
 constexpr std::uint32_t ioOffsetMask = 0x000fffff;
 constexpr int cpuToViaRatio = 20;
 constexpr int viaVblPeriod = 13030;
+constexpr std::uint32_t ramMapSearchEnd = 192U * 1024U * 1024U;
 
 std::uint8_t highByte(std::uint16_t value) { return static_cast<std::uint8_t>(value >> 8); }
 std::uint8_t lowByte(std::uint16_t value) { return static_cast<std::uint8_t>(value); }
@@ -47,7 +48,11 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     m_via1.setAutomaticCa1Period(viaVblPeriod);
     m_via2.setAutomaticCa1Period(0);
     m_via1.setPortAChangedCallback([this](std::uint8_t value) {
-        m_overlay = (value & 0x10) != 0;
+        const auto overlay = (value & 0x10) != 0;
+        if (m_overlay != overlay) {
+            m_overlay = overlay;
+            rebuildPhysicalMemoryMap();
+        }
         m_swim.setSideSelect((value & 0x20) != 0);
     });
     m_via1.setPortBChangedCallback([this](std::uint8_t value, std::uint8_t ddr) {
@@ -64,7 +69,11 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
         updateInterrupts();
     });
     m_via2.setPortAChangedCallback([this](std::uint8_t value) {
-        m_glueRamSize = value & 0xc0;
+        const auto glueRamSize = static_cast<std::uint8_t>(value & 0xc0);
+        if (m_glueRamSize != glueRamSize) {
+            m_glueRamSize = glueRamSize;
+            rebuildPhysicalMemoryMap();
+        }
         updateViaInputs();
     });
     m_nubus.setSlotIrqCallback([this](int slot, bool asserted) {
@@ -186,6 +195,7 @@ void MacIIcxMachine::reset()
     m_via2.reset();
     m_nubus.reset();
     m_overlay = true;
+    rebuildPhysicalMemoryMap();
     updateViaInputs();
     m_cpu.reset();
     updateInterrupts();
@@ -248,6 +258,8 @@ void MacIIcxMachine::queueInput(const core::GuestInputEvent& event, std::uint64_
 
 std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
 {
+    std::uint8_t directValue = 0;
+    if (m_physicalMemoryMap.tryRead8(address, directValue)) return directValue;
     if (m_overlay && address < m_rom.size()) return m_rom[address];
     if (const auto index = ramIndex(address)) return m_ram[static_cast<qsizetype>(*index)];
     if ((address & 0xf0000000U) == romBase) return m_rom[(address - romBase) & (m_rom.size() - 1)];
@@ -261,6 +273,8 @@ std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
 
 std::uint16_t MacIIcxMachine::read16(std::uint32_t address)
 {
+    std::uint16_t directValue = 0;
+    if (m_physicalMemoryMap.tryRead16(address, directValue)) return directValue;
     if (isScsiDma(address)) {
         m_ioStatistics.scsiReads += 2;
         return static_cast<std::uint16_t>(m_scsiBus.readPseudoDma(2));
@@ -274,11 +288,14 @@ std::uint16_t MacIIcxMachine::read16(std::uint32_t address)
 
 std::uint32_t MacIIcxMachine::read32(std::uint32_t address)
 {
+    std::uint32_t directValue = 0;
+    if (m_physicalMemoryMap.tryRead32(address, directValue)) return directValue;
     return (static_cast<std::uint32_t>(read16(address)) << 16) | read16(address + 2);
 }
 
 void MacIIcxMachine::write8(std::uint32_t address, std::uint8_t value)
 {
+    if (m_physicalMemoryMap.tryWrite8(address, value)) return;
     if (const auto index = ramIndex(address); index && !(m_overlay && address < m_rom.size())) {
         m_ram[static_cast<qsizetype>(*index)] = value;
     } else if (isIo(address)) {
@@ -380,6 +397,7 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
 
 void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
 {
+    if (m_physicalMemoryMap.tryWrite16(address, value)) return;
     if (isScsiDma(address)) {
         m_ioStatistics.scsiWrites += 2;
         m_scsiBus.writePseudoDma(2, value);
@@ -400,6 +418,7 @@ void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
 
 void MacIIcxMachine::write32(std::uint32_t address, std::uint32_t value)
 {
+    if (m_physicalMemoryMap.tryWrite32(address, value)) return;
     if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
         ++m_ioStatistics.nubusWrites;
         m_nubus.write32(address, value);
@@ -407,6 +426,26 @@ void MacIIcxMachine::write32(std::uint32_t address, std::uint32_t value)
     }
     write16(address, static_cast<std::uint16_t>(value >> 16));
     write16(address + 2, static_cast<std::uint16_t>(value));
+}
+
+void MacIIcxMachine::rebuildPhysicalMemoryMap()
+{
+    m_physicalMemoryMap.clear();
+    for (std::uint32_t address = 0; address < ramMapSearchEnd;
+         address += core::PhysicalMemoryMap::pageSize) {
+        const auto index = ramIndex(address);
+        if (index && *index + core::PhysicalMemoryMap::pageSize <= static_cast<std::size_t>(m_ram.size())) {
+            m_physicalMemoryMap.mapReadWritePage(address, m_ram.data() + *index);
+        }
+    }
+
+    m_physicalMemoryMap.mapReadOnlyMirrored(romBase, 0x10000000U,
+        m_rom.data(), static_cast<std::uint32_t>(m_rom.size()));
+    if (m_overlay) {
+        for (std::uint32_t address = 0; address < m_rom.size(); address += core::PhysicalMemoryMap::pageSize) {
+            m_physicalMemoryMap.mapReadOnlyPage(address, m_rom.data() + address);
+        }
+    }
 }
 
 bool MacIIcxMachine::installNuBusCard(int slot, std::shared_ptr<devices::nubus::NuBusCard> card)

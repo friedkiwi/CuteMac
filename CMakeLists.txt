@@ -333,6 +333,10 @@ if(BUILD_TESTING)
     target_link_libraries(CuteMacSchedulerTests PRIVATE CuteMacCore)
     add_test(NAME machine-scheduler COMMAND CuteMacSchedulerTests)
 
+    add_executable(CuteMacPhysicalMemoryMapTests tests/physical_memory_map_tests.cpp)
+    target_link_libraries(CuteMacPhysicalMemoryMapTests PRIVATE CuteMacCore)
+    add_test(NAME physical-memory-map COMMAND CuteMacPhysicalMemoryMapTests)
+
     add_executable(CuteMacScsiBlockDeviceTests tests/scsi_block_device_tests.cpp)
     target_link_libraries(CuteMacScsiBlockDeviceTests PRIVATE CuteMacCore)
     add_test(NAME scsi-block-device COMMAND CuteMacScsiBlockDeviceTests)
