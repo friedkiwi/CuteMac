@@ -152,7 +152,9 @@ set_gray:
         movea.l 20(%a1),%a2
         tst.l   %a2
         beq.w   param_error
-        move.b  (%a3),19(%a2)           | nonzero enables luminance mapping
+        tst.b   (%a3)                   | 0 = monochrome, 1 = colour on System 6
+        seq     %d0
+        move.b  %d0,19(%a2)            | private flag is nonzero for luminance mapping
         moveq   #0,%d0
         bra.w   complete
 
@@ -390,7 +392,11 @@ get_gray:
         movea.l 20(%a1),%a2
         tst.l   %a2
         beq.w   param_error
-        move.b  19(%a2),(%a3)
+        moveq   #0,%d0
+        tst.b   19(%a2)
+        seq     %d0
+        andi.b  #1,%d0
+        move.b  %d0,(%a3)
         moveq   #0,%d0
         bra.w   complete
 get_interrupt:
