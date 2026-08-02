@@ -26,8 +26,10 @@
 #include "cutemac/config/Configuration.h"
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/IDebugCpuAccess.h"
+#include "cutemac/debug/SadMacDetector.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
+#include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/session/FramebufferRenderer.h"
 
@@ -487,6 +489,19 @@ private:
         QByteArray bytes;
     };
 
+    struct SadMacCapture {
+        bool armed = false;
+        bool detected = false;
+        std::uint64_t cycle = 0;
+        std::uint32_t pc = 0;
+        QString reason;
+        std::optional<std::uint32_t> primaryCode;
+        std::optional<std::uint32_t> secondaryCode;
+        QStringList registers;
+        QStringList instructions;
+        cutemac::devices::video::VideoFrame frame;
+    };
+
     static QStringList commandWords()
     {
         return {
@@ -501,6 +516,7 @@ private:
             QStringLiteral("rom-symbols"), QStringLiteral("screen"), QStringLiteral("sound"),
             QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("disk"),
             QStringLiteral("floppy"), QStringLiteral("mouse"), QStringLiteral("key"),
+            QStringLiteral("sadmac"), QStringLiteral("arm"), QStringLiteral("report"),
             QStringLiteral("trace"), QStringLiteral("pc-trace"), QStringLiteral("trap-trace"),
             QStringLiteral("irq-trace"), QStringLiteral("driver-trace"), QStringLiteral("timeline"),
             QStringLiteral("bootblock"), QStringLiteral("gdb"), QStringLiteral("script"),
@@ -554,7 +570,7 @@ private:
             QStringLiteral("help"), QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("reset"),
             QStringLiteral("run"), QStringLiteral("step"), QStringLiteral("run-until"), QStringLiteral("state"),
             QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("screen"), QStringLiteral("devices"),
-            QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
+            QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
         };
         if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
             m_out << command << " is not yet available for mac-iicx; common run/register/memory/video commands are available\n";
@@ -625,6 +641,8 @@ private:
             handleMouse(parts);
         } else if (command == QStringLiteral("key")) {
             handleKey(parts);
+        } else if (command == QStringLiteral("sadmac")) {
+            handleSadMac(parts);
         } else if (command == QStringLiteral("trace")) {
             configureTrace(parts);
         } else if (command == QStringLiteral("pc-trace")) {
@@ -704,6 +722,7 @@ private:
         m_out << "  mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
         m_out << "  trace [category on|off|dump|clear|save <file>] | pc-trace|trap-trace|irq-trace|driver-trace|timeline [count]\n";
+        m_out << "  sadmac arm|run [max-cycles]|status|report|save <prefix>|clear\n";
         m_out << "  bootblock verify | floppy last-window | floppy export-window <file>\n";
         m_out << "  gdb [enable|disable|port N|start|stop|status]\n";
         m_out << "  script <file> | paths | quit\n";
@@ -814,10 +833,13 @@ private:
 
     void reloadMachine()
     {
+        m_sadMac = {};
         m_session = std::make_unique<cutemac::core::EmulationSession>(m_configuration);
         m_cpuDebug = m_session->debugCpuAccess();
         m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(m_session->debugMachine(QStringLiteral("mac-plus")));
         m_iicxMachine = static_cast<cutemac::machines::maciicx::MacIIcxMachine*>(m_session->debugMachine(QStringLiteral("mac-iicx")));
+        m_powerMac8100Machine = static_cast<cutemac::machines::powermac8100::PowerMac8100Machine*>(
+            m_session->debugMachine(QStringLiteral("powermac-8100")));
         if (m_cpuDebug == nullptr && m_machine == nullptr && m_iicxMachine == nullptr) {
             m_out << "debug support is unavailable for machine " << m_configuration.machineId << '\n';
             m_romLoaded = false;
@@ -1975,6 +1997,112 @@ private:
         m_out << "gdb_stub=" << (m_gdbEnabled ? "enabled" : "disabled") << " port=" << m_gdbPort << '\n';
     }
 
+    void armSadMac()
+    {
+        m_sadMac = {};
+        m_sadMac.armed = true;
+        m_out << "sadmac armed architecture="
+              << (m_cpuDebug ? m_cpuDebug->debugCpuArchitecture() : QStringLiteral("unknown")) << '\n';
+    }
+
+    void sampleSadMacInstruction()
+    {
+        const auto pc = debugProgramCounter();
+        appendRing(m_sadMac.instructions, QStringLiteral("cycle=%1 pc=%2 %3")
+            .arg(m_session->status().cycles).arg(hexValue(pc), debugDisassemble(pc)));
+    }
+
+    bool detectSadMac()
+    {
+        if (!m_sadMac.armed || !cutemac::debug::SadMacDetector::detect(m_session->videoFrame())) return false;
+        const auto status = m_session->status();
+        m_sadMac.armed = false;
+        m_sadMac.detected = true;
+        m_sadMac.cycle = status.cycles;
+        m_sadMac.pc = debugProgramCounter();
+        m_sadMac.reason = QStringLiteral("framebuffer-layout");
+        m_sadMac.frame = m_session->videoFrame();
+        if (m_cpuDebug) m_sadMac.registers = m_cpuDebug->debugRegisterLines();
+        if (m_powerMac8100Machine != nullptr) {
+            const auto registers = m_powerMac8100Machine->cpuRegisters();
+            // The PDM ROM's 68k compatibility renderer carries the displayed
+            // primary and secondary words in these nanokernel registers.
+            m_sadMac.primaryCode = registers.gpr[15];
+            m_sadMac.secondaryCode = registers.gpr[14];
+        }
+        m_out << "sadmac detected cycle=" << m_sadMac.cycle << " pc=" << hexValue(m_sadMac.pc)
+              << " reason=" << m_sadMac.reason << '\n';
+        return true;
+    }
+
+    void reportSadMac(QTextStream& out, int instructionCount = 64) const
+    {
+        out << "sadmac detected=" << (m_sadMac.detected ? "yes" : "no")
+            << " armed=" << (m_sadMac.armed ? "yes" : "no") << '\n';
+        if (!m_sadMac.detected) return;
+        out << "machine=" << m_configuration.machineId << " architecture="
+            << (m_cpuDebug ? m_cpuDebug->debugCpuArchitecture() : QStringLiteral("unknown")) << '\n';
+        out << "cycle=" << m_sadMac.cycle << " pc=" << hexValue(m_sadMac.pc)
+            << " reason=" << m_sadMac.reason << '\n';
+        if (m_sadMac.primaryCode && m_sadMac.secondaryCode)
+            out << "codes primary=" << hexValue(*m_sadMac.primaryCode)
+                << " secondary=" << hexValue(*m_sadMac.secondaryCode) << '\n';
+        out << "frame=" << m_sadMac.frame.width << 'x' << m_sadMac.frame.height
+            << "x" << m_sadMac.frame.bitsPerPixel << " stride=" << m_sadMac.frame.strideBytes << '\n';
+        for (const auto& line : m_sadMac.registers) out << "register " << line << '\n';
+        const auto begin = std::max<qsizetype>(0, m_sadMac.instructions.size() - instructionCount);
+        for (qsizetype i = begin; i < m_sadMac.instructions.size(); ++i)
+            out << "instruction " << m_sadMac.instructions[i] << '\n';
+    }
+
+    void handleSadMac(const QStringList& parts)
+    {
+        const auto subcommand = parts.size() >= 2 ? parts[1].toLower() : QStringLiteral("status");
+        if (subcommand == QStringLiteral("arm")) {
+            armSadMac();
+        } else if (subcommand == QStringLiteral("clear")) {
+            m_sadMac = {};
+            m_out << "sadmac capture cleared\n";
+        } else if (subcommand == QStringLiteral("status")) {
+            reportSadMac(m_out, 0);
+        } else if (subcommand == QStringLiteral("report")) {
+            reportSadMac(m_out);
+        } else if (subcommand == QStringLiteral("run")) {
+            if (!requireRom()) return;
+            if (!m_sadMac.armed) armSadMac();
+            const auto maxCycles = parts.size() >= 3 ? std::max(1, parts[2].toInt()) : 100'000'000;
+            int cycles = 0;
+            unsigned samples = 0;
+            while (cycles < maxCycles && m_sadMac.armed) {
+                sampleSadMacInstruction();
+                cycles += std::max(1, debugStepInstruction());
+                if ((++samples & 0xffU) == 0 && detectSadMac()) break;
+            }
+            if (m_sadMac.armed) (void)detectSadMac();
+            m_out << (m_sadMac.detected ? "sadmac stopped" : "sadmac timeout")
+                  << " cycles=" << cycles << " pc=" << hexValue(debugProgramCounter()) << '\n';
+        } else if (subcommand == QStringLiteral("save")) {
+            if (!m_sadMac.detected || parts.size() < 3) {
+                m_out << "usage: sadmac save <prefix> (after detection)\n";
+                return;
+            }
+            QFile report(parts[2] + QStringLiteral(".txt"));
+            QFile frame(parts[2] + QStringLiteral(".frame"));
+            if (!report.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                || !frame.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                m_out << "failed to save sadmac capture\n";
+                return;
+            }
+            QTextStream stream(&report);
+            reportSadMac(stream, maxDebugTraceEntries);
+            stream.flush();
+            frame.write(m_sadMac.frame.pixels);
+            m_out << "saved " << report.fileName() << " and " << frame.fileName() << '\n';
+        } else {
+            m_out << "usage: sadmac arm|run [max-cycles]|status|report|save <prefix>|clear\n";
+        }
+    }
+
     void printPaths()
     {
         m_out << "config_root=" << cutemac::config::ConfigurationManager::configRootPath() << '\n';
@@ -2133,6 +2261,7 @@ private:
     cutemac::core::IDebugCpuAccess* m_cpuDebug = nullptr;
     cutemac::machines::macplus::MacPlusMachine* m_machine = nullptr;
     cutemac::machines::maciicx::MacIIcxMachine* m_iicxMachine = nullptr;
+    cutemac::machines::powermac8100::PowerMac8100Machine* m_powerMac8100Machine = nullptr;
     std::unique_ptr<GdbStub> m_gdbStub;
     QTextStream m_out { stdout };
     bool m_romLoaded = false;
@@ -2146,6 +2275,7 @@ private:
     QStringList m_trapTrace;
     QStringList m_driverTrace;
     QStringList m_timeline;
+    SadMacCapture m_sadMac;
     QMap<QString, MemorySnapshot> m_memorySnapshots;
     QMap<QString, std::uint32_t> m_symbols {
         { QStringLiteral("ROMBootSpin"), 0x004007ba },

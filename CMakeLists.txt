@@ -51,6 +51,7 @@ add_library(CuteMacCore
     src/devices/video/SonoraVideo.cpp
     src/devices/video/nubus/CuteMacVideoCard.cpp
     src/devices/video/nubus/MacintoshIIVideoCard.cpp
+    src/debug/SadMacDetector.cpp
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
     src/machines/maciicx/MacIIcxMachine.cpp
@@ -296,6 +297,10 @@ if(BUILD_TESTING)
     add_executable(CuteMacDebugCpuAccessTests tests/debug_cpu_access_tests.cpp)
     target_link_libraries(CuteMacDebugCpuAccessTests PRIVATE CuteMacCore)
     add_test(NAME debug-cpu-access COMMAND CuteMacDebugCpuAccessTests)
+
+    add_executable(CuteMacSadMacDetectorTests tests/sad_mac_detector_tests.cpp)
+    target_link_libraries(CuteMacSadMacDetectorTests PRIVATE CuteMacCore)
+    add_test(NAME sad-mac-detector COMMAND CuteMacSadMacDetectorTests)
 
     add_executable(CuteMacImageWriterTests tests/imagewriter_tests.cpp)
     target_link_libraries(CuteMacImageWriterTests PRIVATE CuteMacCore Qt6::Gui)
