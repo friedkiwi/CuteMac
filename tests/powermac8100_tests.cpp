@@ -73,6 +73,23 @@ int main(int argc, char** argv)
     machine.debugWrite32(0x100, 0x12345678U);
     require(machine.debugRead32(0x100) == 0x12345678U, "RAM mapping");
 
+    const auto diskPath = directory.filePath(QStringLiteral("internal-scsi.img"));
+    QByteArray diskBytes(512, 0);
+    diskBytes.replace(0, 4, QByteArray::fromHex("01020304"));
+    QFile diskFile(diskPath); require(diskFile.open(QIODevice::WriteOnly), "open internal SCSI image");
+    require(diskFile.write(diskBytes) == diskBytes.size(), "write internal SCSI image"); diskFile.close();
+    require(machine.loadScsiDisk(0, diskPath, false), "attach internal SCSI disk");
+    for (const auto byte : QByteArray::fromHex("80080000000100"))
+        machine.debugWrite8(0x50f11020U, static_cast<std::uint8_t>(byte));
+    machine.debugWrite8(0x50f11040U, 0); machine.debugWrite8(0x50f11030U, 0x42);
+    (void)machine.debugRead8(0x50f11050U);
+    machine.debugWrite8(0x50f11000U, 0); machine.debugWrite8(0x50f11010U, 2);
+    machine.debugWrite8(0x50f11030U, 0x90);
+    machine.debugWrite32(0x50f32000U, 0x00001000U);
+    machine.debugWrite8(0x50f32008U, 0x02);
+    require(machine.debugRead32(0x1000U) == 0x01020304U,
+        "AMIC DMA routes internal SCSI data into RAM");
+
     cutemac::machines::powermac8100::PowerMac8100Machine expanded(16 * 1024 * 1024);
     require(expanded.loadRomFile(path, {}), "load expanded-memory test ROM"); expanded.reset();
     const std::uint64_t hmcConfig = std::uint64_t { 2 } << 29; // 8 MiB SIMM decode spacing

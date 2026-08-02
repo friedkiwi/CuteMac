@@ -226,17 +226,22 @@ void PowerMac8100Machine::updateInterrupts()
 void PowerMac8100Machine::serviceScsiDma()
 {
     if (!(m_scsiDmaControl & 0x02U)) return;
+    // AMIC's SCSI DMA channel is shared by the two 53C94s.  The launch-model
+    // 8100 boots from SCSI bus B, while bus A is the external connector.
+    // Route the transfer to whichever controller is currently asserting DRQ;
+    // configured fixed disks are attached to bus B.
+    auto* controller = m_scsiB.dmaRequest() ? &m_scsiB : &m_scsi;
     unsigned guard = 0;
-    while (m_scsi.dmaRequest() && guard++ < 1'048'576U) {
+    while (controller->dmaRequest() && guard++ < 1'048'576U) {
         const auto address = m_scsiDmaAddress + m_scsiDmaOffset;
-        if (m_scsi.dmaToHost()) {
-            const auto swapped = m_scsi.readDmaWord();
+        if (controller->dmaToHost()) {
+            const auto swapped = controller->readDmaWord();
             const auto word = static_cast<std::uint16_t>((swapped << 8) | (swapped >> 8));
             writeMapped8(address, static_cast<std::uint8_t>(word >> 8));
             writeMapped8(address + 1, static_cast<std::uint8_t>(word));
         } else {
             const auto word = static_cast<std::uint16_t>((readMapped8(address) << 8) | readMapped8(address + 1));
-            m_scsi.writeDmaWord(static_cast<std::uint16_t>((word << 8) | (word >> 8)));
+            controller->writeDmaWord(static_cast<std::uint16_t>((word << 8) | (word >> 8)));
         }
         m_scsiDmaOffset += 2;
     }
@@ -396,7 +401,7 @@ void PowerMac8100Machine::writeMapped8(std::uint32_t address, std::uint8_t value
             m_scsi.writeRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4), value); serviceScsiDma(); updateInterrupts(); break;
         }
         if (offset >= 0x11000U && offset < 0x11100U) {
-            m_scsiB.writeRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4), value); updateInterrupts(); break;
+            m_scsiB.writeRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4), value); serviceScsiDma(); updateInterrupts(); break;
         }
         if (offset >= 0x31000U && offset < 0x31004U) {
             const auto shift = (3U - (offset & 3U)) * 8U;
