@@ -11,6 +11,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputMethodEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -37,6 +38,15 @@
 #include "cutemac/rom/RomCatalog.h"
 
 namespace {
+
+class NonEditableTableWidget final : public QTableWidget {
+public:
+    using QTableWidget::QTableWidget;
+
+protected:
+    bool edit(const QModelIndex&, EditTrigger, QEvent*) override { return false; }
+    void inputMethodEvent(QInputMethodEvent* event) override { event->ignore(); }
+};
 
 struct ProfileRow {
     QString path;
@@ -72,7 +82,7 @@ private:
         headerLayout->addStretch();
         layout->addLayout(headerLayout);
 
-        m_table = new QTableWidget;
+        m_table = new NonEditableTableWidget;
         m_table->setColumnCount(6);
         m_table->setHorizontalHeaderLabels({
             QStringLiteral("Name"),

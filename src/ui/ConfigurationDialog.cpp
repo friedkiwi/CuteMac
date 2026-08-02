@@ -6,6 +6,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHeaderView>
+#include <QInputMethodEvent>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QLabel>
@@ -54,6 +55,15 @@ public:
 };
 
 namespace {
+
+class NonEditableTableWidget final : public QTableWidget {
+public:
+    using QTableWidget::QTableWidget;
+
+protected:
+    bool edit(const QModelIndex&, EditTrigger, QEvent*) override { return false; }
+    void inputMethodEvent(QInputMethodEvent* event) override { event->ignore(); }
+};
 
 QString nubusCardName(config::NuBusDeviceType type)
 {
@@ -262,7 +272,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
 
     m_impl->scsiTab = new QWidget;
     auto* scsiLayout = new QVBoxLayout(m_impl->scsiTab);
-    m_impl->scsi = new QTableWidget(0, 4);
+    m_impl->scsi = new NonEditableTableWidget(0, 4);
     m_impl->scsi->setHorizontalHeaderLabels({ QStringLiteral("ID"), QStringLiteral("Device"), QStringLiteral("Image"), QStringLiteral("Access") });
     m_impl->scsi->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     m_impl->scsi->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -284,7 +294,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
 
     m_impl->nubusTab = new QWidget;
     auto* nubusLayout = new QVBoxLayout(m_impl->nubusTab);
-    m_impl->nubus = new QTableWidget(0, 2);
+    m_impl->nubus = new NonEditableTableWidget(0, 2);
     m_impl->nubus->setHorizontalHeaderLabels({ QStringLiteral("Slot"), QStringLiteral("Card") });
     m_impl->nubus->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_impl->nubus->setSelectionBehavior(QAbstractItemView::SelectRows);
