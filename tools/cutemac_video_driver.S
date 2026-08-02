@@ -378,6 +378,7 @@ complete:
         beq.s   queued
         rts
 queued:
+        move.w  %d0,16(%a0)            | JIODone requires ioResult to leave ioInProgress
         movea.l 0x08fc,%a2
         jmp     (%a2)
 
