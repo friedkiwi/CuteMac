@@ -19,6 +19,7 @@
 #include "cutemac/devices/scc/Z8530Scc.h"
 #include "cutemac/devices/scsi/ScsiBlockDevice.h"
 #include "cutemac/devices/scsi/ScsiCdRomDevice.h"
+#include "cutemac/devices/scsi/ncr5380/MacintoshNcr5380Bus.h"
 #include "cutemac/devices/scsi/ncr5380/Ncr5380.h"
 #include "cutemac/devices/via6522/Via6522.h"
 
@@ -193,6 +194,7 @@ private:
     devices::scc::Z8530Scc m_scc;
     devices::iwm::IwmController m_iwm;
     devices::scsi::ncr5380::Ncr5380 m_scsi;
+    devices::scsi::ncr5380::MacintoshNcr5380Bus m_scsiBus;
     std::array<std::shared_ptr<devices::scsi::ScsiBlockDevice>, 7> m_scsiDisks;
     std::array<std::shared_ptr<devices::scsi::ScsiCdRomDevice>, 7> m_scsiCdRoms;
 

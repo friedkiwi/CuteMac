@@ -6,6 +6,7 @@
 
 #include "cutemac/devices/scsi/ScsiBlockDevice.h"
 #include "cutemac/devices/scsi/ScsiCdRomDevice.h"
+#include "cutemac/devices/scsi/ncr5380/MacintoshNcr5380Bus.h"
 #include "cutemac/devices/scsi/ncr5380/Ncr5380.h"
 
 namespace {
@@ -196,5 +197,42 @@ int main()
         "pseudo-DMA DATA IN must transfer every INQUIRY byte");
     ok &= expect(controller.debugState().phase == QStringLiteral("status"),
         "pseudo-DMA DATA IN must complete its handshake and enter STATUS");
+
+    using MacintoshBus = cutemac::devices::scsi::ncr5380::MacintoshNcr5380Bus;
+    controller.reset();
+    controller.writeRegister(0, false, 0xa5);
+    MacintoshBus plusBus(controller, {
+        .registerLane = MacintoshBus::RegisterLane::LeastSignificant,
+        .pseudoDmaLane = MacintoshBus::RegisterLane::LeastSignificant,
+        .pseudoDmaBurst = false,
+        .waitForDrq = true,
+    });
+    MacintoshBus macIIBus(controller, {
+        .registerLane = MacintoshBus::RegisterLane::MostSignificant,
+        .pseudoDmaLane = MacintoshBus::RegisterLane::MostSignificant,
+        .pseudoDmaBurst = true,
+        .waitForDrq = true,
+    });
+    ok &= expect(plusBus.readRegister(6, 2) == 0x00a5,
+        "Mac Plus word register reads must place one byte on the low lane");
+    ok &= expect(macIIBus.readRegister(6, 2) == 0xa500,
+        "Mac II word register reads must place one byte on the high lane");
+
+    target->responseData = QByteArray::fromHex("11223344");
+    controller.reset();
+    controller.writeRegister(0, false, 0x01);
+    controller.writeRegister(1, false, 0x04);
+    controller.writeRegister(1, false, 0x00);
+    for (const auto byte : QByteArray::fromHex("120000000400")) sendByte(controller, static_cast<std::uint8_t>(byte), false);
+    ok &= expect(plusBus.readPseudoDma(2) == 0x0011 && controller.debugState().dataIndex == 1,
+        "one Mac Plus word transaction must produce exactly one DACK transfer");
+
+    controller.reset();
+    controller.writeRegister(0, false, 0x01);
+    controller.writeRegister(1, false, 0x04);
+    controller.writeRegister(1, false, 0x00);
+    for (const auto byte : QByteArray::fromHex("120000000400")) sendByte(controller, static_cast<std::uint8_t>(byte), false);
+    ok &= expect(macIIBus.readPseudoDma(2) == 0x1122 && controller.debugState().dataIndex == 2,
+        "one Mac II word burst must produce exactly two ordered DACK transfers");
     return ok ? 0 : 1;
 }

@@ -73,6 +73,12 @@ void MacPlusMachine::attachSerialEndpoint(int channel, std::shared_ptr<devices::
 
 MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(ramSize), 0)
+    , m_scsiBus(m_scsi, {
+          .registerLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
+          .pseudoDmaLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
+          .pseudoDmaBurst = false,
+          .waitForDrq = true,
+      })
 {
     (void)m_rtc.setNvramImagePath(nvramPath);
     m_cpu.setModel(cpu::m68k::M68kCpuCore::Model::M68000);
@@ -410,6 +416,17 @@ std::uint8_t MacPlusMachine::read8(std::uint32_t address)
 
 std::uint16_t MacPlusMachine::read16(std::uint32_t address)
 {
+    address &= 0x00ffffff;
+    if (regionFor(address) == Region::Scsi) {
+        ++m_accessSummary.scsiReads;
+        const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
+        const auto dack = (address & 0x0200) != 0;
+        const auto value = static_cast<std::uint16_t>(dack
+                ? m_scsiBus.readPseudoDma(2)
+                : m_scsiBus.readRegister(registerIndex, 2));
+        recordBusAccess("read", Region::Scsi, address, value, 2);
+        return value;
+    }
     return static_cast<std::uint16_t>((read8(address) << 8) | read8(address + 1));
 }
 
@@ -437,6 +454,16 @@ void MacPlusMachine::write8(std::uint32_t address, std::uint8_t value)
 
 void MacPlusMachine::write16(std::uint32_t address, std::uint16_t value)
 {
+    address &= 0x00ffffff;
+    if (regionFor(address) == Region::Scsi) {
+        ++m_accessSummary.scsiWrites;
+        const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
+        const auto dack = (address & 0x0200) != 0;
+        if (dack) m_scsiBus.writePseudoDma(2, value);
+        else m_scsiBus.writeRegister(registerIndex, 2, value);
+        recordBusAccess("write", Region::Scsi, address, value, 2);
+        return;
+    }
     write8(address, highByte(value));
     write8(address + 1, lowByte(value));
 }
@@ -532,7 +559,7 @@ std::uint8_t MacPlusMachine::readDevice8(std::uint32_t address, Region region)
         ++m_accessSummary.scsiReads;
         const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
         const auto dack = (address & 0x0200) != 0;
-        return m_scsi.readRegister(registerIndex, dack);
+        return static_cast<std::uint8_t>(dack ? m_scsiBus.readPseudoDma(1) : m_scsiBus.readRegister(registerIndex, 1));
     }
     case Region::Configuration:
         ++m_accessSummary.configurationReads;
@@ -584,7 +611,8 @@ void MacPlusMachine::writeDevice8(std::uint32_t address, Region region, std::uin
         ++m_accessSummary.scsiWrites;
         const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
         const auto dack = (address & 0x0200) != 0;
-        m_scsi.writeRegister(registerIndex, dack, value);
+        if (dack) m_scsiBus.writePseudoDma(1, value);
+        else m_scsiBus.writeRegister(registerIndex, 1, value);
         return;
     }
     case Region::Configuration:

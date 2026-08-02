@@ -30,6 +30,12 @@ bool isScsiDma(std::uint32_t address)
 
 MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(std::max<std::size_t>(ramSize, 1024 * 1024)), 0)
+    , m_scsiBus(m_scsi, {
+          .registerLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::MostSignificant,
+          .pseudoDmaLane = devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::MostSignificant,
+          .pseudoDmaBurst = true,
+          .waitForDrq = true,
+      })
 {
     (void)m_rtc.setNvramImagePath(nvramPath);
     m_cpu.setModel(cpu::m68k::M68kCpuCore::Model::M68030);
@@ -255,7 +261,8 @@ std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
 std::uint16_t MacIIcxMachine::read16(std::uint32_t address)
 {
     if (isScsiDma(address)) {
-        return static_cast<std::uint16_t>((readIo8(address) << 8) | readIo8(address + 1));
+        m_ioStatistics.scsiReads += 2;
+        return static_cast<std::uint16_t>(m_scsiBus.readPseudoDma(2));
     }
     if (isIo(address)) {
         const auto value = readIo8(address);
@@ -355,8 +362,8 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
 void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
 {
     if (isScsiDma(address)) {
-        writeIo8(address, highByte(value));
-        writeIo8(address + 1, lowByte(value));
+        m_ioStatistics.scsiWrites += 2;
+        m_scsiBus.writePseudoDma(2, value);
         return;
     }
     if (isIo(address)) {
@@ -452,15 +459,13 @@ std::uint8_t MacIIcxMachine::readIo8(std::uint32_t address)
         // status line here before completing each aperture access.  Keep this
         // mediation out of the NCR5380 itself: a DACK without REQ must remain
         // a non-transfer for checked/restarted System 7 accesses.
-        (void)m_scsi.readRegister(5, false);
-        return m_scsi.readRegister(6, true);
+        return static_cast<std::uint8_t>(m_scsiBus.readPseudoDma(1));
     }
     if (offset >= 0x10000 && offset < 0x12000) {
         ++m_ioStatistics.scsiReads;
         const auto reg = static_cast<std::uint8_t>(((offset - 0x10000) >> 4) & 7);
         const auto dack = (offset & 0x130) == 0x130;
-        if (dack) (void)m_scsi.readRegister(5, false);
-        return m_scsi.readRegister(reg, dack);
+        return static_cast<std::uint8_t>(dack ? m_scsiBus.readPseudoDma(1) : m_scsiBus.readRegister(reg, 1));
     }
     if (offset >= 0x14000 && offset < 0x16000) return m_asc.read(static_cast<std::uint16_t>(offset & 0x0fff));
     if (offset >= 0x16000 && offset < 0x18000) {
@@ -487,14 +492,13 @@ void MacIIcxMachine::writeIo8(std::uint32_t address, std::uint8_t value)
         }
     } else if ((offset >= 0x6000 && offset < 0x8000) || (offset >= 0x12000 && offset < 0x14000)) {
         ++m_ioStatistics.scsiWrites;
-        (void)m_scsi.readRegister(5, false);
-        m_scsi.writeRegister(0, true, value);
+        m_scsiBus.writePseudoDma(1, value);
     } else if (offset >= 0x10000 && offset < 0x12000) {
         ++m_ioStatistics.scsiWrites;
         const auto reg = static_cast<std::uint8_t>(((offset - 0x10000) >> 4) & 7);
         const auto dack = (offset & 0x130) == 0x130;
-        if (dack) (void)m_scsi.readRegister(5, false);
-        m_scsi.writeRegister(reg, dack, value);
+        if (dack) m_scsiBus.writePseudoDma(1, value);
+        else m_scsiBus.writeRegister(reg, 1, value);
     } else if (offset >= 0x14000 && offset < 0x16000) {
         m_asc.write(static_cast<std::uint16_t>(offset & 0x0fff), value);
     } else if (offset >= 0x16000 && offset < 0x18000) {
