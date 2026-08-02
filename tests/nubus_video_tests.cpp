@@ -31,8 +31,8 @@ int main()
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex(
             "0000002e00000000006800000000027003400000")),
         "CuteMac indexed mode parameters must publish the classic base PixMap layout");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
-        "CuteMac video driver must map logical low-depth colors across the physical RAMDAC");
+    ok &= expect(!virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
+        "CuteMac video driver must not remap a new CLUT using the previous hardware mode");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("2668001c4a8b")),
         "CuteMac video driver must dereference selector-specific Control and Status parameters");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("26532468001c362a0004342a0006")),
@@ -41,8 +41,16 @@ int main()
         "CuteMac video driver must translate the System 6 colour Boolean to its luminance flag");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31400010247808fc4ed2")),
         "CuteMac video driver must complete queued requests before calling JIODone");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("01030fff")),
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a41671a0c4100ff6714")),
         "CuteMac video driver must preserve the indexed white and black endpoints");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("0c4201006200"))
+            && virtualCard.declarationRom().contains(QByteArray::fromHex("4a42670000465342")),
+        "CuteMac video driver must accept 256-entry CLUT requests and convert csCount for DBRA");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("024100ff")),
+        "CuteMac video driver must mask ColorSpec flags before addressing endpoint entries");
+    ok &= expect(!virtualCard.declarationRom().contains(QByteArray::fromHex("c0fc004d"))
+            && !virtualCard.declarationRom().contains(QByteArray::fromHex("c8fc0096")),
+        "CuteMac video driver must program caller-provided RGB instead of stale grayscale conversion");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray(".CuteMac\0", 9))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a895")),
         "CuteMac declaration ROM must advertise guest services and install its shutdown callback");
@@ -70,6 +78,12 @@ int main()
     ok &= expect(virtualCard.read8(0x00080003) == 0x12 && virtualCard.read8(0x00080004) == 0x34
             && virtualCard.read8(0x00080005) == 0x56,
         "CuteMac RAMDAC palette entries must be readable by GetEntries");
+    virtualCard.write8(0x00080002, 0xff);
+    virtualCard.write8(0x00080003, 0x00);
+    virtualCard.write8(0x00080004, 0xff);
+    virtualCard.write8(0x00080005, 0x00);
+    ok &= expect(virtualCard.videoFrame().colorTable[0xff] == 0xff000000U,
+        "CuteMac RAMDAC must keep the physical black endpoint immutable");
     ok &= expect(virtualCard.read8(CuteMacVideoCard::guestServicesBase) == 'C'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 1) == 'T'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 2) == 'M'
@@ -96,9 +110,15 @@ int main()
             && relativeCard.read8(CuteMacVideoCard::guestPointerBase) == 0,
         "disabled absolute-pointer integration must not advertise or publish host coordinates");
     virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 1);
+    ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
+        "CuteMac guest-services power-off must allow the guest to draw its shutdown screen");
+    virtualCard.tick(260608U * 90U - 1U);
+    ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
+        "CuteMac guest-services power-off grace period must use emulated time");
+    virtualCard.tick(1);
     ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::PowerOff
             && virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::None,
-        "CuteMac guest-services power-off request must be consumed once");
+        "CuteMac deferred power-off request must be consumed once");
     virtualCard.write8(CuteMacVideoCard::guestServicesCommand, 2);
     ok &= expect(virtualCard.takePowerRequest() == cutemac::core::GuestPowerRequest::Restart,
         "CuteMac guest-services restart request");

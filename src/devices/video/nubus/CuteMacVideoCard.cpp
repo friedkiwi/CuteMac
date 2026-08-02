@@ -21,6 +21,7 @@ constexpr std::uint8_t guestServicesCleanShutdown = 1U << 0;
 constexpr std::uint8_t guestServicesAbsolutePointer = 1U << 1;
 constexpr int declarationRomBytes = 4096;
 constexpr std::uint64_t cyclesPerVbl = 260608;
+constexpr std::uint64_t cleanShutdownGraceCycles = cyclesPerVbl * 90;
 
 #include "cutemac_video_driver.generated.h"
 
@@ -88,17 +89,30 @@ QString CuteMacVideoCard::id() const { return QStringLiteral("nubus-video-cutema
 void CuteMacVideoCard::reset()
 {
     std::fill(m_vram.begin(), m_vram.end(), 0);
+    m_palette[0] = 0xffffffffU;
+    m_palette[255] = 0xff000000U;
     m_depth = 1;
     m_vblEnabled = false;
     m_vblCycles = cyclesPerVbl;
     m_hostPointerSequence = 0;
     m_hostPointerValid = false;
     m_powerRequest = core::GuestPowerRequest::None;
+    m_deferredPowerRequest = core::GuestPowerRequest::None;
+    m_powerRequestDelayCycles = 0;
     setIrq(false);
 }
 
 void CuteMacVideoCard::tick(std::uint64_t cycles)
 {
+    if (m_deferredPowerRequest != core::GuestPowerRequest::None) {
+        if (cycles >= m_powerRequestDelayCycles) {
+            m_powerRequest = m_deferredPowerRequest;
+            m_deferredPowerRequest = core::GuestPowerRequest::None;
+            m_powerRequestDelayCycles = 0;
+        } else {
+            m_powerRequestDelayCycles -= cycles;
+        }
+    }
     if (cycles >= m_vblCycles) {
         m_vblCycles = cyclesPerVbl - ((cycles - m_vblCycles) % cyclesPerVbl);
         if (m_vblEnabled) setIrq(true);
@@ -153,11 +167,19 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         m_paletteLatch[1] = value;
     } else if (offset == paletteBlueRegister) {
         m_paletteLatch[2] = value;
-        m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
-            | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
+        if (m_paletteAddress != 0 && m_paletteAddress != 255) {
+            m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
+                | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
+        }
         m_paletteAddress = (m_paletteAddress + 1) & 0xff;
     } else if (offset == guestServicesCommand) {
-        if (value == 1) m_powerRequest = core::GuestPowerRequest::PowerOff;
+        if (value == 1) {
+            // The Shutdown Manager callback runs before System 6 draws its
+            // final safe-to-power-off screen. Leave enough emulated time for
+            // the normal shutdown path to finish before closing the host.
+            m_deferredPowerRequest = core::GuestPowerRequest::PowerOff;
+            m_powerRequestDelayCycles = cleanShutdownGraceCycles;
+        }
         else if (value == 2) m_powerRequest = core::GuestPowerRequest::Restart;
     } else if (offset < static_cast<std::uint32_t>(m_vram.size())) m_vram[static_cast<qsizetype>(offset)] = static_cast<char>(value);
 }

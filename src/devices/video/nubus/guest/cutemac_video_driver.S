@@ -86,14 +86,13 @@ set_entries:
         move.w  6(%a2),%d2
         tst.l   %a3
         beq.w   param_error
-        cmpi.w  #255,%d2
+        cmpi.w  #256,%d2
         bhi.w   param_error
-        movem.l %d4-%d5/%a4,-(%sp)
+        tst.w   %d2                    | csCount is a count, not count minus one
+        beq.w   set_entries_done
+        subq.w  #1,%d2                 | DBRA uses a zero-based terminal value
         bsr.w   card_base
         adda.l  #0x00080002,%a2
-        moveq   #0,%d5
-        movea.l 20(%a1),%a4
-        move.b  19(%a4),%d5
 set_entries_loop:
         cmpi.w  #-1,%d3
         bne.s   set_entries_sequential
@@ -103,45 +102,21 @@ set_entries_sequential:
         move.w  %d3,%d1
         addq.w  #1,%d3
 set_entries_index_ready:
+        andi.w  #0x00ff,%d1            | ColorSpec.value may carry flags above the CLUT index
         tst.w   %d1
         beq.s   set_entries_next        | QuickDraw reserves logical white
-        moveq   #0,%d0
-        move.b  -2(%a2),%d0             | current indexed mode
-        cmpi.w  #3,%d0
-        bls.s   set_entries_mode_valid
-        moveq   #3,%d0
-set_entries_mode_valid:
-        move.b  palette_maxima(%pc,%d0.w),%d0
-        cmp.w   %d0,%d1
-        beq.s   set_entries_next        | preserve logical black
-        bsr.w   physical_palette_index
+        cmpi.w  #255,%d1
+        beq.s   set_entries_next        | physical endpoint remains black
         move.b  %d1,(%a2)
-        tst.b   %d5
-        bne.s   set_entries_gray
+        | System 6 supplies either a colour or grayscale table. Program its
+        | RGB values verbatim: SetGray may be ordered after SetEntries.
         move.b  2(%a3),1(%a2)
         move.b  4(%a3),2(%a2)
         move.b  6(%a3),3(%a2)
-        bra.s   set_entries_next
-set_entries_gray:
-        moveq   #0,%d0
-        move.b  2(%a3),%d0
-        mulu.w  #77,%d0
-        moveq   #0,%d4
-        move.b  4(%a3),%d4
-        mulu.w  #150,%d4
-        add.l   %d4,%d0
-        moveq   #0,%d4
-        move.b  6(%a3),%d4
-        mulu.w  #29,%d4
-        add.l   %d4,%d0
-        lsr.l   #8,%d0
-        move.b  %d0,1(%a2)
-        move.b  %d0,2(%a2)
-        move.b  %d0,3(%a2)
 set_entries_next:
         adda.w  #8,%a3
         dbra    %d2,set_entries_loop
-        movem.l (%sp)+,%d4-%d5/%a4
+set_entries_done:
         moveq   #0,%d0
         bra.w   complete
 
@@ -256,23 +231,6 @@ card_base:
         movea.l %d0,%a2
         rts
 
-physical_palette_index:
-        moveq   #0,%d0
-        move.b  -2(%a2),%d0             | current mode: 0=1, 1=2, 2=4, 3=8 bpp
-        cmpi.w  #3,%d0
-        bls.s   palette_mode_indexed
-        moveq   #3,%d0                  | direct modes do not normally use the CLUT
-palette_mode_indexed:
-        lsl.w   #1,%d0
-        move.w  palette_multipliers(%pc,%d0.w),%d0
-        mulu.w  %d0,%d1                 | logical index -> physical 0..255 RAMDAC index
-        rts
-palette_multipliers:
-        .word   255,85,17,1
-palette_maxima:
-        .byte   1,3,15,255
-        .even
-
 install_guest_helpers:
         lea     service_base(%pc),%a2
         move.l  %a2,-(%sp)
@@ -338,8 +296,11 @@ get_entries:
         move.w  6(%a2),%d2
         tst.l   %a3
         beq.w   param_error
-        cmpi.w  #255,%d2
+        cmpi.w  #256,%d2
         bhi.w   param_error
+        tst.w   %d2                    | csCount is the number of records
+        beq.w   get_entries_done
+        subq.w  #1,%d2
         bsr.w   card_base
         adda.l  #0x00080002,%a2
 get_entries_loop:
@@ -352,7 +313,7 @@ get_entries_sequential:
         move.w  %d1,(%a3)
         addq.w  #1,%d3
 get_entries_index_ready:
-        bsr.w   physical_palette_index
+        andi.w  #0x00ff,%d1
         move.b  %d1,(%a2)
         move.b  1(%a2),%d0
         move.b  %d0,2(%a3)
@@ -365,6 +326,7 @@ get_entries_index_ready:
         move.b  %d0,7(%a3)
         adda.w  #8,%a3
         dbra    %d2,get_entries_loop
+get_entries_done:
         moveq   #0,%d0
         bra.w   complete
 

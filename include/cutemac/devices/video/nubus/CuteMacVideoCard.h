@@ -52,6 +52,8 @@ private:
     std::uint8_t m_hostPointerSequence = 0;
     bool m_hostPointerValid = false;
     core::GuestPowerRequest m_powerRequest = core::GuestPowerRequest::None;
+    core::GuestPowerRequest m_deferredPowerRequest = core::GuestPowerRequest::None;
+    std::uint64_t m_powerRequestDelayCycles = 0;
 };
 
 } // namespace cutemac::devices::video::nubus

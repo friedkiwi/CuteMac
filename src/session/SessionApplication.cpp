@@ -876,7 +876,10 @@ private:
         switch (m_session.takePowerRequest()) {
         case cutemac::core::GuestPowerRequest::PowerOff:
             setPaused(true);
-            close();
+            // The card defers this request until the guest has rendered its
+            // final shutdown screen. Keep that last framebuffer visible long
+            // enough to be observed even when emulation was unrestricted.
+            QTimer::singleShot(1000, this, &QWidget::close);
             return;
         case cutemac::core::GuestPowerRequest::Restart:
             loadAndReset();
