@@ -66,7 +66,6 @@ set_mode:
         subi.w  #0x80,%d1
         cmpi.w  #5,%d1
         bhi.w   param_error
-        move.b  mode_to_depth(%pc,%d1.w),%d1
         bsr.w   card_base
         move.l  %a2,36(%a0)
         adda.l  #0x00080000,%a2
@@ -100,7 +99,7 @@ set_entries_index_ready:
         bsr.w   physical_palette_index
         move.b  %d1,(%a2)
         tst.b   %d5
-        bne.s   set_entries_gray
+        beq.s   set_entries_gray
         move.b  2(%a3),1(%a2)
         move.b  4(%a3),2(%a2)
         move.b  6(%a3),3(%a2)
@@ -292,9 +291,6 @@ get_mode:
         moveq   #0,%d1
         move.b  (%a2),%d1
         andi.w  #7,%d1
-        cmpi.w  #5,%d1
-        bhi.w   param_error
-        move.b  depth_to_mode(%pc,%d1.w),%d1
         addi.w  #0x80,%d1
         move.w  %d1,28(%a0)
         clr.w   34(%a0)
@@ -387,11 +383,6 @@ service_base:
         .long   0
 shutdown_installed:
         .byte   0
-        .ascii  "CTMD"
-mode_to_depth:
-        .byte   0,1,2,3,4,5
-depth_to_mode:
-        .byte   0,1,2,3,4,5
         .even
 driver_storage:
         .space  20

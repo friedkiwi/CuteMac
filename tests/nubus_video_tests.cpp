@@ -33,8 +33,8 @@ int main()
         "CuteMac indexed mode parameters must publish a version-1 PixMap layout");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
         "CuteMac video driver must map logical low-depth colors across the physical RAMDAC");
-    ok &= expect(virtualCard.declarationRom().contains(QByteArray("CTMD\x03\x00\x01\x02\x04\x05\x01\x02\x03\x00\x04\x05", 16)),
-        "CuteMac video driver must translate startup-first mode IDs to hardware depths");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("4a056714")),
+        "CuteMac video driver must treat SetGray mode zero as monochrome");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray(".CuteMac\0", 9))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a895")),
         "CuteMac declaration ROM must advertise guest services and install its shutdown callback");
@@ -42,8 +42,10 @@ int main()
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a076"))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("20780d284e90")),
         "CuteMac video driver must install, remove, and dispatch its slot VBL interrupt");
-    ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
-        "CuteMac video must reset to its configured color depth");
+    ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
+        "CuteMac video must reset to one-bit indexed mode");
+    ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
+        "CuteMac one-bit mode must span the hardware color table");
     virtualCard.write8(0x00080000, 3);
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must select eight-bit indexed mode");
@@ -54,12 +56,12 @@ int main()
     virtualCard.write8(0x00080003, 0x12);
     virtualCard.write8(0x00080004, 0x34);
     virtualCard.write8(0x00080005, 0x56);
-    ok &= expect(virtualCard.videoFrame().colorTable[0x2a] == 0xffedcba9U,
-        "CuteMac RAMDAC must convert its active-low component bus to display RGB");
+    ok &= expect(virtualCard.videoFrame().colorTable[0x2a] == 0xff123456U,
+        "CuteMac RAMDAC must publish guest-programmed indexed color");
     virtualCard.write8(0x00080002, 0x2a);
     ok &= expect(virtualCard.read8(0x00080003) == 0x12 && virtualCard.read8(0x00080004) == 0x34
             && virtualCard.read8(0x00080005) == 0x56,
-        "CuteMac RAMDAC palette entries must be readable in active-low guest form by GetEntries");
+        "CuteMac RAMDAC palette entries must be readable by GetEntries");
     ok &= expect(virtualCard.read8(CuteMacVideoCard::guestServicesBase) == 'C'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 1) == 'T'
             && virtualCard.read8(CuteMacVideoCard::guestServicesBase + 2) == 'M'
