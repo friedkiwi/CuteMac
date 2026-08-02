@@ -90,6 +90,27 @@ int main(int argc, char** argv)
     require(machine.debugRead32(0x1000U) == 0x01020304U,
         "AMIC DMA routes internal SCSI data into RAM");
 
+    const auto cdPath = directory.filePath(QStringLiteral("installer.iso"));
+    QByteArray cdBytes(2 * 2048, 0);
+    cdBytes.replace(0, 8, QByteArrayLiteral("CDIMAGE!"));
+    QFile cdFile(cdPath); require(cdFile.open(QIODevice::WriteOnly), "open internal SCSI CD image");
+    require(cdFile.write(cdBytes) == cdBytes.size(), "write internal SCSI CD image"); cdFile.close();
+    require(!machine.loadScsiCdRom(7, cdPath), "reject invalid internal SCSI CD ID");
+    require(machine.loadScsiCdRom(3, cdPath), "attach internal SCSI CD-ROM");
+    machine.reset();
+    for (const auto byte : QByteArray::fromHex("80120000002400"))
+        machine.debugWrite8(0x50f11020U, static_cast<std::uint8_t>(byte));
+    machine.debugWrite8(0x50f11040U, 3); machine.debugWrite8(0x50f11030U, 0x42);
+    (void)machine.debugRead8(0x50f11050U);
+    machine.debugWrite8(0x50f11000U, 36); machine.debugWrite8(0x50f11010U, 0);
+    machine.debugWrite8(0x50f11030U, 0x90);
+    machine.debugWrite32(0x50f32000U, 0x00002000U);
+    machine.debugWrite8(0x50f32008U, 0x02);
+    require(machine.debugRead32(0x2000U) == 0x05800201U,
+        "internal SCSI CD-ROM survives reset and responds to INQUIRY through AMIC DMA");
+    machine.ejectScsiCdRom(3);
+    require(machine.loadScsiCdRom(3, {}), "empty internal SCSI CD-ROM remains selectable");
+
     cutemac::machines::powermac8100::PowerMac8100Machine expanded(16 * 1024 * 1024);
     require(expanded.loadRomFile(path, {}), "load expanded-memory test ROM"); expanded.reset();
     const std::uint64_t hmcConfig = std::uint64_t { 2 } << 29; // 8 MiB SIMM decode spacing

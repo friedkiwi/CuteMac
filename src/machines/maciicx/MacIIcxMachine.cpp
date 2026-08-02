@@ -170,7 +170,10 @@ void MacIIcxMachine::reset()
     m_scsi.reset();
     for (std::size_t id = 0; id < m_scsiDisks.size(); ++id) {
         if (m_scsiDisks[id]) m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
-        else if (m_scsiCdRoms[id]) m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiCdRoms[id]);
+        else if (m_scsiCdRoms[id]) {
+            m_scsiCdRoms[id]->acknowledgeMediaChange();
+            m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiCdRoms[id]);
+        }
     }
     m_via1.reset();
     m_via2.reset();

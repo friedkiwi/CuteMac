@@ -71,6 +71,13 @@ void ScsiCdRomDevice::eject()
     m_unitAttention = true;
 }
 
+void ScsiCdRomDevice::acknowledgeMediaChange()
+{
+    m_unitAttention = false;
+    m_senseKey = ready() ? senseNoSense : senseNotReady;
+    m_additionalSenseCode = ready() ? 0 : 0x3a;
+}
+
 bool ScsiCdRomDevice::ready() const { return !m_image.isEmpty(); }
 
 ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const QByteArray&)

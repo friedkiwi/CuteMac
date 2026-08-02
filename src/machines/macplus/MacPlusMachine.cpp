@@ -210,6 +210,7 @@ void MacPlusMachine::reset()
         if (m_scsiDisks[id] && m_scsiDisks[id]->ready()) {
             m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
         } else if (m_scsiCdRoms[id]) {
+            m_scsiCdRoms[id]->acknowledgeMediaChange();
             m_scsi.attachTarget(static_cast<std::uint8_t>(id), m_scsiCdRoms[id]);
         }
     }

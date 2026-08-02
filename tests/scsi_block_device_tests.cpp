@@ -111,6 +111,10 @@ int main()
     const auto mediaChangedSense = cdRom.executeCommand(QByteArray::fromHex("030000001200"), {});
     ok &= expect(mediaChangedSense.status == 0 && static_cast<std::uint8_t>(mediaChangedSense.data[12]) == 0x28,
         "CD insertion sense code must report changed media");
+    ok &= expect(cdRom.loadImage(isoPath), "CD-ROM reload failed");
+    cdRom.acknowledgeMediaChange();
+    ok &= expect(cdRom.executeCommand(QByteArray::fromHex("000000000000"), {}).status == 0,
+        "power-on acknowledgement must clear configured-media unit attention");
     const auto capacity = cdRom.executeCommand(QByteArray::fromHex("25000000000000000000"), {});
     ok &= expect(capacity.data == QByteArray::fromHex("0000000300000800"), "CD-ROM capacity must use 2048-byte blocks");
     const auto cdRead = cdRom.executeCommand(QByteArray::fromHex("28000000000200000100"), {});

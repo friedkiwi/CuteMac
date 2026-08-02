@@ -64,17 +64,38 @@ bool PowerMac8100Machine::loadScsiDisk(int id, const QString& path, bool readOnl
     if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return false;
     auto disk = std::make_shared<devices::scsi::ScsiBlockDevice>();
     if (!disk->loadImage(path, readOnly)) return false;
+    m_scsiCdRoms[static_cast<std::size_t>(id)].reset();
     m_scsiDisks[static_cast<std::size_t>(id)] = disk;
     // The 8100's configured fixed disks live on its internal Fast SCSI bus.
     m_scsiB.attachTarget(static_cast<std::uint8_t>(id), std::move(disk));
     return true;
 }
 
+bool PowerMac8100Machine::loadScsiCdRom(int id, const QString& path)
+{
+    if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return false;
+    auto cdRom = m_scsiCdRoms[static_cast<std::size_t>(id)];
+    if (!cdRom) cdRom = std::make_shared<devices::scsi::ScsiCdRomDevice>();
+    if (!path.isEmpty() && !cdRom->loadImage(path)) return false;
+    m_scsiDisks[static_cast<std::size_t>(id)].reset();
+    m_scsiCdRoms[static_cast<std::size_t>(id)] = cdRom;
+    m_scsiB.attachTarget(static_cast<std::uint8_t>(id), cdRom);
+    return true;
+}
+
+void PowerMac8100Machine::ejectScsiCdRom(int id)
+{
+    if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return;
+    const auto& cdRom = m_scsiCdRoms[static_cast<std::size_t>(id)];
+    if (cdRom) cdRom->eject();
+}
+
 void PowerMac8100Machine::ejectScsiDevice(int id)
 {
     if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return;
-    m_scsiDisks[static_cast<std::size_t>(id)].reset();
     m_scsiB.detachTarget(static_cast<std::uint8_t>(id));
+    m_scsiDisks[static_cast<std::size_t>(id)].reset();
+    m_scsiCdRoms[static_cast<std::size_t>(id)].reset();
 }
 
 bool PowerMac8100Machine::loadRomFile(const QString& path, const QStringList& patches)
@@ -98,6 +119,13 @@ void PowerMac8100Machine::reset()
     m_scc.reset();
     m_scsi.reset();
     m_scsiB.reset();
+    for (std::size_t id = 0; id < m_scsiDisks.size(); ++id) {
+        if (m_scsiDisks[id]) m_scsiB.attachTarget(static_cast<std::uint8_t>(id), m_scsiDisks[id]);
+        else if (m_scsiCdRoms[id]) {
+            m_scsiCdRoms[id]->acknowledgeMediaChange();
+            m_scsiB.attachTarget(static_cast<std::uint8_t>(id), m_scsiCdRoms[id]);
+        }
+    }
     m_via1.reset();
     for (std::uint8_t bit = 0; bit < 8; ++bit) {
         m_via1.setPortAInputBit(bit, false);

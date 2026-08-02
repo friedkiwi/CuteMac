@@ -13,6 +13,7 @@ class ScsiCdRomDevice final : public ScsiTarget {
 public:
     [[nodiscard]] bool loadImage(const QString& path);
     void eject();
+    void acknowledgeMediaChange();
 
     [[nodiscard]] bool ready() const override;
     [[nodiscard]] bool selectable() const override { return true; }

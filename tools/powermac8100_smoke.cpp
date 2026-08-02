@@ -26,7 +26,7 @@ int main(int argc, char** argv)
 {
     QCoreApplication application(argc, argv);
     if (argc < 2) {
-        std::cerr << "usage: CuteMacPowerMac8100Smoke <rom> [cycles] [scsi-disk]\n";
+        std::cerr << "usage: CuteMacPowerMac8100Smoke <rom> [cycles] [scsi-disk|--cd <id> <image>]\n";
         return 2;
     }
     const auto cycleBudget = argc >= 3 ? std::max<std::int64_t>(1, std::strtoll(argv[2], nullptr, 0)) : 1'000'000;
@@ -38,9 +38,17 @@ int main(int argc, char** argv)
         std::cerr << "failed to load 4 MiB Power Macintosh ROM\n";
         return 1;
     }
-    if (argc >= 4 && !machine.loadScsiDisk(0, QString::fromLocal8Bit(argv[3]), false)) {
-        std::cerr << "failed to load SCSI disk\n";
-        return 1;
+    if (argc >= 4) {
+        if (QString::fromLocal8Bit(argv[3]) == QStringLiteral("--cd")) {
+            if (argc < 6 || !machine.loadScsiCdRom(QString::fromLocal8Bit(argv[4]).toInt(),
+                    QString::fromLocal8Bit(argv[5]))) {
+                std::cerr << "failed to load SCSI CD-ROM\n";
+                return 1;
+            }
+        } else if (!machine.loadScsiDisk(0, QString::fromLocal8Bit(argv[3]), false)) {
+            std::cerr << "failed to load SCSI disk\n";
+            return 1;
+        }
     }
     machine.setBusTraceEnabled(qEnvironmentVariableIsSet("CUTEMAC_8100_BUS_TRACE"));
     machine.setCpuTraceEnabled(qEnvironmentVariableIsSet("CUTEMAC_8100_CPU_TRACE"));

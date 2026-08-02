@@ -20,6 +20,7 @@
 #include "cutemac/devices/nubus/NuBusBus.h"
 #include "cutemac/devices/scc/Z8530Scc.h"
 #include "cutemac/devices/scsi/ScsiBlockDevice.h"
+#include "cutemac/devices/scsi/ScsiCdRomDevice.h"
 #include "cutemac/devices/scsi/ncr53c94/Ncr53c94.h"
 #include "cutemac/devices/via6522/Via6522.h"
 #include "cutemac/devices/video/SonoraVideo.h"
@@ -47,9 +48,9 @@ public:
     [[nodiscard]] bool loadDiskImage(const QString& path) override { return loadScsiDisk(0, path, false); }
     void ejectDiskImage() override {}
     [[nodiscard]] bool loadScsiDisk(int id, const QString& path, bool readOnly) override;
-    [[nodiscard]] bool loadScsiCdRom(int, const QString&) override { return false; }
+    [[nodiscard]] bool loadScsiCdRom(int id, const QString& path) override;
     void ejectScsiDevice(int id) override;
-    void ejectScsiCdRom(int) override {}
+    void ejectScsiCdRom(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString&, bool) override { return false; }
     void ejectFloppyImage() override {}
     void reset() override;
@@ -127,6 +128,7 @@ private:
     devices::scsi::ncr53c94::Ncr53c94 m_scsi;
     devices::scsi::ncr53c94::Ncr53c94 m_scsiB;
     std::array<std::shared_ptr<devices::scsi::ScsiBlockDevice>, 7> m_scsiDisks {};
+    std::array<std::shared_ptr<devices::scsi::ScsiCdRomDevice>, 7> m_scsiCdRoms {};
     devices::via6522::Via6522 m_via1;
     devices::cuda::CudaController m_cuda;
     devices::video::SonoraVideo m_video;
