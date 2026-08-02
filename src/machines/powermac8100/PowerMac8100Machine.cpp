@@ -19,6 +19,22 @@ constexpr std::uint32_t machineIdAddress = 0x5ffffffcU;
 constexpr std::uint32_t machineIdValue = 0xa55a3013U;
 constexpr std::uint32_t motherboardRamSize = 8U * 1024U * 1024U;
 constexpr std::size_t maxBusTrace = 1'000'000;
+
+bool isScsiPseudoDmaAddress(std::uint32_t address)
+{
+    return (address >= 0x50f10100U && address < 0x50f10104U)
+        || (address >= 0x50f11100U && address < 0x50f11104U);
+}
+
+bool isInternalScsiPseudoDmaAddress(std::uint32_t address)
+{
+    return address >= 0x50f11100U && address < 0x50f11104U;
+}
+
+constexpr std::uint16_t byteSwap16(std::uint16_t value)
+{
+    return static_cast<std::uint16_t>((value << 8) | (value >> 8));
+}
 }
 
 PowerMac8100Machine::PowerMac8100Machine(std::size_t ramSize)
@@ -193,6 +209,10 @@ void PowerMac8100Machine::flushDevices()
     }
     m_scheduler.advance(static_cast<std::uint64_t>(m_pendingDeviceCycles));
     m_pendingDeviceCycles = 0;
+    // RUN remains armed across SCSI phase changes. A controller that asserts
+    // DRQ after the AMIC control write must therefore retry on later machine
+    // service points, not wait for another guest register write.
+    serviceScsiDma();
     updateInterrupts();
 }
 
@@ -224,8 +244,10 @@ void PowerMac8100Machine::updateInterrupts()
     if (m_scsi.interruptActive() || m_scsiB.interruptActive()) m_via2Ifr |= 0x08U;
     else m_via2Ifr &= static_cast<std::uint8_t>(~0x08U);
     if ((~m_via2SlotIfr) & m_via2SlotIer) m_via2Ifr |= 0x02U; else m_via2Ifr &= static_cast<std::uint8_t>(~0x02U);
+    const auto via2Active = (m_via2Ifr & m_via2Ier & 0x7fU) != 0;
+    if (via2Active) m_via2Ifr |= 0x80U; else m_via2Ifr &= 0x7fU;
     const auto sources = static_cast<std::uint8_t>((m_via1.interruptActive() ? 1U : 0U)
-        | ((m_via2Ifr & m_via2Ier) ? 2U : 0U));
+        | (via2Active ? 2U : 0U));
     const auto oldSources = static_cast<std::uint8_t>(m_irqControl & 0x3fU);
     m_irqControl = static_cast<std::uint8_t>((m_irqControl & 0xc0U) | sources);
     if (m_irqControl & 0x40U) {
@@ -295,29 +317,46 @@ PowerMac8100Machine::BusRegion PowerMac8100Machine::regionFor(std::uint32_t addr
 std::optional<std::size_t> PowerMac8100Machine::ramIndex(std::uint32_t address) const
 {
     const auto total = static_cast<std::size_t>(m_ram.size());
-    if (!m_hmcCommitted) return address < total ? std::optional<std::size_t>(address) : std::nullopt;
     if (address < motherboardRamSize) return address;
     if (total <= motherboardRamSize) return std::nullopt;
 
     const auto simmSize = (total - motherboardRamSize) / 2U;
     if (simmSize == 0) return std::nullopt;
-    if (address >= motherboardRamSize && address < motherboardRamSize + simmSize)
-        return motherboardRamSize + (address - motherboardRamSize);
+
+    // HMC exposes bank A at 0x10000000 for sizing and mirrors its usable
+    // portion immediately after motherboard RAM. With a 128 MiB bank the
+    // motherboard hides its first 8 MiB in the low primary view.
     if (address >= 0x10000000U && address < 0x10000000U + simmSize)
         return motherboardRamSize + (address - 0x10000000U);
+    const auto bankAPrimaryOffset = simmSize > 120U * 1024U * 1024U ? motherboardRamSize : 0U;
+    const auto bankAPrimarySize = simmSize - bankAPrimaryOffset;
+    if (address >= motherboardRamSize && address < motherboardRamSize + bankAPrimarySize)
+        return motherboardRamSize + bankAPrimaryOffset + (address - motherboardRamSize);
 
     static constexpr std::uint32_t configuredBankSizes[] {
         128U * 1024U * 1024U, 2U * 1024U * 1024U, 8U * 1024U * 1024U, 32U * 1024U * 1024U
     };
-    const auto configuration = static_cast<unsigned>((m_hmcControl >> 29) & 3U);
+    // Reset selects the 128 MiB matrix. Only a complete HMC shift-register
+    // commit may relocate bank B.
+    const auto configuration = m_hmcCommitted
+        ? static_cast<unsigned>((m_hmcControl >> 29) & 3U) : 0U;
     const auto bankBBase = configuration == 0 ? 0x08000000U
         : motherboardRamSize + configuredBankSizes[configuration];
     if (address >= bankBBase && address < bankBBase + simmSize)
         return motherboardRamSize + simmSize + (address - bankBBase);
     if (simmSize < motherboardRamSize) {
-        const auto alias = 0x10000000U + static_cast<std::uint32_t>(simmSize) - motherboardRamSize;
-        if (address >= alias && address < alias + simmSize)
-            return motherboardRamSize + simmSize + (address - alias);
+        // HWInit searches the complete eight-megabyte windows below the normal
+        // bank-B and bank-A aliases for warm-start signatures.
+        for (auto alias = 0x08000000U + static_cast<std::uint32_t>(simmSize) - motherboardRamSize;
+             alias < 0x08000000U; alias += static_cast<std::uint32_t>(simmSize)) {
+            if (address >= alias && address < alias + simmSize)
+                return motherboardRamSize + (address - alias);
+        }
+        for (auto alias = 0x10000000U + static_cast<std::uint32_t>(simmSize) - motherboardRamSize;
+             alias < 0x10000000U; alias += static_cast<std::uint32_t>(simmSize)) {
+            if (address >= alias && address < alias + simmSize)
+                return motherboardRamSize + simmSize + (address - alias);
+        }
     }
     return std::nullopt;
 }
@@ -454,6 +493,11 @@ void PowerMac8100Machine::writeMapped8(std::uint32_t address, std::uint8_t value
             case 2:
                 if (value & static_cast<std::uint8_t>(~m_via2SlotIfr) & 0x40U) m_via2SlotIfr |= 0x40U;
                 break;
+            case 3:
+                // Pseudo-VIA2 clears selected flags only when bit 7 is set.
+                // Live level sources are restored by updateInterrupts().
+                if (value & 0x80U) m_via2Ifr &= static_cast<std::uint8_t>(~(value & 0x7fU));
+                break;
             case 0x12:
                 if (value & 0x80U) m_via2SlotIer |= value & 0x78U; else m_via2SlotIer &= static_cast<std::uint8_t>(~value);
                 break;
@@ -538,9 +582,14 @@ std::optional<std::uint32_t> PowerMac8100Machine::compatibilityRead(
     // reaches AMIC through its physical aperture without a hashed-page entry.
     // These are real device reads, not fabricated ASC data.
     if (address >= amicBase && address < amicBase + 0x40000U) {
+        if (isScsiPseudoDmaAddress(address)) {
+            if (size == 2U) return read16(address);
+            if (size == 4U) return read32(address);
+        }
         std::uint32_t value = 0;
         for (unsigned byte = 0; byte < size; ++byte)
             value = (value << 8) | readMapped8(address + byte);
+        recordBus(address, value, size, false, BusRegion::Amic);
         return value;
     }
     // The PDM 68k compatibility map exposes onboard video at 0x60b00000.
@@ -604,6 +653,16 @@ bool PowerMac8100Machine::compatibilityWrite(
     // are compatibility cycles to physical RAM rather than writes to that BAT.
     const auto ramSize = static_cast<std::uint32_t>(m_ram.size());
     if (instructionPc < 0x68000000U || instructionPc >= 0x68100000U) return false;
+    if (isScsiPseudoDmaAddress(address)) {
+        if (size == 2U) {
+            write16(address, static_cast<std::uint16_t>(value));
+            return true;
+        }
+        if (size == 4U) {
+            write32(address, value);
+            return true;
+        }
+    }
     if (address >= 0x60b00000U && address < 0x60c00000U) {
         const auto base = (m_hmcControl & 0x200000000ULL) ? 0U : 0x100000U;
         const auto offset = base + address - 0x60b00000U;
@@ -653,9 +712,10 @@ std::uint16_t PowerMac8100Machine::read16(std::uint32_t address)
 {
     const auto region = regionFor(address);
     std::uint16_t value;
-    if (address == 0x50f10100U || address == 0x50f11100U) {
+    if (isScsiPseudoDmaAddress(address)) {
         flushDevices();
-        value = address == 0x50f10100U ? m_scsi.readDmaWord() : m_scsiB.readDmaWord();
+        value = byteSwap16(isInternalScsiPseudoDmaAddress(address)
+                ? m_scsiB.readDmaWord() : m_scsi.readDmaWord());
         updateInterrupts();
     } else if (region == BusRegion::Ram) {
         const auto index = *ramIndex(address);
@@ -678,6 +738,12 @@ std::uint32_t PowerMac8100Machine::read32(std::uint32_t address)
     std::uint32_t value;
     if (address == machineIdAddress) {
         value = machineIdValue & 0xffffU;
+    } else if (isScsiPseudoDmaAddress(address)) {
+        flushDevices();
+        auto& controller = isInternalScsiPseudoDmaAddress(address) ? m_scsiB : m_scsi;
+        value = (static_cast<std::uint32_t>(byteSwap16(controller.readDmaWord())) << 16)
+            | byteSwap16(controller.readDmaWord());
+        updateInterrupts();
     } else if (region == BusRegion::Ram) {
         const auto index = *ramIndex(address);
         const auto* bytes = m_ram.constData() + index;
@@ -704,9 +770,10 @@ void PowerMac8100Machine::write8(std::uint32_t address, std::uint8_t value)
 void PowerMac8100Machine::write16(std::uint32_t address, std::uint16_t value)
 {
     const auto region = regionFor(address);
-    if (address == 0x50f10100U || address == 0x50f11100U) {
+    if (isScsiPseudoDmaAddress(address)) {
         flushDevices();
-        if (address == 0x50f10100U) m_scsi.writeDmaWord(value); else m_scsiB.writeDmaWord(value);
+        if (isInternalScsiPseudoDmaAddress(address)) m_scsiB.writeDmaWord(byteSwap16(value));
+        else m_scsi.writeDmaWord(byteSwap16(value));
         updateInterrupts();
     } else if (region == BusRegion::Ram) {
         const auto index = *ramIndex(address);
@@ -721,7 +788,13 @@ void PowerMac8100Machine::write16(std::uint32_t address, std::uint16_t value)
 void PowerMac8100Machine::write32(std::uint32_t address, std::uint32_t value)
 {
     const auto region = regionFor(address);
-    if (region == BusRegion::Ram) {
+    if (isScsiPseudoDmaAddress(address)) {
+        flushDevices();
+        auto& controller = isInternalScsiPseudoDmaAddress(address) ? m_scsiB : m_scsi;
+        controller.writeDmaWord(byteSwap16(static_cast<std::uint16_t>(value >> 16)));
+        controller.writeDmaWord(byteSwap16(static_cast<std::uint16_t>(value)));
+        updateInterrupts();
+    } else if (region == BusRegion::Ram) {
         const auto index = *ramIndex(address);
         auto* bytes = m_ram.data() + index;
         bytes[0] = static_cast<std::uint8_t>(value >> 24); bytes[1] = static_cast<std::uint8_t>(value >> 16);

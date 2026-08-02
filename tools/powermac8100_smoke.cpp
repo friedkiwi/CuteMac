@@ -9,6 +9,7 @@
 #include <QFile>
 
 #include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
+#include "cutemac/debug/SadMacDetector.h"
 #include "cutemac/devices/serial/SerialEndpoint.h"
 
 namespace {
@@ -108,6 +109,7 @@ int main(int argc, char** argv)
     std::array<std::uint32_t, 4096> emulatedPcHistory {};
     std::size_t emulatedPcHistoryPosition = 0;
     const auto capture68kHistory = qEnvironmentVariableIsSet("CUTEMAC_8100_68K_HISTORY");
+    const auto stopOnSadMac = qEnvironmentVariableIsSet("CUTEMAC_8100_STOP_ON_SAD_MAC");
     for (std::int64_t used = 0; used < cycleBudget;) {
         used += machine.stepInstruction();
         if (++instructions == instructionLimit && instructionLimitOk) break;
@@ -124,6 +126,8 @@ int main(int argc, char** argv)
                     % emulatedPcHistory.size()] != emulatedPc)
                 emulatedPcHistory[emulatedPcHistoryPosition++ % emulatedPcHistory.size()] = emulatedPc;
         }
+        if (stopOnSadMac && (instructions & 0x3ffU) == 0
+            && cutemac::debug::SadMacDetector::detect(machine.videoFrame())) break;
         if (pc == 0xfff00300U && ++dsiCount && dsiCountOk && dsiCount >= stopDsiCount) break;
         if (pc == 0xfff00700U && ++programCount && programCountOk && programCount >= stopProgramCount) break;
         if (pc == 0xfff00300U && stopDarOk && machine.cpuRegisters().dar == stopDar) break;
@@ -222,7 +226,18 @@ int main(int argc, char** argv)
         std::cout << " cdb";
         for (std::size_t i = 0; i < scsi.scsiCommandCounts().size(); ++i)
             if (scsi.scsiCommandCounts()[i]) std::cout << " 0x" << std::hex << i << ':' << std::dec << scsi.scsiCommandCounts()[i];
-        std::cout << '\n';
+        const auto debug = scsi.debugState();
+        std::cout << " last=" << debug.cdb.toHex().toStdString()
+                  << " target=" << static_cast<unsigned>(debug.targetId)
+                  << " status=0x" << std::hex << static_cast<unsigned>(debug.status)
+                  << " interrupt=0x" << static_cast<unsigned>(debug.interruptStatus)
+                  << " step=0x" << static_cast<unsigned>(debug.sequenceStep)
+                  << " scsi-status=0x" << static_cast<unsigned>(debug.scsiStatus)
+                  << " message=0x" << static_cast<unsigned>(debug.message)
+                  << std::dec << " data=" << debug.dataPosition << '/' << debug.dataSize
+                  << " remaining=" << debug.transferCount
+                  << " phase=" << (debug.command ? "command" : debug.dataIn ? "data-in" : debug.dataOut ? "data-out" : "other")
+                  << '\n';
     }
     if (capture68kHistory) {
         std::cout << "68k-history";

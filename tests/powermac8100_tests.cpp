@@ -54,6 +54,13 @@ int main(int argc, char** argv)
     (void)machine.runCycles(1'330'100);
     require((machine.debugRead8(0x50f26002U) & 0x40U) == 0,
         "Sonora VBL continues while video output is blanked");
+    machine.debugWrite8(0x50f26012U, 0xc0U);
+    machine.debugWrite8(0x50f26013U, 0x82U);
+    require((machine.debugRead8(0x50f26003U) & 0x82U) == 0x82U,
+        "pseudo-VIA2 reports its enabled slot source in summary bit 7");
+    machine.debugWrite8(0x50f26002U, 0x40U);
+    require((machine.debugRead8(0x50f26003U) & 0x82U) == 0,
+        "acknowledging the slot source clears pseudo-VIA2 summary state");
     require(machine.compatibilityRead(0, 4, 0x68000000U) == 0U,
         "68k compatibility reset view starts in ROM");
     require(!machine.compatibilityRead(0xffffffffU, 1, 0x68000000U).has_value()
@@ -111,6 +118,22 @@ int main(int argc, char** argv)
     machine.ejectScsiCdRom(3);
     require(machine.loadScsiCdRom(3, {}), "empty internal SCSI CD-ROM remains selectable");
 
+    cutemac::machines::powermac8100::PowerMac8100Machine pseudoDmaMachine(8 * 1024 * 1024);
+    require(pseudoDmaMachine.loadRomFile(path, {}), "load pseudo-DMA test ROM");
+    require(pseudoDmaMachine.loadScsiCdRom(0, cdPath), "attach pseudo-DMA test CD-ROM");
+    pseudoDmaMachine.reset();
+    for (const auto byte : QByteArray::fromHex("80120000002400"))
+        pseudoDmaMachine.debugWrite8(0x50f11020U, static_cast<std::uint8_t>(byte));
+    pseudoDmaMachine.debugWrite8(0x50f11040U, 0);
+    pseudoDmaMachine.debugWrite8(0x50f11030U, 0x42);
+    (void)pseudoDmaMachine.debugRead8(0x50f11050U);
+    pseudoDmaMachine.debugWrite8(0x50f11000U, 4);
+    pseudoDmaMachine.debugWrite8(0x50f11010U, 0);
+    pseudoDmaMachine.debugWrite8(0x50f11030U, 0x90);
+    const auto inquiryHead = pseudoDmaMachine.compatibilityRead(0x50f11100U, 4, 0x68001000U);
+    require(inquiryHead == 0x05800201U,
+        "a compatibility-mode longword advances across both SCSI pseudo-DMA halfwords");
+
     cutemac::machines::powermac8100::PowerMac8100Machine expanded(16 * 1024 * 1024);
     require(expanded.loadRomFile(path, {}), "load expanded-memory test ROM"); expanded.reset();
     const std::uint64_t hmcConfig = std::uint64_t { 2 } << 29; // 8 MiB SIMM decode spacing
@@ -120,6 +143,33 @@ int main(int argc, char** argv)
     require(expanded.debugRead32(0x10000000U) == 0x89abcdefU, "bank A sizing alias");
     expanded.debugWrite32(0x01000000U, 0x76543210U);
     require(expanded.debugRead32(0x0fc00000U) == 0x76543210U, "small bank B warm-start alias");
+    expanded.debugWrite32(0x00800000U, 0x13579bdfU);
+    require(expanded.debugRead32(0x07c00000U) == 0x13579bdfU, "small bank A warm-start alias");
+
+    for (const auto ramKiB : { 8192U, 16384U, 24576U, 40960U, 73728U, 139264U, 270336U }) {
+        cutemac::machines::powermac8100::PowerMac8100Machine topology(
+            static_cast<std::size_t>(ramKiB) * 1024U);
+        topology.debugWrite32(0x00001000U, 0x01020304U);
+        require(topology.debugRead32(0x00001000U) == 0x01020304U,
+            "motherboard RAM is present at reset");
+        if (ramKiB == 8192U) {
+            require(topology.debugRead32(0x00800000U) == 0xffffffffU,
+                "motherboard-only reset topology ends at 8 MiB");
+            continue;
+        }
+        const auto simmBytes = (ramKiB - 8192U) * 1024U / 2U;
+        const auto primaryOffset = simmBytes > 120U * 1024U * 1024U ? 8U * 1024U * 1024U : 0U;
+        topology.debugWrite32(0x10000000U + primaryOffset, 0x11223344U);
+        require(topology.debugRead32(0x00800000U) == 0x11223344U,
+            "bank A reset primary view matches its sizing alias");
+        topology.debugWrite32(0x08000000U, 0x55667788U);
+        require(topology.debugRead32(0x08000000U) == 0x55667788U,
+            "bank B is present at its 128 MiB reset location");
+        const auto bankAPrimaryEnd = 0x00800000U + simmBytes - primaryOffset;
+        if (bankAPrimaryEnd < 0x08000000U)
+            require(topology.debugRead32(bankAPrimaryEnd) == 0xffffffffU,
+                "reset topology leaves a hole between banks A and B");
+    }
 
     cutemac::devices::video::SonoraVideo video;
     video.reset(); video.writeControl(0, 0x06); video.writeControl(1, 0);
@@ -141,6 +191,14 @@ int main(int argc, char** argv)
     scsi.writeRegister(3, 0x01); scsi.writeRegister(4, 0); scsi.writeRegister(3, 0xc1);
     require(scsi.interruptActive() && (scsi.readRegister(4) & 7U) == 2U,
         "53C94 DMA selection can precede command-byte transfer");
+    (void)scsi.readRegister(5);
+    for (const auto byte : QByteArray::fromHex("080000000100"))
+        scsi.writeRegister(2, static_cast<std::uint8_t>(byte));
+    require(scsi.scsiCommandCounts()[0x08] == 1,
+        "53C94 does not execute command-phase FIFO bytes prematurely");
+    scsi.writeRegister(3, 0x10);
+    require(scsi.scsiCommandCounts()[0x08] == 2 && scsi.debugState().dataPosition == 0,
+        "TRANSFER INFORMATION completes the staged CDB phase before data transfer");
 
     cutemac::devices::via6522::Via6522 via;
     cutemac::devices::cuda::CudaController cuda;

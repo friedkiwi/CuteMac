@@ -18,7 +18,8 @@ void Ncr53c94::reset()
     m_fifo.clear(); m_cdb.clear(); m_data.clear(); m_dataOut.clear();
     m_dataPosition = 0; m_startTransferCount = m_transferCount = 0;
     m_targetId = 0; m_status = m_interruptStatus = m_sequenceStep = 0;
-    m_scsiStatus = m_message = 0; m_dataIn = m_dataOutPhase = m_commandPhase = false;
+    m_scsiStatus = m_message = 0;
+    m_dataIn = m_dataOutPhase = m_commandPhase = m_dmaActive = false;
     m_controllerCommandCounts.fill(0);
     m_scsiCommandCounts.fill(0);
 }
@@ -26,6 +27,13 @@ void Ncr53c94::reset()
 void Ncr53c94::attachTarget(std::uint8_t id, std::shared_ptr<ScsiTarget> target)
 { if (id < m_targets.size()) m_targets[id] = std::move(target); }
 void Ncr53c94::detachTarget(std::uint8_t id) { if (id < m_targets.size()) m_targets[id].reset(); }
+
+Ncr53c94::DebugState Ncr53c94::debugState() const
+{
+    return { m_cdb, m_transferCount, m_dataPosition, m_data.size(), m_targetId,
+        m_status, m_interruptStatus, m_sequenceStep, m_scsiStatus, m_message,
+        m_dataIn, m_dataOutPhase, m_commandPhase };
+}
 
 std::uint8_t Ncr53c94::readRegister(std::uint8_t index)
 {
@@ -38,10 +46,9 @@ std::uint8_t Ncr53c94::readRegister(std::uint8_t index)
         {
             const auto value = static_cast<std::uint8_t>(m_fifo.front());
             m_fifo.remove(0, 1);
-            if (m_transferCount) --m_transferCount;
-            if (m_dataIn && m_fifo.isEmpty() && m_transferCount == 0) {
+            if (m_dmaActive && m_transferCount) --m_transferCount;
+            if (m_dataIn && m_fifo.isEmpty()) {
                 if (m_dataPosition >= m_data.size()) completeTransfer();
-                else { m_status = static_cast<std::uint8_t>((m_status & 0xf8U) | 1U); raiseInterrupt(interruptService); }
             }
             return value;
         }
@@ -64,11 +71,6 @@ void Ncr53c94::writeRegister(std::uint8_t index, std::uint8_t value)
     case 1: m_startTransferCount = (m_startTransferCount & 0xff00ffU) | (static_cast<std::uint32_t>(value) << 8); break;
     case 2:
         if (m_fifo.size() < 16) m_fifo.append(static_cast<char>(value));
-        if (m_commandPhase && !m_fifo.isEmpty()
-            && m_fifo.size() >= commandLength(static_cast<std::uint8_t>(m_fifo.front()))) {
-            m_commandPhase = false;
-            selectTarget();
-        }
         break;
     case 3: m_registers[3] = value; executeCommand(value); break;
     case 4: m_targetId = value & 7U; break;
@@ -104,11 +106,20 @@ void Ncr53c94::selectTarget()
         raiseInterrupt(interruptService | interruptSuccess);
         return;
     }
+    executeCdb();
+}
+
+void Ncr53c94::executeCdb()
+{
+    if (m_fifo.isEmpty()) return;
+    const auto target = m_targets[m_targetId];
+    if (!target || !target->selectable()) { m_fifo.clear(); raiseInterrupt(interruptDisconnected); return; }
     const auto length = std::min(commandLength(static_cast<std::uint8_t>(m_fifo.front())), static_cast<int>(m_fifo.size()));
     m_cdb = m_fifo.left(length); m_fifo.remove(0, length);
     const auto opcode = static_cast<std::uint8_t>(m_cdb.front());
     ++m_scsiCommandCounts[opcode];
     m_transferCount = 0;
+    m_dmaActive = false;
     m_dataOutPhase = opcode == 0x0a || opcode == 0x2a || opcode == 0x15;
     if (m_dataOutPhase) {
         m_dataOut.clear(); m_data.clear(); m_dataPosition = 0; m_dataIn = false;
@@ -118,14 +129,16 @@ void Ncr53c94::selectTarget()
         m_dataIn = !m_data.isEmpty();
     }
     m_sequenceStep = 4;
-    m_status = static_cast<std::uint8_t>((m_status & 0xe8U) | terminalCount
+    m_status = static_cast<std::uint8_t>((m_status & 0xe8U)
         | (m_dataIn ? 1U : m_dataOutPhase ? 0U : 3U));
     raiseInterrupt(interruptService | interruptSuccess);
 }
 
 void Ncr53c94::completeTransfer()
 {
-    m_transferCount = 0; m_status |= terminalCount;
+    m_transferCount = 0;
+    m_dmaActive = false;
+    m_status |= terminalCount;
     if (m_commandPhase) {
         if (!m_fifo.isEmpty() && m_fifo.size() >= commandLength(static_cast<std::uint8_t>(m_fifo.front()))) {
             m_commandPhase = false;
@@ -155,17 +168,22 @@ void Ncr53c94::executeCommand(std::uint8_t command)
     case 0x02: { const auto targets = m_targets; reset(); m_targets = targets; break; }
     case 0x03: raiseInterrupt(interruptReset); break;
     case 0x10:
-        if (m_dataIn && !dma) {
+        if (m_commandPhase && !dma && !m_fifo.isEmpty()
+            && m_fifo.size() >= commandLength(static_cast<std::uint8_t>(m_fifo.front()))) {
+            m_commandPhase = false;
+            executeCdb();
+        } else if (m_dataIn && !dma) {
             m_fifo.clear();
-            const auto requested = m_startTransferCount ? m_startTransferCount : 16U;
-            const auto count = std::min<qsizetype>(16, std::min<qsizetype>(requested, m_data.size() - m_dataPosition));
+            // Programmed I/O performs one SCSI REQ/ACK handshake per command.
+            const auto count = std::min<qsizetype>(1, m_data.size() - m_dataPosition);
             m_fifo.append(m_data.constData() + m_dataPosition, count);
             m_dataPosition += count;
-            m_transferCount = static_cast<std::uint32_t>(count);
-            m_status = static_cast<std::uint8_t>((m_status & 0xf8U) | 1U);
+            m_dmaActive = false;
+            m_status = static_cast<std::uint8_t>((m_status & 0xe8U) | 1U);
             raiseInterrupt(interruptService);
         } else {
             m_transferCount = dma ? (m_startTransferCount ? m_startTransferCount : 0x10000U) : 0;
+            m_dmaActive = dma;
         }
         break;
     case 0x11:
@@ -174,8 +192,10 @@ void Ncr53c94::executeCommand(std::uint8_t command)
     case 0x12: m_fifo.clear(); m_data.clear(); m_dataOut.clear(); m_status &= 0xf8U; raiseInterrupt(interruptDisconnected); break;
     case 0x41: case 0x42: case 0x43:
         selectTarget();
-        if (dma && m_commandPhase)
+        if (dma && m_commandPhase) {
             m_transferCount = m_startTransferCount ? m_startTransferCount : 0x10000U;
+            m_dmaActive = true;
+        }
         break;
     default: break;
     }

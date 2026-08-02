@@ -1236,6 +1236,39 @@ private:
 
     void handleBus(const QStringList& parts)
     {
+        if (m_powerMac8100Machine != nullptr) {
+            if (parts.size() >= 2 && (parts[1] == QStringLiteral("on") || parts[1] == QStringLiteral("off"))) {
+                const auto enabled = parts[1] == QStringLiteral("on");
+                m_powerMac8100Machine->setBusTraceEnabled(enabled);
+                m_out << "bus trace=" << (enabled ? "on" : "off") << '\n';
+                return;
+            }
+            int count = 32;
+            bool amicOnly = false;
+            bool scsiOnly = false;
+            if (parts.size() >= 3 && parts[1] == QStringLiteral("filter"))
+                amicOnly = parts[2].compare(QStringLiteral("amic"), Qt::CaseInsensitive) == 0;
+            if (parts.size() >= 3 && parts[1] == QStringLiteral("filter"))
+                scsiOnly = parts[2].compare(QStringLiteral("scsi"), Qt::CaseInsensitive) == 0;
+            if (parts.size() >= 3 && parts[1] == QStringLiteral("last"))
+                count = std::max(1, parts[2].toInt());
+            const auto& trace = m_powerMac8100Machine->busTrace();
+            const auto start = (amicOnly || scsiOnly) ? 0U
+                : trace.size() > static_cast<std::size_t>(count) ? trace.size() - count : 0U;
+            for (auto index = start; index < trace.size(); ++index) {
+                const auto& access = trace[index];
+                if (amicOnly && access.region
+                    != cutemac::machines::powermac8100::PowerMac8100Machine::BusRegion::Amic) continue;
+                if (scsiOnly && (access.address < 0x50f10000U || access.address >= 0x50f11200U)) continue;
+                m_out << (access.write ? "write" : "read")
+                      << " region=" << static_cast<unsigned>(access.region)
+                      << " pc=" << hexValue(access.pc)
+                      << " address=" << hexValue(access.address)
+                      << " size=" << access.size
+                      << " value=" << hexValue(access.value, access.size * 2) << '\n';
+            }
+            return;
+        }
         if (parts.size() >= 2 && (parts[1] == QStringLiteral("on") || parts[1] == QStringLiteral("off"))) {
             const auto enabled = parts[1] == QStringLiteral("on");
             m_machine->setBusTraceEnabled(enabled);
@@ -1269,6 +1302,34 @@ private:
 
     void printDevices(const QStringList& parts)
     {
+        if (m_powerMac8100Machine != nullptr) {
+            const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
+            if (device.isEmpty() || device == QStringLiteral("scsi")) {
+                for (const auto internal : { false, true }) {
+                    const auto& controller = m_powerMac8100Machine->scsiController(internal);
+                    const auto scsi = controller.debugState();
+                    m_out << "scsi-" << (internal ? "internal" : "external")
+                          << " target=" << scsi.targetId
+                          << " cdb=" << scsi.cdb.toHex(' ')
+                          << " data=" << scsi.dataPosition << '/' << scsi.dataSize
+                          << " remaining=" << scsi.transferCount
+                          << " status=" << hexValue(scsi.status, 2)
+                          << " interrupt=" << hexValue(scsi.interruptStatus, 2)
+                          << " step=" << hexValue(scsi.sequenceStep, 2)
+                          << " scsi_status=" << hexValue(scsi.scsiStatus, 2)
+                          << " message=" << hexValue(scsi.message, 2)
+                          << " phase=" << (scsi.command ? "command" : scsi.dataIn ? "data-in"
+                                  : scsi.dataOut ? "data-out" : "other") << '\n';
+                    m_out << "scsi-" << (internal ? "internal" : "external") << " commands";
+                    for (std::size_t command = 0; command < controller.scsiCommandCounts().size(); ++command) {
+                        if (controller.scsiCommandCounts()[command] != 0)
+                            m_out << ' ' << hexValue(command, 2) << ':' << controller.scsiCommandCounts()[command];
+                    }
+                    m_out << '\n';
+                }
+            }
+            return;
+        }
         if (m_iicxMachine != nullptr) {
             const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
             const auto io = m_iicxMachine->ioStatistics();
@@ -1710,11 +1771,13 @@ private:
     void handleKey(const QStringList& parts)
     {
         if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
-            m_out << "keymap=" << bytesToHex(m_machine->keyMapBytes()) << '\n';
+            if (m_machine) m_out << "keymap=" << bytesToHex(m_machine->keyMapBytes()) << '\n';
+            else m_out << "keymap unavailable for this machine\n";
             return;
         }
         if (parts.size() >= 2 && parts[1] == QStringLiteral("reset")) {
-            m_machine->resetKeyboard();
+            if (m_machine) m_machine->resetKeyboard();
+            else m_session->queueKeyboardReset();
             m_out << "keyboard reset\n";
             return;
         }
@@ -1724,7 +1787,8 @@ private:
                 m_out << "invalid Mac key code\n";
                 return;
             }
-            m_machine->setKeyState(static_cast<std::uint8_t>(*code), parts[1] == QStringLiteral("down"));
+            if (m_machine) m_machine->setKeyState(static_cast<std::uint8_t>(*code), parts[1] == QStringLiteral("down"));
+            else m_session->queueKey(static_cast<std::uint8_t>(*code), parts[1] == QStringLiteral("down"));
             handleKey({ QStringLiteral("key"), QStringLiteral("status") });
             return;
         }
