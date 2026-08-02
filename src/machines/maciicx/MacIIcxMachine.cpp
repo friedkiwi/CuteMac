@@ -447,12 +447,20 @@ std::uint8_t MacIIcxMachine::readIo8(std::uint32_t address)
     }
     if ((offset >= 0x6000 && offset < 0x8000) || (offset >= 0x12000 && offset < 0x14000)) {
         ++m_ioStatistics.scsiReads;
+        // Macintosh blind pseudo-DMA relies on GLUE holding off DSACK until
+        // the 5380 presents DRQ.  Our CPU bus cannot wait, so observe the
+        // status line here before completing each aperture access.  Keep this
+        // mediation out of the NCR5380 itself: a DACK without REQ must remain
+        // a non-transfer for checked/restarted System 7 accesses.
+        (void)m_scsi.readRegister(5, false);
         return m_scsi.readRegister(6, true);
     }
     if (offset >= 0x10000 && offset < 0x12000) {
         ++m_ioStatistics.scsiReads;
         const auto reg = static_cast<std::uint8_t>(((offset - 0x10000) >> 4) & 7);
-        return m_scsi.readRegister(reg, (offset & 0x130) == 0x130);
+        const auto dack = (offset & 0x130) == 0x130;
+        if (dack) (void)m_scsi.readRegister(5, false);
+        return m_scsi.readRegister(reg, dack);
     }
     if (offset >= 0x14000 && offset < 0x16000) return m_asc.read(static_cast<std::uint16_t>(offset & 0x0fff));
     if (offset >= 0x16000 && offset < 0x18000) {
@@ -479,11 +487,14 @@ void MacIIcxMachine::writeIo8(std::uint32_t address, std::uint8_t value)
         }
     } else if ((offset >= 0x6000 && offset < 0x8000) || (offset >= 0x12000 && offset < 0x14000)) {
         ++m_ioStatistics.scsiWrites;
+        (void)m_scsi.readRegister(5, false);
         m_scsi.writeRegister(0, true, value);
     } else if (offset >= 0x10000 && offset < 0x12000) {
         ++m_ioStatistics.scsiWrites;
         const auto reg = static_cast<std::uint8_t>(((offset - 0x10000) >> 4) & 7);
-        m_scsi.writeRegister(reg, (offset & 0x130) == 0x130, value);
+        const auto dack = (offset & 0x130) == 0x130;
+        if (dack) (void)m_scsi.readRegister(5, false);
+        m_scsi.writeRegister(reg, dack, value);
     } else if (offset >= 0x14000 && offset < 0x16000) {
         m_asc.write(static_cast<std::uint16_t>(offset & 0x0fff), value);
     } else if (offset >= 0x16000 && offset < 0x18000) {

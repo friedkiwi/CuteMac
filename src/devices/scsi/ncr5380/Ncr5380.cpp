@@ -85,13 +85,6 @@ std::uint8_t Ncr5380::readRegister(std::uint8_t registerIndex, bool dack)
 {
     registerIndex &= 0x07;
     if (dack) {
-        // The IIcx pseudo-DMA driver performs consecutive aperture accesses
-        // without polling the bus/status register between every byte.  Make
-        // the target's pending next REQ visible to the following DACK access.
-        if (m_requestReassertPending) {
-            m_request = true;
-            m_requestReassertPending = false;
-        }
         if (!m_request) return 0;
         const auto value = readDataByte();
         if (m_phase == Phase::DataIn && m_request) {
@@ -127,10 +120,6 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
 {
     registerIndex &= 0x07;
     if (dack) {
-        if (m_requestReassertPending) {
-            m_request = true;
-            m_requestReassertPending = false;
-        }
         if (!m_request) return;
         writeDataByte(value);
         if (m_phase == Phase::DataOut && m_request) {
