@@ -33,6 +33,8 @@ int main()
         "CuteMac indexed mode parameters must publish a version-1 PixMap layout");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("00ff005500110001")),
         "CuteMac video driver must map logical low-depth colors across the physical RAMDAC");
+    ok &= expect(virtualCard.declarationRom().contains(QByteArray("CTMD\x03\x00\x01\x02\x04\x05\x01\x02\x03\x00\x04\x05", 16)),
+        "CuteMac video driver must translate startup-first mode IDs to hardware depths");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray(".CuteMac\0", 9))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a895")),
         "CuteMac declaration ROM must advertise guest services and install its shutdown callback");
@@ -40,10 +42,8 @@ int main()
             && virtualCard.declarationRom().contains(QByteArray::fromHex("a076"))
             && virtualCard.declarationRom().contains(QByteArray::fromHex("20780d284e90")),
         "CuteMac video driver must install, remove, and dispatch its slot VBL interrupt");
-    ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
-        "CuteMac video must reset to one-bit indexed mode");
-    ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 255 },
-        "CuteMac one-bit mode must span the hardware color table");
+    ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
+        "CuteMac video must reset to its configured color depth");
     virtualCard.write8(0x00080000, 3);
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 8,
         "CuteMac mode register must select eight-bit indexed mode");
