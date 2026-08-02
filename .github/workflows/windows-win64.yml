@@ -1,7 +1,7 @@
 name: Windows Win64
 
 on:
-  push:
+  workflow_dispatch:
 
 permissions:
   contents: read

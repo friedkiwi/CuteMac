@@ -20,7 +20,40 @@ find_package(Readline)
 
 qt_standard_project_setup()
 
+set(CUTEMAC_RETRO68_TOOLCHAIN_BIN "" CACHE PATH "Directory containing the Retro68 cross tools")
+find_program(CUTEMAC_RETRO68_AS
+    NAMES m68k-apple-macos-as
+    HINTS "${CUTEMAC_RETRO68_TOOLCHAIN_BIN}" /opt/Retro68/toolchain/bin
+    REQUIRED
+)
+find_program(CUTEMAC_RETRO68_OBJCOPY
+    NAMES m68k-apple-macos-objcopy
+    HINTS "${CUTEMAC_RETRO68_TOOLCHAIN_BIN}" /opt/Retro68/toolchain/bin
+    REQUIRED
+)
+
+set(CUTEMAC_VIDEO_DRIVER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/devices/video/nubus/guest/cutemac_video_driver.S")
+set(CUTEMAC_VIDEO_DRIVER_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.o")
+set(CUTEMAC_VIDEO_DRIVER_BINARY "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.bin")
+set(CUTEMAC_VIDEO_DRIVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/cutemac_video_driver.generated.h")
+add_custom_command(
+    OUTPUT "${CUTEMAC_VIDEO_DRIVER_HEADER}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
+    COMMAND "${CUTEMAC_RETRO68_AS}" -m68020 -o "${CUTEMAC_VIDEO_DRIVER_OBJECT}" "${CUTEMAC_VIDEO_DRIVER_SOURCE}"
+    COMMAND "${CUTEMAC_RETRO68_OBJCOPY}" -O binary -j .text "${CUTEMAC_VIDEO_DRIVER_OBJECT}" "${CUTEMAC_VIDEO_DRIVER_BINARY}"
+    COMMAND "${CMAKE_COMMAND}"
+        "-DINPUT_FILE=${CUTEMAC_VIDEO_DRIVER_BINARY}"
+        "-DOUTPUT_FILE=${CUTEMAC_VIDEO_DRIVER_HEADER}"
+        -DARRAY_NAME=videoDriver
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
+    DEPENDS "${CUTEMAC_VIDEO_DRIVER_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BinaryToCpp.cmake"
+    COMMENT "Building CuteMac Video declaration-ROM driver with Retro68"
+    VERBATIM
+)
+add_custom_target(CuteMacVideoRom DEPENDS "${CUTEMAC_VIDEO_DRIVER_HEADER}")
+
 add_library(CuteMacCore
+    "${CUTEMAC_VIDEO_DRIVER_HEADER}"
     src/config/Configuration.cpp
     src/core/EmulationSession.cpp
     src/core/MachineScheduler.cpp
@@ -62,9 +95,13 @@ add_library(CuteMacCore
     src/storage/PngPageSink.cpp
 )
 
+add_dependencies(CuteMacCore CuteMacVideoRom)
+
 target_include_directories(CuteMacCore
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 target_link_libraries(CuteMacCore

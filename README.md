@@ -24,6 +24,8 @@ sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-de
 sudo apt-get install libreadline-dev libtomlplusplus-dev
 ```
 
+The build also requires a Retro68 toolchain for the project-owned CuteMac Video declaration ROM. Put `m68k-apple-macos-as` and `m68k-apple-macos-objcopy` on `PATH`, install Retro68 at `/opt/Retro68/toolchain/bin`, or pass `-DCUTEMAC_RETRO68_TOOLCHAIN_BIN=/path/to/toolchain/bin` when configuring.
+
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
@@ -31,7 +33,7 @@ cmake --build build
 
 The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, `CuteMacDebugSession` for a readline debug console, and headless Mac Plus/IIcx smoke tools.
 
-Every push also runs the Windows Win64 workflow. Its `CuteMac-win64` artifact is a portable folder containing the release executables and their Qt 6 runtime dependencies.
+The Windows Win64 workflow is temporarily manual while Retro68 installation is added to CI. Its `CuteMac-win64` artifact is a portable folder containing the release executables and their Qt 6 runtime dependencies.
 
 `CuteMacSession` and `CuteMacDebugSession` share the machine-neutral `EmulationSession` facade. Desktop sessions run emulation off the Qt event thread; WebAssembly uses a single-threaded frame runner. Debug-only concrete machine access is kept behind an optional debug interface.
 
