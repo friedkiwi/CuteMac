@@ -6,6 +6,9 @@
 #include <QIODevice>
 #include <QMediaDevices>
 
+#include <cstdint>
+#include <cstring>
+
 namespace cutemac::session {
 
 AudioOutput::AudioOutput(QObject* parent)
@@ -43,16 +46,26 @@ void AudioOutput::configure(const devices::audio::AudioFrame& frame)
     }
 }
 
-void AudioOutput::enqueue(devices::audio::AudioFrame frame)
+bool AudioOutput::enqueue(devices::audio::AudioFrame frame)
 {
     if (!frame.isValid() || frame.format != devices::audio::SampleFormat::SignedInt16) {
-        return;
+        return false;
+    }
+    bool audible = false;
+    for (qsizetype offset = 0; offset + qsizetype(sizeof(std::int16_t)) <= frame.samples.size();
+         offset += sizeof(std::int16_t)) {
+        std::int16_t sample = 0;
+        std::memcpy(&sample, frame.samples.constData() + offset, sizeof(sample));
+        if (sample != 0) {
+            audible = true;
+            break;
+        }
     }
     if (!m_sink || frame.sampleRate != m_sampleRate || frame.channelCount != m_channelCount) {
         configure(frame);
     }
     if (!m_sink || !m_device || m_paused) {
-        return;
+        return false;
     }
 
     m_pending.append(frame.samples);
@@ -61,6 +74,7 @@ void AudioOutput::enqueue(devices::audio::AudioFrame frame)
         m_pending.remove(0, m_pending.size() - maximumBytes);
     }
     pump();
+    return audible;
 }
 
 void AudioOutput::pump()

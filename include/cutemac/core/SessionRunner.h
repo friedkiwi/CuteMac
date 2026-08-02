@@ -25,6 +25,7 @@ public:
     void setCyclesPerFrame(int cyclesPerFrame);
     void setSpeed(config::RuntimeSpeed speed);
     void setInteractiveInputActive(bool active);
+    void setAudioPlaybackActive(bool active);
     [[nodiscard]] config::RuntimeSpeed speed() const;
     void runHostFrame();
 
@@ -37,6 +38,7 @@ private:
     std::atomic_int m_cyclesPerFrame = 130560;
     std::atomic<config::RuntimeSpeed> m_speed = config::RuntimeSpeed::Realtime;
     std::atomic_bool m_interactiveInputActive = false;
+    std::atomic_bool m_audioPlaybackActive = false;
     std::atomic_bool m_running = false;
     std::atomic_bool m_paused = true;
 #if !defined(Q_OS_WASM)

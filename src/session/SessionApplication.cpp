@@ -844,6 +844,10 @@ private:
         if (m_paused || !m_romLoaded) m_frameTimer.stop(); else m_frameTimer.start();
         m_display->setRunning(!m_paused && m_romLoaded);
         m_audioOutput.setPaused(m_paused || !m_romLoaded);
+        if (m_paused || !m_romLoaded) {
+            m_audioPacingFrames = 0;
+            m_runner.setAudioPlaybackActive(false);
+        }
         if (m_pauseAction != nullptr) {
             m_pauseAction->setIcon(style()->standardIcon(m_paused ? QStyle::SP_MediaPlay : QStyle::SP_MediaPause));
             m_pauseAction->setText(m_paused ? QStringLiteral("Resume") : QStringLiteral("Pause"));
@@ -860,7 +864,15 @@ private:
 
         m_runner.runHostFrame();
         m_display->setFramebuffer(m_session.videoFrame());
-        m_audioOutput.enqueue(m_session.takeAudioFrame());
+        if (m_audioOutput.enqueue(m_session.takeAudioFrame())) {
+            // Keep the emulated sample clock at wall-clock rate while sound is
+            // audible. The short tail prevents zero crossings and queued sink
+            // audio from repeatedly switching unlimited execution back on.
+            m_audioPacingFrames = 8;
+        } else if (m_audioPacingFrames > 0) {
+            --m_audioPacingFrames;
+        }
+        m_runner.setAudioPlaybackActive(m_audioPacingFrames > 0);
         switch (m_session.takePowerRequest()) {
         case cutemac::core::GuestPowerRequest::PowerOff:
             setPaused(true);
@@ -905,6 +917,7 @@ private:
     cutemac::core::SessionRunner m_runner;
     cutemac::session::SessionControlServer m_controlServer;
     cutemac::session::AudioOutput m_audioOutput;
+    int m_audioPacingFrames = 0;
     DisplayWidget* m_display = nullptr;
     QLabel* m_status = nullptr;
     QAction* m_realtimeSpeedAction = nullptr;

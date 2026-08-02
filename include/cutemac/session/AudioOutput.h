@@ -18,7 +18,7 @@ public:
     explicit AudioOutput(QObject* parent = nullptr);
     ~AudioOutput() override;
 
-    void enqueue(devices::audio::AudioFrame frame);
+    [[nodiscard]] bool enqueue(devices::audio::AudioFrame frame);
     void setPaused(bool paused);
 
 private:
