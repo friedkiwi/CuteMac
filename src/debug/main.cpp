@@ -570,7 +570,7 @@ private:
             QStringLiteral("help"), QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("reset"),
             QStringLiteral("run"), QStringLiteral("step"), QStringLiteral("run-until"), QStringLiteral("state"),
             QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("screen"), QStringLiteral("devices"),
-            QStringLiteral("mouse"),
+            QStringLiteral("mouse"), QStringLiteral("key"),
             QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
         };
         if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
@@ -835,10 +835,12 @@ private:
     void reloadMachine()
     {
         m_sadMac = {};
+        m_debugKeysDown.clear();
         m_session = std::make_unique<cutemac::core::EmulationSession>(m_configuration);
         m_cpuDebug = m_session->debugCpuAccess();
         m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(m_session->debugMachine(QStringLiteral("mac-plus")));
         m_iicxMachine = static_cast<cutemac::machines::maciicx::MacIIcxMachine*>(m_session->debugMachine(QStringLiteral("mac-iicx")));
+        if (m_iicxMachine != nullptr) m_iicxMachine->setAdbTraceEnabled(true);
         m_powerMac8100Machine = static_cast<cutemac::machines::powermac8100::PowerMac8100Machine*>(
             m_session->debugMachine(QStringLiteral("powermac-8100")));
         if (m_cpuDebug == nullptr && m_machine == nullptr && m_iicxMachine == nullptr) {
@@ -1369,7 +1371,7 @@ private:
                     m_out << '\n';
                 }
             }
-            if (device.isEmpty() || device == QStringLiteral("via")) {
+            if (device.isEmpty() || device == QStringLiteral("via") || device == QStringLiteral("adb")) {
                 const auto via1 = m_iicxMachine->via1DebugState();
                 const auto via2 = m_iicxMachine->via2DebugState();
                 m_out << "via1_ifr=" << hexValue(via1.interruptFlags, 2) << " ier=" << hexValue(via1.interruptEnable, 2)
@@ -1383,9 +1385,45 @@ private:
                       << " cycles=" << adb.transferCycles
                       << " pending=" << (adb.commandPending ? "yes" : "no")
                       << " tx=" << (adb.transmittingFromVia ? "yes" : "no")
+                      << " phase=" << static_cast<int>(adb.phase)
+                      << " error=" << (adb.error ? "yes" : "no")
+                      << " srq=" << (adb.serviceRequest ? "yes" : "no")
+                      << " retry=" << (adb.retryPending ? "yes" : "no")
                       << " dx=" << adb.pendingMouseDx << " dy=" << adb.pendingMouseDy
                       << " keyboard=" << static_cast<int>(adb.keyboardAddress)
                       << " mouse=" << static_cast<int>(adb.mouseAddress) << '\n';
+                static const std::array<const char*, 9> adbKinds {
+                    "none", "state", "host-write", "host-start", "host-done",
+                    "controller-start", "controller-done", "pb3", "autopoll"
+                };
+                for (const auto& event : m_iicxMachine->adbTraceEvents()) {
+                    const auto kind = event.kind < adbKinds.size() ? adbKinds[event.kind] : "unknown";
+                    m_out << "adb-trace cycle=" << event.cycle << " kind=" << kind
+                          << " pc=" << hexValue(event.pc)
+                          << " state=" << static_cast<int>(event.state)
+                          << " value=" << hexValue(event.value, 2)
+                          << " phase=" << static_cast<int>(event.phase)
+                          << " status=" << (event.status ? "low" : "high")
+                          << " acr=" << hexValue(event.viaAcr, 2)
+                          << " sr=" << hexValue(event.viaSr, 2)
+                          << " ifr=" << hexValue(event.viaIfr, 2)
+                          << " ier=" << hexValue(event.viaIer, 2)
+                          << " orb=" << hexValue(event.viaOrb, 2) << '\n';
+                }
+            }
+            if (device.isEmpty() || device == QStringLiteral("scc")) {
+                using Channel = cutemac::devices::scc::Z8530Scc::Channel;
+                for (const auto [name, channel] : {std::pair {"A", Channel::A}, std::pair {"B", Channel::B}}) {
+                    const auto scc = m_iicxMachine->sccDebugState(channel);
+                    m_out << "scc" << name << " irq=" << (m_iicxMachine->sccInterruptActive() ? "yes" : "no")
+                          << " selected=" << hexValue(scc.selectedRegister, 2)
+                          << " tx_cycles=" << scc.transmitCycles << " brg_cycles=" << scc.baudRateCycles
+                          << " pending=" << (scc.receivePending ? "r" : "-")
+                          << (scc.transmitPending ? "t" : "-") << (scc.externalPending ? "e" : "-")
+                          << " zero=" << (scc.zeroCount ? "yes" : "no") << " wr=";
+                    for (const auto reg : {1, 9, 12, 13, 14, 15}) m_out << reg << ':' << hexValue(scc.writeRegisters[reg], 2) << ' ';
+                    m_out << '\n';
+                }
             }
             if (device.isEmpty() || device == QStringLiteral("scsi")) {
                 m_out << "scsi_reads=" << io.scsiReads << " scsi_writes=" << io.scsiWrites << '\n';
@@ -1405,6 +1443,13 @@ private:
                       << " output=" << hexValue(scsi.outputData, 2) << '\n';
                 m_out << "scsi_active_cdb=" << scsi.activeCommand.toHex(' ') << '\n';
                 m_out << "scsi_last_cdb=" << scsi.lastCommand.toHex(' ') << '\n';
+                for (const auto& command : m_iicxMachine->scsiController().commandTrace()) {
+                    m_out << "scsi_cmd target=" << static_cast<int>(command.targetId)
+                          << " cdb=" << command.cdb.toHex(' ')
+                          << " in=" << command.dataLength << " out=" << command.dataOutLength
+                          << " status=" << hexValue(command.status, 2)
+                          << " sense=" << hexValue(command.senseKey, 2) << '\n';
+                }
             }
             if (device.isEmpty() || device == QStringLiteral("swim")) {
                 m_out << "swim_reads=" << io.swimReads << " swim_writes=" << io.swimWrites << '\n';
@@ -1785,13 +1830,21 @@ private:
     void handleKey(const QStringList& parts)
     {
         if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
-            if (m_machine) m_out << "keymap=" << bytesToHex(m_machine->keyMapBytes()) << '\n';
-            else m_out << "keymap unavailable for this machine\n";
+            m_out << "keys_down=";
+            bool first = true;
+            for (const auto code : m_debugKeysDown) {
+                if (!first) m_out << ',';
+                m_out << hexValue(code, 2);
+                first = false;
+            }
+            if (first) m_out << "none";
+            if (m_machine) m_out << " keymap=" << bytesToHex(m_machine->keyMapBytes());
+            m_out << '\n';
             return;
         }
         if (parts.size() >= 2 && parts[1] == QStringLiteral("reset")) {
-            if (m_machine) m_machine->resetKeyboard();
-            else m_session->queueKeyboardReset();
+            m_session->queueKeyboardReset();
+            m_debugKeysDown.clear();
             m_out << "keyboard reset\n";
             return;
         }
@@ -1801,8 +1854,11 @@ private:
                 m_out << "invalid Mac key code\n";
                 return;
             }
-            if (m_machine) m_machine->setKeyState(static_cast<std::uint8_t>(*code), parts[1] == QStringLiteral("down"));
-            else m_session->queueKey(static_cast<std::uint8_t>(*code), parts[1] == QStringLiteral("down"));
+            const auto keyCode = static_cast<std::uint8_t>(*code);
+            const auto pressed = parts[1] == QStringLiteral("down");
+            m_session->queueKey(keyCode, pressed);
+            if (pressed) m_debugKeysDown.insert(keyCode);
+            else m_debugKeysDown.remove(keyCode);
             handleKey({ QStringLiteral("key"), QStringLiteral("status") });
             return;
         }
@@ -2406,6 +2462,7 @@ private:
     std::int16_t m_debugMouseX = 0;
     std::int16_t m_debugMouseY = 0;
     bool m_debugMouseButton = false;
+    QSet<std::uint8_t> m_debugKeysDown;
     quint16 m_gdbPort = 1234;
     std::set<std::uint32_t> m_breakpoints;
     QStringList m_watches;

@@ -1,4 +1,5 @@
 file(READ "${BASE_SOURCE}" source)
 string(REPLACE "beq.w   install_guest_helpers" "beq.w   accelerated_install_guest_helpers" source "${source}")
+string(REPLACE "slot_cursor_task:\n" "slot_cursor_task:\n        bsr.w   accelerated_slot_vbl_hook\n" source "${source}")
 file(READ "${EXTENSION_SOURCE}" extension)
 file(WRITE "${OUTPUT_SOURCE}" "${source}\n${extension}\n")

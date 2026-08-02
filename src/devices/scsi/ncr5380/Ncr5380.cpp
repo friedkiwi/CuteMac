@@ -58,6 +58,7 @@ void Ncr5380::reset()
     m_previousAck = false;
     m_commandReady = false;
     m_lastCommand.clear();
+    m_commandTrace.clear();
     m_activeTarget.reset();
     m_activeTargetId = 0xff;
 }
@@ -270,6 +271,17 @@ void Ncr5380::executeCommand()
         setPhase(Phase::DataOut);
         return;
     }
+    if (opcode == 0x2a && m_command.size() >= 10) {
+        const auto blocks = (static_cast<qsizetype>(static_cast<std::uint8_t>(m_command[7])) << 8)
+            | static_cast<std::uint8_t>(m_command[8]);
+        m_expectedDataOut = blocks * 512;
+        if (m_expectedDataOut != 0) {
+            m_dataBuffer.clear();
+            m_dataIndex = 0;
+            setPhase(Phase::DataOut);
+            return;
+        }
+    }
     if (opcode == 0x15 && m_command.size() >= 6 && static_cast<std::uint8_t>(m_command[4]) != 0) {
         m_expectedDataOut = static_cast<std::uint8_t>(m_command[4]);
         m_dataBuffer.clear();
@@ -296,6 +308,9 @@ void Ncr5380::executeCommand()
     }
 
     const auto result = m_activeTarget->executeCommand(m_command, {});
+    if (m_commandTrace.size() == 128) m_commandTrace.pop_front();
+    m_commandTrace.push_back({ m_activeTargetId, m_command, result.data.size(), 0,
+        result.status, result.senseKey });
     m_lastCommand = m_command;
     ++m_completedCommands;
     m_dataBuffer = result.data;
@@ -344,6 +359,9 @@ void Ncr5380::finishDataPhaseIfDone()
 void Ncr5380::completeDataOutCommand()
 {
     const auto result = m_activeTarget ? m_activeTarget->executeCommand(m_command, m_dataOut) : ScsiCommandResult {};
+    if (m_commandTrace.size() == 128) m_commandTrace.pop_front();
+    m_commandTrace.push_back({ m_activeTargetId, m_command, result.data.size(), m_dataOut.size(),
+        result.status, result.senseKey });
     m_lastCommand = m_command;
     ++m_completedCommands;
     m_status = result.status;

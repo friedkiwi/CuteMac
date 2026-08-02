@@ -31,6 +31,11 @@ int main(int argc, char* argv[])
         err << "failed to load 128 KiB Mac Plus ROM: " << romPath << '\n';
         return 1;
     }
+    if (const auto path = qEnvironmentVariable("CUTEMAC_MACPLUS_SCSI_DISK"); !path.isEmpty()
+        && !machine.loadScsiDisk(0, path, false)) {
+        err << "failed to load SCSI disk image: " << path << '\n';
+        return 1;
+    }
 
     machine.reset();
     const auto cyclesRun = machine.runCycles(cycles);

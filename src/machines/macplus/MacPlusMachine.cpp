@@ -79,6 +79,51 @@ MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath)
           false,
           true,
       })
+    , m_sccBus(
+          {
+              devices::bus::ByteWideMmioAdapter::ReadWiring::MostSignificantLane,
+              devices::bus::ByteWideMmioAdapter::WriteWiring::LeastSignificantLane,
+          },
+          [this](std::uint32_t offset, bool) {
+              using Channel = devices::scc::Z8530Scc::Channel;
+              switch (offset & 6) {
+              case 6: return m_scc.readData(Channel::A);
+              case 4: return m_scc.readData(Channel::B);
+              case 2: return m_scc.readControl(Channel::A);
+              default: return m_scc.readControl(Channel::B);
+              }
+          },
+          [this](std::uint32_t offset, std::uint8_t value) {
+              using Channel = devices::scc::Z8530Scc::Channel;
+              switch (offset & 6) {
+              case 6: m_scc.writeData(Channel::A, value); break;
+              case 4: m_scc.writeData(Channel::B, value); break;
+              case 2: m_scc.writeControl(Channel::A, value); break;
+              default: m_scc.writeControl(Channel::B, value); break;
+              }
+          })
+    , m_iwmBus(
+          {
+              devices::bus::ByteWideMmioAdapter::ReadWiring::Replicate,
+              devices::bus::ByteWideMmioAdapter::WriteWiring::LeastSignificantLane,
+          },
+          [this](std::uint32_t offset, bool) {
+              return m_iwm.access(static_cast<std::uint8_t>((offset >> 9) & 0x0f));
+          },
+          [this](std::uint32_t offset, std::uint8_t value) {
+              (void)m_iwm.access(static_cast<std::uint8_t>((offset >> 9) & 0x0f), value, true);
+          })
+    , m_viaBus(
+          {
+              devices::bus::ByteWideMmioAdapter::ReadWiring::Replicate,
+              devices::bus::ByteWideMmioAdapter::WriteWiring::MostSignificantLane,
+          },
+          [this](std::uint32_t offset, bool) {
+              return m_via.readRegister(static_cast<std::uint8_t>((offset >> 9) & 0x0f));
+          },
+          [this](std::uint32_t offset, std::uint8_t value) {
+              m_via.writeRegister(static_cast<std::uint8_t>((offset >> 9) & 0x0f), value);
+          })
 {
     (void)m_rtc.setNvramImagePath(nvramPath);
     m_cpu.setModel(cpu::m68k::M68kCpuCore::Model::M68000);
@@ -417,14 +462,13 @@ std::uint8_t MacPlusMachine::read8(std::uint32_t address)
 std::uint16_t MacPlusMachine::read16(std::uint32_t address)
 {
     address &= 0x00ffffff;
-    if (regionFor(address) == Region::Scsi) {
-        ++m_accessSummary.scsiReads;
-        const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
-        const auto dack = (address & 0x0200) != 0;
-        const auto value = static_cast<std::uint16_t>(dack
-                ? m_scsiBus.readPseudoDma(2)
-                : m_scsiBus.readRegister(registerIndex, 2));
-        recordBusAccess("read", Region::Scsi, address, value, 2);
+    const auto region = regionFor(address);
+    if (region != Region::Ram && region != Region::Rom && region != Region::Unmapped) {
+        const core::BusTransaction transaction {
+            address, 0, 2, 0x03, core::BusAccessKind::DataRead,
+        };
+        const auto value = static_cast<std::uint16_t>(accessDevice(transaction, region).value);
+        recordBusAccess("read", region, address, value, 2);
         return value;
     }
     return static_cast<std::uint16_t>((read8(address) << 8) | read8(address + 1));
@@ -455,13 +499,13 @@ void MacPlusMachine::write8(std::uint32_t address, std::uint8_t value)
 void MacPlusMachine::write16(std::uint32_t address, std::uint16_t value)
 {
     address &= 0x00ffffff;
-    if (regionFor(address) == Region::Scsi) {
-        ++m_accessSummary.scsiWrites;
-        const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
-        const auto dack = (address & 0x0200) != 0;
-        if (dack) m_scsiBus.writePseudoDma(2, value);
-        else m_scsiBus.writeRegister(registerIndex, 2, value);
-        recordBusAccess("write", Region::Scsi, address, value, 2);
+    const auto region = regionFor(address);
+    if (region != Region::Ram && region != Region::Rom && region != Region::Unmapped) {
+        const core::BusTransaction transaction {
+            address, value, 2, 0x03, core::BusAccessKind::DataWrite,
+        };
+        (void)accessDevice(transaction, region);
+        recordBusAccess("write", region, address, value, 2);
         return;
     }
     write8(address, highByte(value));
@@ -529,101 +573,62 @@ std::uint32_t MacPlusMachine::romOffset(std::uint32_t address) const
 
 std::uint8_t MacPlusMachine::readDevice8(std::uint32_t address, Region region)
 {
+    const core::BusTransaction transaction {
+        address, 0, 1, 1, core::BusAccessKind::DataRead,
+    };
+    return static_cast<std::uint8_t>(accessDevice(transaction, region).value);
+}
+
+core::BusResponse MacPlusMachine::accessDevice(const core::BusTransaction& transaction, Region region)
+{
+    const auto address = transaction.address;
+    const bool write = transaction.kind == core::BusAccessKind::DataWrite
+        || transaction.kind == core::BusAccessKind::DebugWrite;
     switch (region) {
-    case Region::Scc: {
-        ++m_accessSummary.sccReads;
-        const auto offset = static_cast<std::uint8_t>((address - sccReadBase) & 0x07);
-        using Channel = devices::scc::Z8530Scc::Channel;
-        if (offset == 6) {
-            return m_scc.readData(Channel::A);
-        }
-        if (offset == 4) {
-            return m_scc.readData(Channel::B);
-        }
-        if (offset == 2) {
-            return m_scc.readControl(Channel::A);
-        }
-        return m_scc.readControl(Channel::B);
-    }
-    case Region::Iwm: {
-        ++m_accessSummary.iwmReads;
-        const auto registerIndex = static_cast<std::uint8_t>(((address - iwmBase) >> 9) & 0x0f);
-        return m_iwm.access(registerIndex);
-    }
-    case Region::Via: {
-        ++m_accessSummary.viaReads;
-        const auto registerIndex = static_cast<std::uint8_t>(((address - viaBase) >> 9) & 0x0f);
-        return m_via.readRegister(registerIndex);
-    }
+    case Region::Scc:
+        write ? ++m_accessSummary.sccWrites : ++m_accessSummary.sccReads;
+        return m_sccBus.access(address - (write ? sccWriteBase : sccReadBase), transaction);
+    case Region::Iwm:
+        write ? ++m_accessSummary.iwmWrites : ++m_accessSummary.iwmReads;
+        return m_iwmBus.access(address - iwmBase, transaction);
+    case Region::Via:
+        write ? ++m_accessSummary.viaWrites : ++m_accessSummary.viaReads;
+        return m_viaBus.access(address - viaBase, transaction);
     case Region::Scsi: {
-        ++m_accessSummary.scsiReads;
+        write ? ++m_accessSummary.scsiWrites : ++m_accessSummary.scsiReads;
         const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
         const auto dack = (address & 0x0200) != 0;
-        return static_cast<std::uint8_t>(dack ? m_scsiBus.readPseudoDma(1) : m_scsiBus.readRegister(registerIndex, 1));
+        if (write) {
+            if (dack) m_scsiBus.writePseudoDma(transaction.size, transaction.value);
+            else m_scsiBus.writeRegister(registerIndex, transaction.size, transaction.value);
+            return {};
+        }
+        return {dack
+                ? m_scsiBus.readPseudoDma(transaction.size)
+                : m_scsiBus.readRegister(registerIndex, transaction.size)};
     }
     case Region::Configuration:
-        ++m_accessSummary.configurationReads;
-        return 0;
+        if (!write) ++m_accessSummary.configurationReads;
+        return {};
     case Region::Ram:
     case Region::Rom:
     case Region::Unmapped:
         break;
     }
 
-    ++m_accessSummary.unmappedReads;
-    logAccess("read unmapped", address, 0xff);
-    return 0xff;
+    if (write) ++m_accessSummary.unmappedWrites;
+    else ++m_accessSummary.unmappedReads;
+    logAccess(write ? "write unmapped" : "read unmapped", address, transaction.value);
+    return {0xffffffffU};
 }
 
 void MacPlusMachine::writeDevice8(std::uint32_t address, Region region, std::uint8_t value)
 {
-    switch (region) {
-    case Region::Rom:
-        return;
-    case Region::Scc: {
-        ++m_accessSummary.sccWrites;
-        const auto offset = static_cast<std::uint8_t>((address - sccWriteBase) & 0x07);
-        using Channel = devices::scc::Z8530Scc::Channel;
-        if (offset == 6) {
-            m_scc.writeData(Channel::A, value);
-        } else if (offset == 4) {
-            m_scc.writeData(Channel::B, value);
-        } else if (offset == 2) {
-            m_scc.writeControl(Channel::A, value);
-        } else {
-            m_scc.writeControl(Channel::B, value);
-        }
-        return;
-    }
-    case Region::Iwm: {
-        ++m_accessSummary.iwmWrites;
-        const auto registerIndex = static_cast<std::uint8_t>(((address - iwmBase) >> 9) & 0x0f);
-        (void)m_iwm.access(registerIndex, value, true);
-        return;
-    }
-    case Region::Via: {
-        ++m_accessSummary.viaWrites;
-        const auto registerIndex = static_cast<std::uint8_t>(((address - viaBase) >> 9) & 0x0f);
-        m_via.writeRegister(registerIndex, value);
-        return;
-    }
-    case Region::Scsi: {
-        ++m_accessSummary.scsiWrites;
-        const auto registerIndex = static_cast<std::uint8_t>((address >> 4) & 0x07);
-        const auto dack = (address & 0x0200) != 0;
-        if (dack) m_scsiBus.writePseudoDma(1, value);
-        else m_scsiBus.writeRegister(registerIndex, 1, value);
-        return;
-    }
-    case Region::Configuration:
-        return;
-    case Region::Ram:
-    case Region::Unmapped:
-        break;
-    }
-
-    ++m_accessSummary.unmappedWrites;
-    logAccess("write unmapped", address, value);
+    if (region == Region::Rom) return;
+    const core::BusTransaction transaction {
+        address, value, 1, 1, core::BusAccessKind::DataWrite,
+    };
+    (void)accessDevice(transaction, region);
 }
 
 std::uint8_t MacPlusMachine::debugRead8(std::uint32_t address) const

@@ -3,6 +3,7 @@
 #include <QFile>
 
 #include <algorithm>
+#include <optional>
 
 namespace cutemac::devices::scsi {
 
@@ -15,6 +16,15 @@ constexpr std::uint8_t messageCommandComplete = 0x00;
 constexpr std::uint8_t senseNoSense = 0x00;
 constexpr std::uint8_t senseNotReady = 0x02;
 constexpr std::uint8_t senseIllegalRequest = 0x05;
+constexpr std::uint64_t MiB = 1024ULL * 1024ULL;
+
+QByteArray padded(const char* text, qsizetype width)
+{
+    auto bytes = QByteArray(text);
+    bytes.truncate(width);
+    if (bytes.size() < width) bytes.append(QByteArray(width - bytes.size(), ' '));
+    return bytes;
+}
 
 void appendBe32(QByteArray& bytes, std::uint32_t value)
 {
@@ -24,6 +34,14 @@ void appendBe32(QByteArray& bytes, std::uint32_t value)
     bytes.append(static_cast<char>(value));
 }
 
+std::uint32_t readBe32(const QByteArray& bytes, qsizetype offset)
+{
+    return (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset])) << 24)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 1])) << 16)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 2])) << 8)
+        | static_cast<std::uint8_t>(bytes[offset + 3]);
+}
+
 QByteArray clipped(QByteArray bytes, std::uint8_t allocationLength)
 {
     bytes.truncate(std::min<int>(allocationLength, bytes.size()));
@@ -31,6 +49,22 @@ QByteArray clipped(QByteArray bytes, std::uint8_t allocationLength)
 }
 
 } // namespace
+
+ScsiDiskIdentity ScsiBlockDevice::identityForSize(std::uint64_t sizeBytes)
+{
+    const auto identity = [sizeBytes](std::uint64_t mib, const char* vendor, const char* product) -> std::optional<ScsiDiskIdentity> {
+        if (sizeBytes != mib * MiB) return std::nullopt;
+        return ScsiDiskIdentity { padded(vendor, 8), padded(product, 16), padded("1.0", 4) };
+    };
+    if (auto value = identity(20, "CONNER", "CP2025-20mb")) return *value;
+    if (auto value = identity(40, "QUANTUM", "GO40S")) return *value;
+    if (auto value = identity(80, "QUANTUM", "GO80S1")) return *value;
+    if (auto value = identity(160, "QUANTUM", "GO160S")) return *value;
+    if (auto value = identity(230, "QUANTUM", "LP240S")) return *value;
+    if (auto value = identity(500, "QUANTUM", "LPS540S")) return *value;
+    if (auto value = identity(1024, "IBM", "DPES-31080")) return *value;
+    return { padded("QUANTUM", 8), padded("FIREBALL1", 16), padded("1.0", 4) };
+}
 
 bool ScsiBlockDevice::loadImage(const QString& path, bool readOnly)
 {
@@ -121,10 +155,36 @@ ScsiCommandResult ScsiBlockDevice::executeCommand(const QByteArray& cdb, const Q
         return good();
     case 0x1a:
         return modeSense(
+            cdb.size() > 1 && (static_cast<std::uint8_t>(cdb[1]) & 0x08) != 0,
             cdb.size() > 2 ? static_cast<std::uint8_t>(cdb[2]) & 0x3f : 0x3f,
             cdb.size() > 4 ? static_cast<std::uint8_t>(cdb[4]) : 4);
     case 0x25:
         return readCapacity();
+    case 0x28: {
+        if (cdb.size() < 10) {
+            return checkCondition(senseIllegalRequest);
+        }
+        const auto lba = readBe32(cdb, 2);
+        const auto blocks = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[7])) << 8)
+            | static_cast<std::uint8_t>(cdb[8]);
+        if (blocks == 0) {
+            return good();
+        }
+        const auto data = readBlocks(lba, blocks);
+        return m_senseKey == senseNoSense ? good(data) : checkCondition(m_senseKey);
+    }
+    case 0x2a: {
+        if (cdb.size() < 10 || m_readOnly) {
+            return checkCondition(senseIllegalRequest);
+        }
+        const auto lba = readBe32(cdb, 2);
+        const auto blocks = (static_cast<std::uint32_t>(static_cast<std::uint8_t>(cdb[7])) << 8)
+            | static_cast<std::uint8_t>(cdb[8]);
+        if (dataOut.size() != static_cast<qsizetype>(blocks) * blockSize) {
+            return checkCondition(senseIllegalRequest);
+        }
+        return blocks == 0 || writeBlocks(lba, dataOut) ? good() : checkCondition(senseIllegalRequest);
+    }
     case 0x2b:
     case 0x35:
         return good();
@@ -270,9 +330,10 @@ ScsiCommandResult ScsiBlockDevice::inquiry(bool evpd, std::uint8_t pageCode, std
     data[3] = 0x01;
     data[4] = 31;
     data[7] = 0x18; // linked commands and synchronous transfer supported.
-    data.replace(8, 8, QByteArrayLiteral(" SEAGATE"));
-    data.replace(16, 16, QByteArrayLiteral("          ST225N"));
-    data.replace(32, 4, QByteArrayLiteral("1.0 "));
+    const auto identity = identityForSize(static_cast<std::uint64_t>(m_image.size()));
+    data.replace(8, 8, identity.vendor);
+    data.replace(16, 16, identity.product);
+    data.replace(32, 4, identity.revision);
     return good(clipped(data, allocationLength));
 }
 
@@ -286,11 +347,29 @@ ScsiCommandResult ScsiBlockDevice::requestSense(std::uint8_t allocationLength) c
     return good(data);
 }
 
-ScsiCommandResult ScsiBlockDevice::modeSense(std::uint8_t pageCode, std::uint8_t allocationLength)
+ScsiCommandResult ScsiBlockDevice::modeSense(bool disableBlockDescriptors,
+    std::uint8_t pageCode, std::uint8_t allocationLength)
 {
     QByteArray data(4, '\0');
     data[2] = m_readOnly ? static_cast<char>(0x80) : static_cast<char>(0x00);
     bool pageFound = pageCode == 0x00;
+    // Disk-format and geometry consumers, including Apple's setup tools,
+    // expect the direct-access block descriptor when DBD is clear.  Without
+    // it they interpret the first mode-page bytes as capacity and block size,
+    // shifting the complete page layout by eight bytes.
+    if (!disableBlockDescriptors
+        && (pageCode == 0x03 || pageCode == 0x04 || pageCode == 0x30 || pageCode == 0x3f)) {
+        QByteArray descriptor(8, '\0');
+        const auto blocks = std::min<std::uint32_t>(blockCount(), 0x00ffffffU);
+        descriptor[1] = static_cast<char>(blocks >> 16);
+        descriptor[2] = static_cast<char>(blocks >> 8);
+        descriptor[3] = static_cast<char>(blocks);
+        descriptor[5] = static_cast<char>(blockSize >> 16);
+        descriptor[6] = static_cast<char>(blockSize >> 8);
+        descriptor[7] = static_cast<char>(blockSize);
+        data.append(descriptor);
+        data[3] = 8;
+    }
     if (pageCode == 0x03 || pageCode == 0x3f) {
         pageFound = true;
         QByteArray page(24, '\0');
@@ -330,10 +409,8 @@ ScsiCommandResult ScsiBlockDevice::modeSense(std::uint8_t pageCode, std::uint8_t
     if (pageCode == 0x30 || pageCode == 0x3f) {
         pageFound = true;
         data.append(static_cast<char>(0x30));
-        data.append(static_cast<char>(0x24));
-        QByteArray page(0x24, '\0');
-        page.replace(8, 22, QByteArrayLiteral("APPLE COMPUTER, INC   "));
-        data.append(page);
+        data.append(static_cast<char>(0x16));
+        data.append(QByteArrayLiteral("APPLE COMPUTER, INC   "));
     }
     if (!pageFound) {
         return checkCondition(senseIllegalRequest);

@@ -63,6 +63,13 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     m_via1.setShiftRegisterWriteCallback([this](std::uint8_t value) { m_adbTransceiver.shiftRegisterWritten(value); });
     m_adbTransceiver.setReceiveByteCallback([this](std::uint8_t value) { m_via1.externalShiftIn(value); });
     m_adbTransceiver.setTransmitCompleteCallback([this]() { m_via1.externalShiftOutComplete(); });
+    m_adbTransceiver.setTraceContextCallback([this]() {
+        const auto via = m_via1.debugState();
+        return devices::adb::AdbTransceiver::TraceContext {
+            m_cpu.programCounter(), via.auxiliaryControl, via.shiftRegister,
+            via.interruptFlags, via.interruptEnable, via.portB,
+        };
+    });
     m_adbTransceiver.setIrqCallback([this](bool asserted) {
         m_adbIrqPending = asserted;
         m_via1.setPortBInputBit(3, !m_adbIrqPending);

@@ -8,8 +8,15 @@
 
 namespace cutemac::devices::scsi {
 
+struct ScsiDiskIdentity {
+    QByteArray vendor;
+    QByteArray product;
+    QByteArray revision;
+};
+
 class ScsiBlockDevice final : public ScsiTarget {
 public:
+    [[nodiscard]] static ScsiDiskIdentity identityForSize(std::uint64_t sizeBytes);
     [[nodiscard]] bool loadImage(const QString& path, bool readOnly = false);
     void eject();
 
@@ -25,7 +32,8 @@ private:
     [[nodiscard]] ScsiCommandResult checkCondition(std::uint8_t senseKey);
     [[nodiscard]] ScsiCommandResult inquiry(bool evpd, std::uint8_t pageCode, std::uint8_t allocationLength);
     [[nodiscard]] ScsiCommandResult requestSense(std::uint8_t allocationLength) const;
-    [[nodiscard]] ScsiCommandResult modeSense(std::uint8_t pageCode, std::uint8_t allocationLength);
+    [[nodiscard]] ScsiCommandResult modeSense(bool disableBlockDescriptors,
+        std::uint8_t pageCode, std::uint8_t allocationLength);
     [[nodiscard]] ScsiCommandResult readCapacity() const;
 
     QByteArray m_image;

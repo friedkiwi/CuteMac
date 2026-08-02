@@ -14,3 +14,8 @@ Thumbs.db
 core
 core.*
 core-*
+
+# Runtime state produced by emulator and reference-emulator sessions.
+cfg/
+nvram/
+snap/

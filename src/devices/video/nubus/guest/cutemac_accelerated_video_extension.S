@@ -11,6 +11,17 @@ accelerated_install_guest_helpers:
         movem.l (%sp)+,%d1-%d7/%a0-%a6
         bra.w   install_guest_helpers
 
+accelerated_slot_vbl_hook:
+        movem.l %d0-%d7/%a0-%a6,-(%sp)
+        bsr.w   card_base
+        movea.l 0x000a0038(%a2),%a0     | resident Guest Tools callback
+        cmpa.l  #0,%a0
+        beq.s   accelerated_slot_vbl_done
+        jsr     (%a0)
+accelerated_slot_vbl_done:
+        movem.l (%sp)+,%d0-%d7/%a0-%a6
+        rts
+
 accelerated_install_std_bits_hook:
         lea     accelerated_old_std_bits(%pc),%a0
         tst.l   (%a0)

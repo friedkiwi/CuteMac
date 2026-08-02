@@ -13,7 +13,9 @@
 #include "cutemac/core/IMachine.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/core/MachineScheduler.h"
+#include "cutemac/core/BusTransaction.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
+#include "cutemac/devices/bus/ByteWideMmioAdapter.h"
 #include "cutemac/devices/iwm/IwmController.h"
 #include "cutemac/devices/rtc/MacRtc.h"
 #include "cutemac/devices/scc/Z8530Scc.h"
@@ -164,6 +166,7 @@ private:
 
     [[nodiscard]] std::uint8_t readDevice8(std::uint32_t address, Region region);
     void writeDevice8(std::uint32_t address, Region region, std::uint8_t value);
+    [[nodiscard]] core::BusResponse accessDevice(const core::BusTransaction& transaction, Region region);
 
     void updateInterrupts();
     [[nodiscard]] std::uint32_t readRam32Direct(std::uint32_t address) const;
@@ -195,6 +198,9 @@ private:
     devices::iwm::IwmController m_iwm;
     devices::scsi::ncr5380::Ncr5380 m_scsi;
     devices::scsi::ncr5380::MacintoshNcr5380Bus m_scsiBus;
+    devices::bus::ByteWideMmioAdapter m_sccBus;
+    devices::bus::ByteWideMmioAdapter m_iwmBus;
+    devices::bus::ByteWideMmioAdapter m_viaBus;
     std::array<std::shared_ptr<devices::scsi::ScsiBlockDevice>, 7> m_scsiDisks;
     std::array<std::shared_ptr<devices::scsi::ScsiCdRomDevice>, 7> m_scsiCdRoms;
 

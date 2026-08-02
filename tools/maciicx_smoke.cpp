@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -9,6 +10,7 @@
 #include <QFile>
 
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 
@@ -23,6 +25,7 @@ int main(int argc, char** argv)
     const auto cycles = argc >= 3 ? std::max(1, std::atoi(argv[2])) : 10'000'000;
     cutemac::machines::maciicx::MacIIcxMachine machine(8 * 1024 * 1024);
     std::shared_ptr<cutemac::devices::video::nubus::MacintoshIIVideoCard> authenticVideo;
+    std::shared_ptr<cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard> acceleratedVideo;
     if (qEnvironmentVariableIsSet("CUTEMAC_IICX_AUTHENTIC_VIDEO")) {
         authenticVideo = std::make_shared<cutemac::devices::video::nubus::MacintoshIIVideoCard>();
         const auto path = qEnvironmentVariable("CUTEMAC_IICX_VIDEO_ROM", QStringLiteral("work/roms/342-0008-a.bin"));
@@ -30,6 +33,10 @@ int main(int argc, char** argv)
             std::cerr << "failed to load authentic Macintosh II video card ROM\n";
             return 1;
         }
+    } else if (qEnvironmentVariableIsSet("CUTEMAC_IICX_ACCELERATED_VIDEO")) {
+        acceleratedVideo = std::make_shared<cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard>(
+            1024, 768, 8, 4, true, true);
+        (void)machine.installNuBusCard(9, acceleratedVideo);
     } else {
         (void)machine.installNuBusCard(9,
             std::make_shared<cutemac::devices::video::nubus::CuteMacVideoCard>(640, 480, 8, 4, true));
@@ -43,6 +50,11 @@ int main(int argc, char** argv)
         return 1;
     }
     if (argc >= 7 && !machine.loadScsiDisk(0, QString::fromLocal8Bit(argv[6]), false)) {
+        std::cerr << "failed to load SCSI disk image\n";
+        return 1;
+    }
+    if (const auto path = qEnvironmentVariable("CUTEMAC_IICX_SCSI_DISK"); !path.isEmpty()
+        && !machine.loadScsiDisk(0, path, false)) {
         std::cerr << "failed to load SCSI disk image\n";
         return 1;
     }
@@ -263,6 +275,50 @@ int main(int argc, char** argv)
         const auto& writes = authenticVideo->vblWriteOffsets();
         for (std::size_t offset = 0; offset < writes.size(); ++offset) {
             if (writes[offset] != 0) std::cout << " +0x" << std::hex << offset << '=' << std::dec << writes[offset];
+        }
+        std::cout << '\n';
+    }
+    if (acceleratedVideo) {
+        const auto read32 = [&acceleratedVideo](std::uint32_t offset) {
+            return (static_cast<std::uint32_t>(acceleratedVideo->read8(offset)) << 24)
+                | (static_cast<std::uint32_t>(acceleratedVideo->read8(offset + 1)) << 16)
+                | (static_cast<std::uint32_t>(acceleratedVideo->read8(offset + 2)) << 8)
+                | acceleratedVideo->read8(offset + 3);
+        };
+        const auto base = cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard::acceleratorBase;
+        using Register = cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard::AcceleratorRegister;
+        const auto reg = [base](Register value) { return base + static_cast<std::uint32_t>(value); };
+        std::cout << "video-accel status=0x" << std::hex << read32(reg(Register::Status))
+                  << " submitted=" << std::dec << read32(reg(Register::CommandsSubmitted))
+                  << " completed=" << read32(reg(Register::CommandsCompleted))
+                  << " rejected=" << read32(reg(Register::CommandsRejected))
+                  << " fallback=" << std::dec << read32(reg(Register::FallbackOperations))
+                  << " guest=0x" << std::hex << read32(reg(Register::GuestAdapter))
+                  << " callback=0x" << read32(reg(Register::GuestCallback))
+                  << " system=0x" << read32(reg(Register::GuestSystemVersion))
+                  << " version=" << std::dec << read32(reg(Register::GuestAdapterVersion)) << '\n';
+        std::cout << "qd-traps set-port=0x" << std::hex << machine.read32(0x0e00 + 4 * 0x073)
+                  << " set-procs=0x" << machine.read32(0x0e00 + 4 * 0x0ea)
+                  << " get-event=0x" << machine.read32(0x0e00 + 4 * 0x170)
+                  << " wait-event=0x" << machine.read32(0x0e00 + 4 * 0x060)
+                  << " stdbits=0x" << machine.read32(0x0e00 + 4 * 0x0eb) << std::dec << '\n';
+        const auto currentA5 = machine.read32(0x0904) & 0x00ffffffU;
+        const auto currentPort = currentA5 != 0 ? machine.read32(currentA5) & 0x00ffffffU : 0;
+        const auto grafProcs = currentPort != 0 ? machine.read32(currentPort + 0x68) & 0x00ffffffU : 0;
+        std::cout << "qd-port a5=0x" << std::hex << currentA5 << " port=0x" << currentPort
+                  << " procs=0x" << grafProcs
+                  << " bits=0x" << (grafProcs != 0 ? machine.read32(grafProcs + 0x20) : 0) << std::dec << '\n';
+        static constexpr std::array<const char*, 24> traceNames {
+            "bits", "srcCopy", "otherMode", "masked", "scaled", "src1", "src2", "src4", "src8",
+            "srcVram", "dstVram", "strideDifferent", "srcUnaligned", "dstUnaligned", "copyAccepted",
+            "monoAttempt", "monoAccepted", "rect", "paint", "erase", "rectOther", "monoDstResolved",
+            "monoSrcVram", "fillAccepted"
+        };
+        std::cout << "qd-usage";
+        const auto traceBase = static_cast<std::uint32_t>(Register::GuestTraceCounters);
+        for (std::size_t index = 0; index < traceNames.size(); ++index) {
+            const auto count = read32(base + traceBase + static_cast<std::uint32_t>(index * 4));
+            if (count != 0) std::cout << ' ' << traceNames[index] << '=' << count;
         }
         std::cout << '\n';
     }

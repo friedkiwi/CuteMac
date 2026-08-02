@@ -19,6 +19,9 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <array>
+#include <utility>
+
 namespace cutemac::ui {
 namespace {
 
@@ -127,8 +130,17 @@ public:
             m_preset->addItem(QStringLiteral("800K (double-sided Macintosh)"), 800LL * 1024);
             m_preset->addItem(QStringLiteral("1.44 MB (high-density Macintosh)"), 1440LL * 1024);
         } else {
-            for (const auto size : { 20, 40, 80, 160, 230, 500, 1024 })
-                m_preset->addItem(size == 1024 ? QStringLiteral("1 GB") : QStringLiteral("%1 MB").arg(size), static_cast<qint64>(size) * 1024 * 1024);
+            const std::array presets {
+                std::pair { 20, QStringLiteral("20 MB — Conner CP2025") },
+                std::pair { 40, QStringLiteral("40 MB — Quantum GO40S") },
+                std::pair { 80, QStringLiteral("80 MB — Quantum GO80S1") },
+                std::pair { 160, QStringLiteral("160 MB — Quantum GO160S") },
+                std::pair { 230, QStringLiteral("230 MB — Quantum LP240S") },
+                std::pair { 500, QStringLiteral("500 MB — Quantum LPS540S") },
+                std::pair { 1024, QStringLiteral("1 GB — IBM DPES-31080") },
+            };
+            for (const auto& [size, label] : presets)
+                m_preset->addItem(label, static_cast<qint64>(size) * 1024 * 1024);
             m_preset->addItem(QStringLiteral("Custom"), -1);
         }
         if (presetSizeBytes > 0) {

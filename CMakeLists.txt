@@ -98,6 +98,7 @@ add_library(CuteMacCore
     src/cpu/m68k/engine/softfloat/softfloat.c
     src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
+    src/devices/bus/ByteWideMmioAdapter.cpp
     src/devices/audio/AppleSoundChip.cpp
     src/devices/adb/AdbTransceiver.cpp
     src/devices/floppy/FloppyDiskImage.cpp
@@ -345,6 +346,10 @@ if(BUILD_TESTING)
     add_executable(CuteMacScsiBlockDeviceTests tests/scsi_block_device_tests.cpp)
     target_link_libraries(CuteMacScsiBlockDeviceTests PRIVATE CuteMacCore)
     add_test(NAME scsi-block-device COMMAND CuteMacScsiBlockDeviceTests)
+
+    add_executable(CuteMacSccTests tests/scc_tests.cpp)
+    target_link_libraries(CuteMacSccTests PRIVATE CuteMacCore Qt6::Core)
+    add_test(NAME scc-register-protocol COMMAND CuteMacSccTests)
 
     add_executable(CuteMacDiskImageManagerTests tests/disk_image_manager_tests.cpp)
     target_link_libraries(CuteMacDiskImageManagerTests PRIVATE CuteMacCore)

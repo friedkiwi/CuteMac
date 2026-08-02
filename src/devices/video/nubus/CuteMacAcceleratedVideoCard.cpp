@@ -65,6 +65,17 @@ void CuteMacAcceleratedVideoCard::reset()
     m_guestAdapter = 0;
     m_guestSystemVersion = 0;
     m_guestAdapterVersion = 0;
+    m_guestCallback = 0;
+    m_sourceStrideBytes = 0;
+    m_destinationStrideBytes = 0;
+    m_fillValue = 0;
+    m_sourceBitOffset = 0;
+    m_foregroundValue = 0;
+    m_backgroundValue = 0;
+    m_destinationDepth = 0;
+    m_widthPixels = 0;
+    m_guestTraceLast = 0;
+    m_guestTraceCounters.fill(0);
     resetStatistics();
 }
 void CuteMacAcceleratedVideoCard::tick(std::uint64_t cycles) { m_compatibleCard.tick(cycles); }
@@ -90,7 +101,8 @@ void CuteMacAcceleratedVideoCard::write8(std::uint32_t offset, std::uint8_t valu
         const auto relative = offset - acceleratorBase;
         const auto aligned = relative & ~3U;
         if (aligned == static_cast<std::uint32_t>(AcceleratorRegister::Command)
-            || aligned == static_cast<std::uint32_t>(AcceleratorRegister::Control)) {
+            || aligned == static_cast<std::uint32_t>(AcceleratorRegister::Control)
+            || aligned == static_cast<std::uint32_t>(AcceleratorRegister::GuestTraceEvent)) {
             if ((relative & 3U) == 3U) writeAcceleratorRegister(aligned, value);
             return;
         }
@@ -125,10 +137,14 @@ void CuteMacAcceleratedVideoCard::setHostPointerPosition(std::int16_t x, std::in
 
 std::uint32_t CuteMacAcceleratedVideoCard::readAcceleratorRegister(std::uint32_t offset) const
 {
+    const auto traceBase = static_cast<std::uint32_t>(AcceleratorRegister::GuestTraceCounters);
+    if (offset >= traceBase && offset < traceBase + guestTraceCounterCount * 4U)
+        return m_guestTraceCounters[(offset - traceBase) / 4U];
     switch (static_cast<AcceleratorRegister>(offset)) {
     case AcceleratorRegister::Signature: return 0x43564131U; // CVA1
-    case AcceleratorRegister::Version: return 1;
-    case AcceleratorRegister::Capabilities: return m_acceleration ? capabilityVramCopy : 0;
+    case AcceleratorRegister::Version: return 2;
+    case AcceleratorRegister::Capabilities:
+        return m_acceleration ? capabilityVramCopy | capabilitySolidFill | capabilityMonochromeExpand : 0;
     case AcceleratorRegister::Status: return m_status;
     case AcceleratorRegister::CommandsSubmitted: return m_commandsSubmitted;
     case AcceleratorRegister::CommandsCompleted: return m_commandsCompleted;
@@ -140,12 +156,22 @@ std::uint32_t CuteMacAcceleratedVideoCard::readAcceleratorRegister(std::uint32_t
     case AcceleratorRegister::GuestAdapter: return m_guestAdapter;
     case AcceleratorRegister::GuestSystemVersion: return m_guestSystemVersion;
     case AcceleratorRegister::GuestAdapterVersion: return m_guestAdapterVersion;
+    case AcceleratorRegister::GuestCallback: return m_guestCallback;
     case AcceleratorRegister::SourceOffset: return m_sourceOffset;
     case AcceleratorRegister::DestinationOffset: return m_destinationOffset;
     case AcceleratorRegister::StrideBytes: return m_strideBytes;
     case AcceleratorRegister::WidthBytes: return m_widthBytes;
     case AcceleratorRegister::Height: return m_height;
     case AcceleratorRegister::Flags: return m_flags;
+    case AcceleratorRegister::SourceStrideBytes: return m_sourceStrideBytes;
+    case AcceleratorRegister::DestinationStrideBytes: return m_destinationStrideBytes;
+    case AcceleratorRegister::FillValue: return m_fillValue;
+    case AcceleratorRegister::SourceBitOffset: return m_sourceBitOffset;
+    case AcceleratorRegister::ForegroundValue: return m_foregroundValue;
+    case AcceleratorRegister::BackgroundValue: return m_backgroundValue;
+    case AcceleratorRegister::DestinationDepth: return m_destinationDepth;
+    case AcceleratorRegister::WidthPixels: return m_widthPixels;
+    case AcceleratorRegister::GuestTraceLast: return m_guestTraceLast;
     default: return 0;
     }
 }
@@ -156,12 +182,25 @@ void CuteMacAcceleratedVideoCard::writeAcceleratorRegister(std::uint32_t offset,
     case AcceleratorRegister::GuestAdapter: m_guestAdapter = value; break;
     case AcceleratorRegister::GuestSystemVersion: m_guestSystemVersion = value; break;
     case AcceleratorRegister::GuestAdapterVersion: m_guestAdapterVersion = value; break;
+    case AcceleratorRegister::GuestCallback: m_guestCallback = value; break;
     case AcceleratorRegister::SourceOffset: m_sourceOffset = value; break;
     case AcceleratorRegister::DestinationOffset: m_destinationOffset = value; break;
     case AcceleratorRegister::StrideBytes: m_strideBytes = value; break;
     case AcceleratorRegister::WidthBytes: m_widthBytes = value; break;
     case AcceleratorRegister::Height: m_height = value; break;
     case AcceleratorRegister::Flags: m_flags = value; break;
+    case AcceleratorRegister::SourceStrideBytes: m_sourceStrideBytes = value; break;
+    case AcceleratorRegister::DestinationStrideBytes: m_destinationStrideBytes = value; break;
+    case AcceleratorRegister::FillValue: m_fillValue = value; break;
+    case AcceleratorRegister::SourceBitOffset: m_sourceBitOffset = value; break;
+    case AcceleratorRegister::ForegroundValue: m_foregroundValue = value; break;
+    case AcceleratorRegister::BackgroundValue: m_backgroundValue = value; break;
+    case AcceleratorRegister::DestinationDepth: m_destinationDepth = value; break;
+    case AcceleratorRegister::WidthPixels: m_widthPixels = value; break;
+    case AcceleratorRegister::GuestTraceEvent:
+        m_guestTraceLast = value;
+        if (value < m_guestTraceCounters.size()) incrementSaturating(m_guestTraceCounters[value]);
+        break;
     case AcceleratorRegister::Command: executeCommand(value); break;
     case AcceleratorRegister::Control:
         if (value == controlResetStatistics) resetStatistics();
@@ -180,37 +219,82 @@ void CuteMacAcceleratedVideoCard::executeCommand(std::uint32_t command)
     m_lastError = 0;
     m_status &= ~statusError;
     if (!m_acceleration) return reject(AcceleratorError::Disabled);
-    if (command != commandVramCopy) return reject(AcceleratorError::UnknownCommand);
-    executeVramCopy();
+    if (command == commandVramCopy) executeVramCopy();
+    else if (command == commandSolidFill) executeSolidFill();
+    else if (command == commandMonochromeExpand) executeMonochromeExpand();
+    else reject(AcceleratorError::UnknownCommand);
 }
 
 void CuteMacAcceleratedVideoCard::executeVramCopy()
 {
     if (m_widthBytes == 0 || m_height == 0) return reject(AcceleratorError::InvalidDimensions);
-    if (m_strideBytes < m_widthBytes) return reject(AcceleratorError::InvalidStride);
+    const auto sourceStride = m_sourceStrideBytes != 0 ? m_sourceStrideBytes : m_strideBytes;
+    const auto destinationStride = m_destinationStrideBytes != 0 ? m_destinationStrideBytes : m_strideBytes;
+    if (sourceStride < m_widthBytes || destinationStride < m_widthBytes)
+        return reject(AcceleratorError::InvalidStride);
     if ((m_flags & ~copyBackward) != 0) return reject(AcceleratorError::InvalidFlags);
 
-    const auto lastRowOffset = static_cast<std::uint64_t>(m_height - 1) * m_strideBytes;
-    const auto sourceEnd = static_cast<std::uint64_t>(m_sourceOffset) + lastRowOffset + m_widthBytes;
-    const auto destinationEnd = static_cast<std::uint64_t>(m_destinationOffset) + lastRowOffset + m_widthBytes;
+    const auto sourceEnd = static_cast<std::uint64_t>(m_sourceOffset)
+        + static_cast<std::uint64_t>(m_height - 1) * sourceStride + m_widthBytes;
+    const auto destinationEnd = static_cast<std::uint64_t>(m_destinationOffset)
+        + static_cast<std::uint64_t>(m_height - 1) * destinationStride + m_widthBytes;
     if (sourceEnd > m_vramBytes || destinationEnd > m_vramBytes) return reject(AcceleratorError::OutOfRange);
 
     m_status |= statusBusy;
     const bool backward = (m_flags & copyBackward) != 0;
-    for (std::uint32_t rowIndex = 0; rowIndex < m_height; ++rowIndex) {
-        const auto row = backward ? m_height - 1 - rowIndex : rowIndex;
-        const auto source = m_sourceOffset + row * m_strideBytes;
-        const auto destination = m_destinationOffset + row * m_strideBytes;
-        for (std::uint32_t byteIndex = 0; byteIndex < m_widthBytes; ++byteIndex) {
-            const auto byte = backward ? m_widthBytes - 1 - byteIndex : byteIndex;
-            m_compatibleCard.write8(destination + byte, m_compatibleCard.read8(source + byte));
-        }
-    }
+    m_compatibleCard.acceleratedVramCopy(m_sourceOffset, m_destinationOffset,
+        sourceStride, destinationStride, m_widthBytes, m_height, backward);
     m_status &= ~statusBusy;
     incrementSaturating(m_commandsCompleted);
     const auto copied = static_cast<std::uint64_t>(m_widthBytes) * m_height;
     incrementSaturating(m_bytesCopied, static_cast<std::uint32_t>(std::min<std::uint64_t>(
         copied, std::numeric_limits<std::uint32_t>::max())));
+}
+
+void CuteMacAcceleratedVideoCard::executeSolidFill()
+{
+    if (m_widthBytes == 0 || m_height == 0) return reject(AcceleratorError::InvalidDimensions);
+    const auto destinationStride = m_destinationStrideBytes != 0 ? m_destinationStrideBytes : m_strideBytes;
+    if (destinationStride < m_widthBytes) return reject(AcceleratorError::InvalidStride);
+    if (m_flags != 0 || m_fillValue > 0xffU) return reject(AcceleratorError::InvalidFlags);
+    const auto destinationEnd = static_cast<std::uint64_t>(m_destinationOffset)
+        + static_cast<std::uint64_t>(m_height - 1) * destinationStride + m_widthBytes;
+    if (destinationEnd > m_vramBytes) return reject(AcceleratorError::OutOfRange);
+    m_status |= statusBusy;
+    m_compatibleCard.acceleratedVramFill(m_destinationOffset, destinationStride,
+        m_widthBytes, m_height, static_cast<std::uint8_t>(m_fillValue));
+    m_status &= ~statusBusy;
+    incrementSaturating(m_commandsCompleted);
+    incrementSaturating(m_bytesCopied, static_cast<std::uint32_t>(std::min<std::uint64_t>(
+        static_cast<std::uint64_t>(m_widthBytes) * m_height, std::numeric_limits<std::uint32_t>::max())));
+}
+
+void CuteMacAcceleratedVideoCard::executeMonochromeExpand()
+{
+    if (m_widthPixels == 0 || m_height == 0) return reject(AcceleratorError::InvalidDimensions);
+    if (m_sourceBitOffset > 7 || (m_destinationDepth != 1 && m_destinationDepth != 2
+            && m_destinationDepth != 4 && m_destinationDepth != 8) || m_flags != 0)
+        return reject(AcceleratorError::InvalidFlags);
+    const auto sourceStride = m_sourceStrideBytes != 0 ? m_sourceStrideBytes : m_strideBytes;
+    const auto destinationStride = m_destinationStrideBytes != 0 ? m_destinationStrideBytes : m_strideBytes;
+    const auto sourceRowBytes = (m_sourceBitOffset + m_widthPixels + 7) / 8;
+    const auto destinationRowBytes = (static_cast<std::uint64_t>(m_widthPixels) * m_destinationDepth + 7) / 8;
+    if (sourceStride < sourceRowBytes || destinationStride < destinationRowBytes)
+        return reject(AcceleratorError::InvalidStride);
+    const auto sourceEnd = static_cast<std::uint64_t>(m_sourceOffset)
+        + static_cast<std::uint64_t>(m_height - 1) * sourceStride + sourceRowBytes;
+    const auto destinationEnd = static_cast<std::uint64_t>(m_destinationOffset)
+        + static_cast<std::uint64_t>(m_height - 1) * destinationStride + destinationRowBytes;
+    if (sourceEnd > m_vramBytes || destinationEnd > m_vramBytes) return reject(AcceleratorError::OutOfRange);
+    m_status |= statusBusy;
+    m_compatibleCard.acceleratedMonochromeExpand(m_sourceOffset, m_destinationOffset,
+        sourceStride, destinationStride, m_sourceBitOffset, m_widthPixels, m_height,
+        m_destinationDepth, static_cast<std::uint8_t>(m_foregroundValue),
+        static_cast<std::uint8_t>(m_backgroundValue));
+    m_status &= ~statusBusy;
+    incrementSaturating(m_commandsCompleted);
+    incrementSaturating(m_bytesCopied, static_cast<std::uint32_t>(std::min<std::uint64_t>(
+        destinationRowBytes * m_height, std::numeric_limits<std::uint32_t>::max())));
 }
 
 void CuteMacAcceleratedVideoCard::reject(AcceleratorError error)

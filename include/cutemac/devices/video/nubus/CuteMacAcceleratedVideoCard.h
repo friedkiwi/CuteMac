@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "cutemac/devices/nubus/NuBusCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 
@@ -14,7 +16,7 @@ public:
     static constexpr std::uint32_t guestServicesCommand = CuteMacVideoCard::guestServicesCommand;
     static constexpr std::uint32_t guestPointerBase = CuteMacVideoCard::guestPointerBase;
     static constexpr std::uint32_t acceleratorBase = 0x000a0000;
-    static constexpr std::uint32_t acceleratorBytes = 0x100;
+    static constexpr std::uint32_t acceleratorBytes = 0x200;
 
     enum class AcceleratorRegister : std::uint32_t {
         Signature = 0x00,
@@ -31,6 +33,7 @@ public:
         GuestAdapter = 0x2c,
         GuestSystemVersion = 0x30,
         GuestAdapterVersion = 0x34,
+        GuestCallback = 0x38,
         SourceOffset = 0x40,
         DestinationOffset = 0x44,
         StrideBytes = 0x48,
@@ -39,20 +42,36 @@ public:
         Flags = 0x54,
         Command = 0x58,
         Control = 0x5c,
+        SourceStrideBytes = 0x60,
+        DestinationStrideBytes = 0x64,
+        FillValue = 0x68,
+        SourceBitOffset = 0x6c,
+        ForegroundValue = 0x70,
+        BackgroundValue = 0x74,
+        DestinationDepth = 0x78,
+        WidthPixels = 0x7c,
+        GuestTraceEvent = 0x80,
+        GuestTraceLast = 0x84,
+        GuestTraceCounters = 0x100,
     };
 
     enum : std::uint32_t {
         capabilityVramCopy = 1U << 0,
+        capabilitySolidFill = 1U << 1,
+        capabilityMonochromeExpand = 1U << 2,
         statusEnabled = 1U << 0,
         statusBusy = 1U << 1,
         statusError = 1U << 2,
         statusGuestAttached = 1U << 3,
         copyBackward = 1U << 0,
         commandVramCopy = 1,
+        commandSolidFill = 2,
+        commandMonochromeExpand = 3,
         controlResetStatistics = 1,
         controlGuestAttach = 2,
         controlGuestDetach = 3,
         controlRecordFallback = 4,
+        guestTraceCounterCount = 24,
     };
 
     CuteMacAcceleratedVideoCard(int width, int height, int depth, int vramMiB,
@@ -89,6 +108,8 @@ private:
     void writeAcceleratorRegister(std::uint32_t offset, std::uint32_t value);
     void executeCommand(std::uint32_t command);
     void executeVramCopy();
+    void executeSolidFill();
+    void executeMonochromeExpand();
     void reject(AcceleratorError error);
     void resetStatistics();
     static void incrementSaturating(std::uint32_t& value, std::uint32_t amount = 1);
@@ -108,12 +129,23 @@ private:
     std::uint32_t m_guestAdapter = 0;
     std::uint32_t m_guestSystemVersion = 0;
     std::uint32_t m_guestAdapterVersion = 0;
+    std::uint32_t m_guestCallback = 0;
     std::uint32_t m_sourceOffset = 0;
     std::uint32_t m_destinationOffset = 0;
     std::uint32_t m_strideBytes = 0;
     std::uint32_t m_widthBytes = 0;
     std::uint32_t m_height = 0;
     std::uint32_t m_flags = 0;
+    std::uint32_t m_sourceStrideBytes = 0;
+    std::uint32_t m_destinationStrideBytes = 0;
+    std::uint32_t m_fillValue = 0;
+    std::uint32_t m_sourceBitOffset = 0;
+    std::uint32_t m_foregroundValue = 0;
+    std::uint32_t m_backgroundValue = 0;
+    std::uint32_t m_destinationDepth = 0;
+    std::uint32_t m_widthPixels = 0;
+    std::uint32_t m_guestTraceLast = 0;
+    std::array<std::uint32_t, guestTraceCounterCount> m_guestTraceCounters {};
 };
 
 } // namespace cutemac::devices::video::nubus

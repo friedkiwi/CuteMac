@@ -169,21 +169,58 @@ int main()
     const auto accelRegister = [accel](AccelRegister reg) { return accel + static_cast<std::uint32_t>(reg); };
     ok &= expect(readCard32(acceleratedCard, accelRegister(AccelRegister::Signature)) == 0x43564131U
             && readCard32(acceleratedCard, accelRegister(AccelRegister::Capabilities))
-                == CuteMacAcceleratedVideoCard::capabilityVramCopy,
+                == (CuteMacAcceleratedVideoCard::capabilityVramCopy
+                    | CuteMacAcceleratedVideoCard::capabilitySolidFill
+                    | CuteMacAcceleratedVideoCard::capabilityMonochromeExpand),
         "accelerated adapter must expose the versioned CVA1 copy protocol");
+    acceleratedCard.write32(accelRegister(AccelRegister::GuestCallback), 0x00123456U);
+    ok &= expect(readCard32(acceleratedCard, accelRegister(AccelRegister::GuestCallback)) == 0x00123456U,
+        "accelerated adapter must retain the guest-tools slot-VBL callback pointer");
+    acceleratedCard.reset();
+    ok &= expect(readCard32(acceleratedCard, accelRegister(AccelRegister::GuestCallback)) == 0,
+        "accelerated adapter reset must clear stale guest callback pointers");
     for (std::uint32_t index = 0; index < 16; ++index) acceleratedCard.write8(0x100 + index, static_cast<std::uint8_t>(index));
     acceleratedCard.write32(accelRegister(AccelRegister::SourceOffset), 0x100);
     acceleratedCard.write32(accelRegister(AccelRegister::DestinationOffset), 0x200);
     acceleratedCard.write32(accelRegister(AccelRegister::StrideBytes), 8);
+    acceleratedCard.write32(accelRegister(AccelRegister::SourceStrideBytes), 8);
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationStrideBytes), 12);
     acceleratedCard.write32(accelRegister(AccelRegister::WidthBytes), 4);
     acceleratedCard.write32(accelRegister(AccelRegister::Height), 2);
     acceleratedCard.write32(accelRegister(AccelRegister::Flags), 0);
     acceleratedCard.write32(accelRegister(AccelRegister::Command), CuteMacAcceleratedVideoCard::commandVramCopy);
     ok &= expect(acceleratedCard.read8(0x200) == 0 && acceleratedCard.read8(0x203) == 3
-            && acceleratedCard.read8(0x208) == 8 && acceleratedCard.read8(0x20b) == 11
+            && acceleratedCard.read8(0x20c) == 8 && acceleratedCard.read8(0x20f) == 11
             && readCard32(acceleratedCard, accelRegister(AccelRegister::CommandsCompleted)) == 1
             && readCard32(acceleratedCard, accelRegister(AccelRegister::BytesCopied)) == 8,
-        "accelerated adapter must synchronously copy validated VRAM rectangles");
+        "accelerated adapter must copy validated VRAM rectangles");
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationOffset), 0x300);
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationStrideBytes), 8);
+    acceleratedCard.write32(accelRegister(AccelRegister::WidthBytes), 5);
+    acceleratedCard.write32(accelRegister(AccelRegister::Height), 2);
+    acceleratedCard.write32(accelRegister(AccelRegister::FillValue), 0x5a);
+    acceleratedCard.write32(accelRegister(AccelRegister::Flags), 0);
+    acceleratedCard.write32(accelRegister(AccelRegister::Command), CuteMacAcceleratedVideoCard::commandSolidFill);
+    ok &= expect(acceleratedCard.read8(0x300) == 0x5a && acceleratedCard.read8(0x304) == 0x5a
+            && acceleratedCard.read8(0x308) == 0x5a && acceleratedCard.read8(0x30c) == 0x5a
+            && acceleratedCard.read8(0x30d) == 0,
+        "accelerated adapter must fill validated strided VRAM rectangles");
+    acceleratedCard.write8(0x400, 0xa0);
+    acceleratedCard.write32(accelRegister(AccelRegister::SourceOffset), 0x400);
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationOffset), 0x500);
+    acceleratedCard.write32(accelRegister(AccelRegister::SourceStrideBytes), 1);
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationStrideBytes), 8);
+    acceleratedCard.write32(accelRegister(AccelRegister::SourceBitOffset), 0);
+    acceleratedCard.write32(accelRegister(AccelRegister::WidthPixels), 3);
+    acceleratedCard.write32(accelRegister(AccelRegister::Height), 1);
+    acceleratedCard.write32(accelRegister(AccelRegister::DestinationDepth), 8);
+    acceleratedCard.write32(accelRegister(AccelRegister::ForegroundValue), 0xee);
+    acceleratedCard.write32(accelRegister(AccelRegister::BackgroundValue), 0x11);
+    acceleratedCard.write32(accelRegister(AccelRegister::Command),
+        CuteMacAcceleratedVideoCard::commandMonochromeExpand);
+    ok &= expect(acceleratedCard.read8(0x500) == 0xee && acceleratedCard.read8(0x501) == 0x11
+            && acceleratedCard.read8(0x502) == 0xee,
+        "accelerated adapter must expand validated monochrome sources into indexed VRAM");
     acceleratedCard.write32(accelRegister(AccelRegister::DestinationOffset), 4U * 1024U * 1024U - 2U);
     acceleratedCard.write32(accelRegister(AccelRegister::Command), CuteMacAcceleratedVideoCard::commandVramCopy);
     ok &= expect(readCard32(acceleratedCard, accelRegister(AccelRegister::CommandsRejected)) == 1

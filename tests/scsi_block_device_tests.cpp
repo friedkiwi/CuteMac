@@ -58,25 +58,65 @@ int main()
     const auto inquiry = disk.executeCommand(QByteArray::fromHex("120000002400"), {});
     ok &= expect(inquiry.status == 0, "INQUIRY failed");
     ok &= expect(inquiry.data.size() == 36, "INQUIRY length is wrong");
-    ok &= expect(inquiry.data.mid(8, 8) == QByteArrayLiteral(" SEAGATE"), "Apple-compatible vendor is wrong");
-    ok &= expect(inquiry.data.mid(16, 16) == QByteArrayLiteral("          ST225N"), "Apple-compatible product is wrong");
+    ok &= expect(inquiry.data.mid(8, 8) == QByteArrayLiteral("CONNER  "), "20 MiB vendor identity is wrong");
+    ok &= expect(inquiry.data.mid(16, 16) == QByteArrayLiteral("CP2025-20mb     "), "20 MiB product identity is wrong");
+    const struct {
+        std::uint64_t mib;
+        const char* vendor;
+        const char* product;
+    } identities[] {
+        { 20, "CONNER  ", "CP2025-20mb     " },
+        { 40, "QUANTUM ", "GO40S           " },
+        { 80, "QUANTUM ", "GO80S1          " },
+        { 160, "QUANTUM ", "GO160S          " },
+        { 230, "QUANTUM ", "LP240S          " },
+        { 500, "QUANTUM ", "LPS540S         " },
+        { 1024, "IBM     ", "DPES-31080      " },
+    };
+    for (const auto& expected : identities) {
+        const auto actual = cutemac::devices::scsi::ScsiBlockDevice::identityForSize(expected.mib * 1024 * 1024);
+        ok &= expect(actual.vendor == expected.vendor && actual.product == expected.product && actual.revision == "1.0 ",
+            "capacity-specific SCSI identity is wrong");
+    }
+    const auto customIdentity = cutemac::devices::scsi::ScsiBlockDevice::identityForSize(123 * 1024 * 1024);
+    ok &= expect(customIdentity.vendor == QByteArrayLiteral("QUANTUM ")
+            && customIdentity.product == QByteArrayLiteral("FIREBALL1       "),
+        "custom-size SCSI identity must use the generic Fireball personality");
 
     const auto modeSense = disk.executeCommand(QByteArray::fromHex("1a003000ff00"), {});
     ok &= expect(modeSense.status == 0, "Apple MODE SENSE failed");
-    ok &= expect(modeSense.data.size() == 42, "Apple mode page length is wrong");
-    ok &= expect(static_cast<std::uint8_t>(modeSense.data[4]) == 0x30 && static_cast<std::uint8_t>(modeSense.data[5]) == 0x24,
+    ok &= expect(modeSense.data.size() == 36 && static_cast<std::uint8_t>(modeSense.data[3]) == 8,
+        "Apple MODE SENSE block descriptor is wrong");
+    ok &= expect(static_cast<std::uint8_t>(modeSense.data[12]) == 0x30
+            && static_cast<std::uint8_t>(modeSense.data[13]) == 0x16,
         "Apple mode page header is wrong");
     ok &= expect(modeSense.data.mid(14, 22) == QByteArrayLiteral("APPLE COMPUTER, INC   "), "Apple mode page vendor is wrong");
+    const auto modeSenseDbd = disk.executeCommand(QByteArray::fromHex("1a083000ff00"), {});
+    ok &= expect(modeSenseDbd.status == 0 && modeSenseDbd.data.size() == 28
+            && modeSenseDbd.data[3] == 0
+            && static_cast<std::uint8_t>(modeSenseDbd.data[4]) == 0x30,
+        "Apple MODE SENSE DBD response is wrong");
 
     const auto modeSelect = disk.executeCommand(QByteArray::fromHex("150000000c00"), QByteArray(12, '\0'));
     ok &= expect(modeSelect.status == 0, "MODE SELECT failed");
 
     const auto formatPage = disk.executeCommand(QByteArray::fromHex("1a000300ff00"), {});
-    ok &= expect(formatPage.status == 0 && formatPage.data.size() == 28 && static_cast<std::uint8_t>(formatPage.data[4]) == 0x83,
+    ok &= expect(formatPage.status == 0 && formatPage.data.size() == 36
+            && static_cast<std::uint8_t>(formatPage.data[3]) == 8
+            && formatPage.data.mid(5, 3) == QByteArray::fromHex("00a000")
+            && formatPage.data.mid(9, 3) == QByteArray::fromHex("000200")
+            && static_cast<std::uint8_t>(formatPage.data[12]) == 0x83,
         "format-device mode page is wrong");
     const auto geometryPage = disk.executeCommand(QByteArray::fromHex("1a000400ff00"), {});
-    ok &= expect(geometryPage.status == 0 && geometryPage.data.size() == 28 && static_cast<std::uint8_t>(geometryPage.data[4]) == 0x04,
+    ok &= expect(geometryPage.status == 0 && geometryPage.data.size() == 36
+            && static_cast<std::uint8_t>(geometryPage.data[3]) == 8
+            && static_cast<std::uint8_t>(geometryPage.data[12]) == 0x04,
         "rigid-disk geometry mode page is wrong");
+    const auto geometryPageDbd = disk.executeCommand(QByteArray::fromHex("1a080400ff00"), {});
+    ok &= expect(geometryPageDbd.status == 0 && geometryPageDbd.data.size() == 28
+            && geometryPageDbd.data[3] == 0
+            && static_cast<std::uint8_t>(geometryPageDbd.data[4]) == 0x04,
+        "MODE SENSE DBD must suppress the direct-access block descriptor");
 
     const auto format = disk.executeCommand(QByteArray::fromHex("040000000000"), {});
     ok &= expect(format.status == 0, "FORMAT UNIT failed");
@@ -88,6 +128,13 @@ int main()
     const QByteArray marker(512, static_cast<char>(0x5a));
     const auto write = disk.executeCommand(QByteArray::fromHex("0a0000000100"), marker);
     ok &= expect(write.status == 0, "WRITE(6) failed");
+    const auto read10 = disk.executeCommand(QByteArray::fromHex("28000000000000000100"), {});
+    ok &= expect(read10.status == 0 && read10.data == marker, "READ(10) failed");
+    const QByteArray marker10(512, static_cast<char>(0xa5));
+    const auto write10 = disk.executeCommand(QByteArray::fromHex("2a000000000100000100"), marker10);
+    ok &= expect(write10.status == 0, "WRITE(10) failed");
+    const auto readBack10 = disk.executeCommand(QByteArray::fromHex("28000000000100000100"), {});
+    ok &= expect(readBack10.status == 0 && readBack10.data == marker10, "WRITE(10) data was not readable");
     QFile persisted(path);
     ok &= expect(persisted.open(QIODevice::ReadOnly) && persisted.read(512) == marker, "WRITE(6) was not persisted");
 

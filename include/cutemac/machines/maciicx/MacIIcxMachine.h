@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <QByteArray>
 #include <QString>
@@ -80,11 +81,15 @@ public:
     [[nodiscard]] devices::via6522::Via6522::DebugState via1DebugState() const { return m_via1.debugState(); }
     [[nodiscard]] devices::via6522::Via6522::DebugState via2DebugState() const { return m_via2.debugState(); }
     [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const { return m_scsi.debugState(); }
+    [[nodiscard]] const devices::scsi::ncr5380::Ncr5380& scsiController() const { return m_scsi; }
     [[nodiscard]] devices::iwm::IwmController::DebugState swimDebugState() const { return m_swim.debugState(); }
     void setSwimTraceEnabled(bool enabled) { m_swim.setTraceEnabled(enabled); }
     [[nodiscard]] QStringList swimTraceEvents() const { return m_swim.traceEvents(); }
     [[nodiscard]] bool sccInterruptActive() const { return m_scc.interruptActive(); }
+    [[nodiscard]] devices::scc::Z8530Scc::DebugChannelState sccDebugState(devices::scc::Z8530Scc::Channel channel) const { return m_scc.debugState(channel); }
     [[nodiscard]] devices::adb::AdbTransceiver::DebugState adbDebugState() const { return m_adbTransceiver.debugState(); }
+    void setAdbTraceEnabled(bool enabled) { m_adbTransceiver.setTraceEnabled(enabled); }
+    [[nodiscard]] std::vector<devices::adb::AdbTransceiver::TraceEvent> adbTraceEvents() const { return m_adbTransceiver.traceEvents(); }
     struct IoStatistics {
         std::uint64_t scsiReads = 0;
         std::uint64_t scsiWrites = 0;

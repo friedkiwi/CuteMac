@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <deque>
+#include <vector>
 #include <QString>
 #include <QByteArray>
 
@@ -12,6 +14,14 @@ namespace cutemac::devices::scsi::ncr5380 {
 
 class Ncr5380 {
 public:
+    struct CommandTrace {
+        std::uint8_t targetId = 0xff;
+        QByteArray cdb;
+        qsizetype dataLength = 0;
+        qsizetype dataOutLength = 0;
+        std::uint8_t status = 0;
+        std::uint8_t senseKey = 0;
+    };
     struct DebugState {
         QString phase;
         QByteArray activeCommand;
@@ -41,6 +51,8 @@ public:
     [[nodiscard]] std::uint8_t readRegister(std::uint8_t registerIndex, bool dack);
     void writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t value);
     [[nodiscard]] DebugState debugState() const;
+    [[nodiscard]] std::vector<CommandTrace> commandTrace() const
+    { return { m_commandTrace.cbegin(), m_commandTrace.cend() }; }
 
 private:
     enum class Phase {
@@ -89,6 +101,7 @@ private:
     bool m_previousAck = false;
     bool m_commandReady = false;
     QByteArray m_lastCommand;
+    std::deque<CommandTrace> m_commandTrace;
 };
 
 } // namespace cutemac::devices::scsi::ncr5380
