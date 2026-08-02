@@ -39,6 +39,7 @@ private:
     std::atomic<config::RuntimeSpeed> m_speed = config::RuntimeSpeed::Realtime;
     std::atomic_bool m_interactiveInputActive = false;
     std::atomic_bool m_audioPlaybackActive = false;
+    std::atomic_bool m_machineAudioPlaybackActive = false;
     std::atomic_bool m_running = false;
     std::atomic_bool m_paused = true;
 #if !defined(Q_OS_WASM)

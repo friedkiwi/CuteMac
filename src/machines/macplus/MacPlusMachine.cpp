@@ -201,6 +201,7 @@ void MacPlusMachine::reset()
     m_pendingAudio.clear();
     m_audioCyclePhase = 0;
     m_audioBufferIndex = 0;
+    m_audioPlaybackActive = false;
 
     std::fill(m_ram.begin(), m_ram.end(), 0);
     m_scc.reset();
@@ -230,6 +231,7 @@ void MacPlusMachine::reset()
 
 int MacPlusMachine::runCycles(int cycles)
 {
+    m_audioPlaybackActive = false;
     int cyclesRun = 0;
     while (cyclesRun < cycles) {
         cyclesRun += std::max(1, stepInstruction());
@@ -676,6 +678,11 @@ devices::audio::AudioFrame MacPlusMachine::takeAudioFrame()
     return frame;
 }
 
+bool MacPlusMachine::audioPlaybackActive() const
+{
+    return m_audioPlaybackActive;
+}
+
 std::uint32_t MacPlusMachine::framebufferHash() const
 {
     const auto bytes = framebufferBytes();
@@ -998,6 +1005,7 @@ void MacPlusMachine::advanceAudio(int cycles)
             const auto source = static_cast<int>(debugRead8(base + m_audioBufferIndex * 2)) - 128;
             sample = static_cast<std::int16_t>(source * 256 / (8 - m_soundVolume));
         }
+        m_audioPlaybackActive = m_audioPlaybackActive || sample != 0;
         m_pendingAudio.append(reinterpret_cast<const char*>(&sample), sizeof(sample));
         m_audioBufferIndex = (m_audioBufferIndex + 1) % soundSamples;
     }

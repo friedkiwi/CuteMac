@@ -107,6 +107,7 @@ public:
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;
     [[nodiscard]] devices::audio::AudioFrame takeAudioFrame() override;
+    [[nodiscard]] bool audioPlaybackActive() const override;
     [[nodiscard]] std::uint32_t framebufferHash() const;
     [[nodiscard]] QByteArray soundBufferBytes() const;
     [[nodiscard]] std::uint32_t soundBufferHash() const;
@@ -215,6 +216,7 @@ private:
     std::uint8_t m_viaPortA = 0x7b;
     std::uint8_t m_soundVolume = 3;
     bool m_soundEnabled = false;
+    bool m_audioPlaybackActive = false;
     bool m_busTraceEnabled = false;
     bool m_soundCaptureEnabled = false;
     core::MachineScheduler m_scheduler;

@@ -185,6 +185,12 @@ devices::audio::AudioFrame EmulationSession::takeAudioFrame()
     return m_machine ? m_machine->takeAudioFrame() : devices::audio::AudioFrame {};
 }
 
+bool EmulationSession::audioPlaybackActive() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_machine && m_machine->audioPlaybackActive();
+}
+
 GuestPowerRequest EmulationSession::takePowerRequest()
 {
     std::lock_guard lock(m_mutex);

@@ -40,6 +40,7 @@ public:
     [[nodiscard]] QByteArray framebufferBytes() const;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const;
     [[nodiscard]] devices::audio::AudioFrame takeAudioFrame();
+    [[nodiscard]] bool audioPlaybackActive() const;
     [[nodiscard]] GuestPowerRequest takePowerRequest();
     [[nodiscard]] config::Configuration configuration() const;
 

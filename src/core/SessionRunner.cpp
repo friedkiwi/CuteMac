@@ -85,14 +85,18 @@ void SessionRunner::runHostFrame()
     if (m_running && !m_paused) {
         const auto cycles = m_cyclesPerFrame.load();
         (void)m_session.runCycles(cycles);
-        if (m_speed == config::RuntimeSpeed::Unlimited && !m_interactiveInputActive && !m_audioPlaybackActive) {
+        m_machineAudioPlaybackActive = m_session.audioPlaybackActive();
+        if (m_speed == config::RuntimeSpeed::Unlimited && !m_interactiveInputActive
+            && !m_audioPlaybackActive && !m_machineAudioPlaybackActive) {
             // Stay cooperative with the browser while using the remainder of this host frame.
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(12);
             while (m_running && !m_paused && m_speed == config::RuntimeSpeed::Unlimited
                 && !m_interactiveInputActive
                 && !m_audioPlaybackActive
+                && !m_machineAudioPlaybackActive
                 && std::chrono::steady_clock::now() < deadline) {
                 (void)m_session.runCycles(cycles);
+                m_machineAudioPlaybackActive = m_session.audioPlaybackActive();
             }
         }
     }
@@ -114,12 +118,14 @@ void SessionRunner::workerLoop()
         }
         const auto currentSpeed = m_speed.load();
         const auto realtimeThrottle = currentSpeed == config::RuntimeSpeed::Realtime
-            || m_interactiveInputActive.load() || m_audioPlaybackActive.load();
+            || m_interactiveInputActive.load() || m_audioPlaybackActive.load()
+            || m_machineAudioPlaybackActive.load();
         if (realtimeThrottle != previousRealtimeThrottle) {
             deadline = clock::now();
             previousRealtimeThrottle = realtimeThrottle;
         }
         (void)m_session.runCycles(m_cyclesPerFrame.load());
+        m_machineAudioPlaybackActive = m_session.audioPlaybackActive();
         if (!realtimeThrottle) {
             deadline = clock::now();
             // Give the frontend a deterministic lock-acquisition window for input and display work.
@@ -127,7 +133,7 @@ void SessionRunner::workerLoop()
             m_wake.wait_for(lock, std::chrono::microseconds(50), [this]() {
                 return !m_running || m_paused || m_speed.load() == config::RuntimeSpeed::Realtime
                     || m_interactiveInputActive.load()
-                    || m_audioPlaybackActive.load();
+                    || m_audioPlaybackActive.load() || m_machineAudioPlaybackActive.load();
             });
             continue;
         }
@@ -136,7 +142,8 @@ void SessionRunner::workerLoop()
         m_wake.wait_until(lock, deadline, [this, currentSpeed]() {
             return !m_running || m_paused || m_speed.load() != currentSpeed
                 || (currentSpeed == config::RuntimeSpeed::Unlimited
-                    && !m_interactiveInputActive.load() && !m_audioPlaybackActive.load());
+                    && !m_interactiveInputActive.load() && !m_audioPlaybackActive.load()
+                    && !m_machineAudioPlaybackActive.load());
         });
         if (deadline < clock::now() - std::chrono::milliseconds(100)) {
             deadline = clock::now();
