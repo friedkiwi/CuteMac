@@ -187,13 +187,10 @@ int main()
     ok &= expect(!controller.debugState().request && (controller.readRegister(4, false) & 0x20) == 0
             && controller.debugState().request,
         "pseudo-DMA DATA IN must expose a REQ release before the next byte");
-    for (int byte = 1; byte < 36; ++byte) {
-        ok &= expect((controller.readRegister(5, false) & 0x40) != 0,
-            "pseudo-DMA DATA IN must reassert DRQ before each byte");
+    for (int byte = 1; byte < 36; ++byte)
         pseudoDmaInquiry.append(static_cast<char>(controller.readRegister(6, true)));
-    }
     ok &= expect(pseudoDmaInquiry == target->responseData,
-        "pseudo-DMA DATA IN must transfer every INQUIRY byte");
+        "consecutive pseudo-DMA DATA IN accesses must transfer every INQUIRY byte");
     ok &= expect(controller.debugState().phase == QStringLiteral("status"),
         "pseudo-DMA DATA IN must complete its handshake and enter STATUS");
     return ok ? 0 : 1;

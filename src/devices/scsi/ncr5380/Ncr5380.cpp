@@ -85,10 +85,13 @@ std::uint8_t Ncr5380::readRegister(std::uint8_t registerIndex, bool dack)
 {
     registerIndex &= 0x07;
     if (dack) {
-        // DACK only completes a transfer for a currently asserted REQ.  It
-        // must not make the target's next REQ visible by itself: the Mac ROM
-        // polls the bus/status register between bytes, and repeated or
-        // restarted aperture reads before that poll must not consume data.
+        // The IIcx pseudo-DMA driver performs consecutive aperture accesses
+        // without polling the bus/status register between every byte.  Make
+        // the target's pending next REQ visible to the following DACK access.
+        if (m_requestReassertPending) {
+            m_request = true;
+            m_requestReassertPending = false;
+        }
         if (!m_request) return 0;
         const auto value = readDataByte();
         if (m_phase == Phase::DataIn && m_request) {
@@ -124,6 +127,10 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
 {
     registerIndex &= 0x07;
     if (dack) {
+        if (m_requestReassertPending) {
+            m_request = true;
+            m_requestReassertPending = false;
+        }
         if (!m_request) return;
         writeDataByte(value);
         if (m_phase == Phase::DataOut && m_request) {
