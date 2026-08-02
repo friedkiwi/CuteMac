@@ -20,7 +20,9 @@ using Core = cutemac::cpu::ppc::PowerPc601Core;
 class TestBus final : public cutemac::cpu::ppc::PowerPcBus {
 public:
     static constexpr std::size_t size = 2 * 1024 * 1024;
-    std::array<std::uint8_t, size> bytes {};
+    TestBus() : bytes(size) {}
+
+    std::vector<std::uint8_t> bytes;
 
     std::uint8_t read8(std::uint32_t address) override { return bytes[address % size]; }
     std::uint16_t read16(std::uint32_t address) override
