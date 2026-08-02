@@ -21,6 +21,7 @@ constexpr std::uint8_t icrAssertBusy = 0x08;
 constexpr std::uint8_t icrAssertAck = 0x10;
 constexpr std::uint8_t icrAssertReset = 0x80;
 constexpr std::uint8_t modeArbitrate = 0x01;
+constexpr std::uint8_t modeDma = 0x02;
 
 constexpr std::uint8_t csrIo = 0x04;
 constexpr std::uint8_t csrCd = 0x08;
@@ -53,6 +54,8 @@ void Ncr5380::reset()
     m_selected = false;
     m_request = false;
     m_requestReassertPending = false;
+    m_dataOutCompletionPending = false;
+    m_dataOutDrainStatusReads = 0;
     m_previousAck = false;
     m_commandReady = false;
     m_lastCommand.clear();
@@ -129,7 +132,7 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
         if (m_phase == Phase::DataOut && m_request) {
             m_request = false;
             finishDataPhaseIfDone();
-            if (m_phase == Phase::DataOut) m_requestReassertPending = true;
+            if (m_phase == Phase::DataOut && !m_dataOutCompletionPending) m_requestReassertPending = true;
         }
         return;
     }
@@ -202,6 +205,11 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
         break;
     }
     case mode:
+        if ((m_registers[mode] & modeDma) != 0 && (value & modeDma) == 0 && m_dataOutCompletionPending) {
+            m_dataOutCompletionPending = false;
+            m_dataOutDrainStatusReads = 0;
+            completeDataOutCommand();
+        }
         m_registers[mode] = value;
         break;
     case targetCommand:
@@ -236,6 +244,8 @@ void Ncr5380::setPhase(Phase phase, bool request)
         m_dataOut.clear();
         m_dataIndex = 0;
         m_expectedDataOut = 0;
+        m_dataOutCompletionPending = false;
+        m_dataOutDrainStatusReads = 0;
         m_commandReady = false;
         m_activeTargetId = 0xff;
     }
@@ -316,22 +326,29 @@ void Ncr5380::finishDataPhaseIfDone()
             m_expectedDataOut = totalLength;
             return;
         }
-        const auto result = m_activeTarget ? m_activeTarget->executeCommand(m_command, m_dataOut) : ScsiCommandResult {};
-        m_lastCommand = m_command;
-        ++m_completedCommands;
-        m_status = result.status;
-        m_message = result.message;
-        m_senseKey = result.senseKey;
-        setPhase(Phase::Status);
+        if ((m_registers[mode] & modeDma) != 0) {
+            m_dataOutCompletionPending = true;
+            m_dataOutDrainStatusReads = 2;
+        }
+        else completeDataOutCommand();
     } else if (m_phase == Phase::DataOut && m_dataOut.size() >= m_expectedDataOut) {
-        const auto result = m_activeTarget ? m_activeTarget->executeCommand(m_command, m_dataOut) : ScsiCommandResult {};
-        m_lastCommand = m_command;
-        ++m_completedCommands;
-        m_status = result.status;
-        m_message = result.message;
-        m_senseKey = result.senseKey;
-        setPhase(Phase::Status);
+        if ((m_registers[mode] & modeDma) != 0) {
+            m_dataOutCompletionPending = true;
+            m_dataOutDrainStatusReads = 2;
+        }
+        else completeDataOutCommand();
     }
+}
+
+void Ncr5380::completeDataOutCommand()
+{
+    const auto result = m_activeTarget ? m_activeTarget->executeCommand(m_command, m_dataOut) : ScsiCommandResult {};
+    m_lastCommand = m_command;
+    ++m_completedCommands;
+    m_status = result.status;
+    m_message = result.message;
+    m_senseKey = result.senseKey;
+    setPhase(Phase::Status);
 }
 
 std::uint8_t Ncr5380::readDataByte()
@@ -393,6 +410,15 @@ std::uint8_t Ncr5380::busAndStatus()
     if (m_requestReassertPending) {
         m_request = true;
         m_requestReassertPending = false;
+    }
+    // The final pseudo-DMA send access loads the 5380's output path before
+    // ACK is released on the SCSI bus. Preserve the old phase long enough for
+    // the ROM's paired DRQ/phase polls, then let the target advance. This also
+    // lets a loaded disk driver observe the subsequent phase mismatch without
+    // requiring it to clear DMA mode first.
+    if (m_dataOutCompletionPending && m_dataOutDrainStatusReads > 0 && --m_dataOutDrainStatusReads == 0) {
+        m_dataOutCompletionPending = false;
+        completeDataOutCommand();
     }
     return status;
 }

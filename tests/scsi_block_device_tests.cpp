@@ -150,6 +150,26 @@ int main()
     ok &= expect(controller.debugState().phase == QStringLiteral("status"), "FORMAT UNIT did not finish after its defect list");
     ok &= expect(target->lastDataOut == QByteArray::fromHex("000000021234"), "FORMAT UNIT parameter data was not delivered");
 
+    // A pseudo-DMA send has a final-byte pipeline: the host's last DACK
+    // loads the byte, but the target cannot change phase until ACK is
+    // released. The IIcx ROM observes the still-matching DATA OUT phase and
+    // then clears DMA mode, which completes the command.
+    controller.reset();
+    controller.writeRegister(0, false, 0x01);
+    controller.writeRegister(1, false, 0x04);
+    controller.writeRegister(1, false, 0x00);
+    for (const auto byte : QByteArray::fromHex("150000000400")) sendByte(controller, static_cast<std::uint8_t>(byte), false);
+    controller.writeRegister(2, false, 0x02);
+    for (const auto byte : QByteArray::fromHex("00000000")) sendByte(controller, static_cast<std::uint8_t>(byte), true);
+    ok &= expect(controller.debugState().phase == QStringLiteral("data-out")
+            && (controller.readRegister(5, false) & 0x08) != 0
+            && (controller.readRegister(5, false) & 0x40) == 0,
+        "pseudo-DMA DATA OUT must retain phase match while its final byte drains");
+    ok &= expect(controller.debugState().phase == QStringLiteral("status")
+            && (controller.readRegister(5, false) & 0x08) == 0
+            && target->lastDataOut == QByteArray::fromHex("00000000"),
+        "the drained pseudo-DMA byte must advance to STATUS and report a phase mismatch");
+
     target->responseData = QByteArray(36, static_cast<char>(0x5a));
     controller.reset();
     controller.writeRegister(0, false, 0x01);

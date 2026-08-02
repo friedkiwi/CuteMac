@@ -1266,6 +1266,22 @@ private:
             }
             if (device.isEmpty() || device == QStringLiteral("scsi")) {
                 m_out << "scsi_reads=" << io.scsiReads << " scsi_writes=" << io.scsiWrites << '\n';
+                const auto scsi = m_iicxMachine->scsiDebugState();
+                m_out << "scsi_phase=" << scsi.phase
+                      << " target=" << (scsi.activeTargetId == 0xff ? QStringLiteral("none") : QString::number(scsi.activeTargetId))
+                      << " selected=" << (scsi.selected ? "yes" : "no")
+                      << " req=" << (scsi.request ? "yes" : "no")
+                      << " ack=" << (scsi.ack ? "yes" : "no")
+                      << " command_ready=" << (scsi.commandReady ? "yes" : "no") << '\n';
+                m_out << "scsi_data index=" << scsi.dataIndex << '/' << scsi.dataLength
+                      << " out=" << scsi.dataOutLength << '/' << scsi.expectedDataOutLength
+                      << " completed=" << scsi.completedCommands << '\n';
+                m_out << "scsi_status=" << hexValue(scsi.status, 2)
+                      << " message=" << hexValue(scsi.message, 2)
+                      << " tcmd=" << hexValue(scsi.targetCommand, 2)
+                      << " output=" << hexValue(scsi.outputData, 2) << '\n';
+                m_out << "scsi_active_cdb=" << scsi.activeCommand.toHex(' ') << '\n';
+                m_out << "scsi_last_cdb=" << scsi.lastCommand.toHex(' ') << '\n';
             }
             if (device.isEmpty() || device == QStringLiteral("swim")) {
                 m_out << "swim_reads=" << io.swimReads << " swim_writes=" << io.swimWrites << '\n';

@@ -56,6 +56,7 @@ private:
     void acceptCommandByte(std::uint8_t value);
     void executeCommand();
     void finishDataPhaseIfDone();
+    void completeDataOutCommand();
     [[nodiscard]] std::uint8_t readDataByte();
     void writeDataByte(std::uint8_t value);
     [[nodiscard]] std::uint8_t currentBusStatus();
@@ -84,6 +85,8 @@ private:
     bool m_selected = false;
     bool m_request = false;
     bool m_requestReassertPending = false;
+    bool m_dataOutCompletionPending = false;
+    int m_dataOutDrainStatusReads = 0;
     bool m_previousAck = false;
     bool m_commandReady = false;
     QByteArray m_lastCommand;
