@@ -113,12 +113,13 @@ void appendMfmRepeated(QByteArray& bytes, QVector<bool>& marks, std::uint8_t val
     for (int i = 0; i < count; ++i) appendMfmByte(bytes, marks, value);
 }
 
-void appendMfmField(QByteArray& bytes, QVector<bool>& marks, std::uint8_t type, const QByteArray& payload)
+void appendMfmField(QByteArray& bytes, QVector<bool>& marks, std::uint8_t type, const QByteArray& payload,
+    std::uint8_t syncMark = 0xa1)
 {
     QByteArray crcBytes;
     for (int i = 0; i < 3; ++i) {
-        appendMfmByte(bytes, marks, 0xa1, true);
-        crcBytes.append(static_cast<char>(0xa1));
+        appendMfmByte(bytes, marks, syncMark, true);
+        crcBytes.append(static_cast<char>(syncMark));
     }
     appendMfmByte(bytes, marks, type);
     crcBytes.append(static_cast<char>(type));
@@ -455,9 +456,10 @@ void FloppyDiskImage::rebuildTrackCache()
 void FloppyDiskImage::buildMfmTrack(int physicalTrack, int side, QByteArray& bytes, QVector<bool>& marks) const
 {
     constexpr int sectorsPerTrack = 18;
+    constexpr int bytesPerRevolution = 12500; // 500 kbit/s at 300 RPM.
     appendMfmRepeated(bytes, marks, 0x4e, 80);
     appendMfmRepeated(bytes, marks, 0x00, 12);
-    appendMfmField(bytes, marks, 0xfc, {});
+    appendMfmField(bytes, marks, 0xfc, {}, 0xc2);
     appendMfmRepeated(bytes, marks, 0x4e, 50);
     for (int sector = 0; sector < sectorsPerTrack; ++sector) {
         appendMfmRepeated(bytes, marks, 0x00, 12);
@@ -471,8 +473,9 @@ void FloppyDiskImage::buildMfmTrack(int physicalTrack, int side, QByteArray& byt
         appendMfmRepeated(bytes, marks, 0x00, 12);
         const auto block = (physicalTrack * 2 + side) * sectorsPerTrack + sector;
         appendMfmField(bytes, marks, 0xfb, m_data.mid(block * bytesPerSector, bytesPerSector));
-        appendMfmRepeated(bytes, marks, 0x4e, 84);
+        appendMfmRepeated(bytes, marks, 0x4e, 101);
     }
+    appendMfmRepeated(bytes, marks, 0x4e, bytesPerRevolution - bytes.size());
 }
 
 QByteArray FloppyDiskImage::buildTrackBytes(int physicalTrack, int side) const

@@ -54,8 +54,10 @@ bool create1440KImage(const QString& path)
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return false;
     QByteArray bytes(1440 * 1024, '\0');
-    bytes[0] = 'L';
-    bytes[1] = 'K';
+    for (int block = 0; block < bytes.size() / 512; ++block) {
+        bytes[block * 512] = static_cast<char>(block >> 8);
+        bytes[block * 512 + 1] = static_cast<char>(block);
+    }
     return file.write(bytes) == bytes.size();
 }
 
@@ -100,6 +102,32 @@ int main()
     ok &= expect(create1440KImage(hdImagePath) && swim.loadFloppyImage(hdImagePath, true), "1.44 MB image must load");
     ok &= expect(swim.debugState().highDensity, "1.44 MB media must report high density");
     ok &= expect(swim.debugState().imageFormat == QStringLiteral("raw-1440k"), "1.44 MB format name");
+    const auto mfmTrack = swim.trackBytesForDebug(0, 0);
+    ok &= expect(mfmTrack.size() == 12500, "1.44 MB MFM track must span one 300 RPM revolution");
+    ok &= expect(mfmTrack.mid(92, 4) == QByteArray::fromHex("c2c2c2fc"),
+        "MFM index address mark must use illegal-clock C2 bytes");
+    ok &= expect(mfmTrack.mid(160, 8) == QByteArray::fromHex("a1a1a1fe00000102"),
+        "first MFM ID field must describe cylinder 0, side 0, sector 1");
+    ok &= expect(mfmTrack.mid(204, 4) == QByteArray::fromHex("a1a1a1fb"),
+        "first MFM data field must follow the documented gap");
+    ok &= expect(mfmTrack.mid(823 + 160 - 148, 8) == QByteArray::fromHex("a1a1a1fe00000202"),
+        "1.44 MB sectors must use the documented 101-byte inter-sector gap");
+    for (int track = 0; track < 80; ++track) {
+        for (int side = 0; side < 2; ++side) {
+            const auto encodedTrack = swim.trackBytesForDebug(track, side);
+            for (int sector = 0; sector < 18; ++sector) {
+                const auto field = 148 + sector * 675;
+                const auto block = (track * 2 + side) * 18 + sector;
+                ok &= expect(static_cast<std::uint8_t>(encodedTrack[field + 16]) == track
+                        && static_cast<std::uint8_t>(encodedTrack[field + 17]) == side
+                        && static_cast<std::uint8_t>(encodedTrack[field + 18]) == sector + 1,
+                    "every MFM ID field must identify its source sector");
+                ok &= expect(static_cast<std::uint8_t>(encodedTrack[field + 60]) == (block >> 8)
+                        && static_cast<std::uint8_t>(encodedTrack[field + 61]) == (block & 0xff),
+                    "every MFM data field must contain the corresponding raw-image block");
+            }
+        }
+    }
 
     // Enter ISM mode with the unmodified ROM's 1,0,1,1 sequence.
     for (const auto value : { 0x40, 0x00, 0x40, 0x40 }) (void)swim.access(15, static_cast<std::uint8_t>(value), true);
@@ -111,7 +139,7 @@ int main()
     ok &= expect((handshake & 0x80) != 0, "MFM read action must make a byte available");
     ok &= expect((handshake & 0x01) != 0, "first synchronized MFM byte must be a mark");
     ok &= expect((handshake & 0x0c) == 0, "inserted spinning media must deassert NoReady");
-    ok &= expect(swim.access(9) == 0xa1, "MFM address mark must begin with an illegal-clock A1 byte");
+    ok &= expect(swim.access(9) == 0xc2, "first synchronized MFM field must be the C2 index mark");
 
     return ok ? 0 : 1;
 }
