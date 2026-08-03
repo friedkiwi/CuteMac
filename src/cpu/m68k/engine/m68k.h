@@ -313,6 +313,9 @@ void m68k_set_instr_hook_callback(void  (*callback)(unsigned int pc));
  */
 void m68k_set_cpu_type(unsigned int cpu_type);
 
+/* Attach/detach an external MC68851. Legal only with a full 68020. */
+void m68k_set_external_pmmu(unsigned int enabled);
+
 /* Do whatever initialisations the core requires.  Should be called
  * at least once at init time.
  */
@@ -358,6 +361,7 @@ void m68k_pulse_halt(void);
 
 /* Trigger a bus error exception */
 void m68k_pulse_bus_error(void);
+void m68k_report_physical_bus_error(unsigned int address, unsigned int is_write, unsigned int size);
 
 
 /* Context switching to allow multiple CPUs */
@@ -393,6 +397,9 @@ unsigned int m68k_get_pmmu_crp_limit(void);
 unsigned int m68k_get_pmmu_crp_address(void);
 unsigned int m68k_get_pmmu_srp_limit(void);
 unsigned int m68k_get_pmmu_srp_address(void);
+unsigned int m68k_get_pmmu_kind(void);
+unsigned int m68k_get_pmmu_mmusr(void);
+unsigned int m68k_get_pmmu_fault_address(void);
 unsigned int m68k_translate_address(unsigned int address);
 void m68k_pmmu_atc_flush(void);
 void m68k_pmmu_atc_reset_statistics(void);

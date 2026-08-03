@@ -208,6 +208,16 @@ void MacIIcxMachine::reset()
     updateInterrupts();
 }
 
+bool MacIIcxMachine::triggerProgrammersInterrupt()
+{
+    // Physical programmer/debug switches on 68k Macs assert an NMI-style
+    // level-7 edge.  Normal GLUE/VIA/SCC levels are recomputed before and
+    // after subsequent instructions.
+    m_cpu.setIrqLevel(0);
+    m_cpu.setIrqLevel(7);
+    return true;
+}
+
 int MacIIcxMachine::runCycles(int cycles)
 {
     int used = 0;
@@ -330,7 +340,8 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
         break;
     case 4:
         noMirror = true;
-        bankASize = bankBSize = 2U * 1024U * 1024U;
+        bankASize = 4U * 1024U * 1024U;
+        bankBSize = 0;
         break;
     case 5:
         bankASize = 4U * 1024U * 1024U;
@@ -386,7 +397,11 @@ std::optional<std::size_t> MacIIcxMachine::ramIndex(std::uint32_t address) const
     // exposing the complete allocation in an oversized GLUE window makes it
     // mis-detect the SIMMs.  Match the hardware-visible probe window used by
     // MAME: retain only the first MiB until the selected window fits.
-    if (bankBLocation > memorySize)
+    // A single fully populated bank A (1/4/16 MiB configurations) remains
+    // contiguous regardless of the bank-B sizing selector.  MODE32 enters
+    // 32-bit startup while VIA2 still selects the 32 MiB probe window and
+    // immediately uses RAM above 1 MiB for its supervisor stack.
+    if (!noMirror && bankBLocation > memorySize)
         return address < std::min<std::size_t>(memorySize, 1U * 1024U * 1024U)
             ? std::optional<std::size_t>(address)
             : std::nullopt;
@@ -486,17 +501,23 @@ QStringList MacIIcxMachine::debugRegisterLines() const
                      .arg(regs.pc, 8, 16, QLatin1Char('0')).arg(regs.sr, 4, 16, QLatin1Char('0'))
                      .arg(regs.usp, 8, 16, QLatin1Char('0')).arg(regs.isp, 8, 16, QLatin1Char('0'))
                      .arg(regs.msp, 8, 16, QLatin1Char('0')).arg(regs.vbr, 8, 16, QLatin1Char('0')));
-    lines.append(QStringLiteral("PMMU=%1 TC=%2 TT0=%3 TT1=%4 PHYS_PC=%5")
+    lines.append(QStringLiteral("PMMU=%1 KIND=%2 TC=%3 TT0=%4 TT1=%5 MMUSR=%6 PHYS_PC=%7")
                      .arg(regs.pmmuEnabled ? QStringLiteral("on") : QStringLiteral("off"))
+                     .arg(regs.pmmuKind)
                      .arg(regs.pmmuTc, 8, 16, QLatin1Char('0'))
                      .arg(regs.pmmuTt0, 8, 16, QLatin1Char('0'))
                      .arg(regs.pmmuTt1, 8, 16, QLatin1Char('0'))
+                     .arg(regs.pmmuMmusr, 4, 16, QLatin1Char('0'))
                      .arg(regs.physicalPc, 8, 16, QLatin1Char('0')));
     lines.append(QStringLiteral("CRP=%1:%2 SRP=%3:%4")
                      .arg(regs.pmmuCrpLimit, 8, 16, QLatin1Char('0'))
                      .arg(regs.pmmuCrpAddress, 8, 16, QLatin1Char('0'))
                      .arg(regs.pmmuSrpLimit, 8, 16, QLatin1Char('0'))
                      .arg(regs.pmmuSrpAddress, 8, 16, QLatin1Char('0')));
+    lines.append(QStringLiteral("ATC_HITS=%1 ATC_MISSES=%2 LAST_MMU_FAULT=%3")
+                     .arg(regs.pmmuAtcHits)
+                     .arg(regs.pmmuAtcMisses)
+                     .arg(regs.pmmuFaultAddress, 8, 16, QLatin1Char('0')));
     return lines;
 }
 
@@ -609,6 +630,11 @@ void MacIIcxMachine::applyInput(const core::GuestInputEvent& event)
             integratedVideo = std::dynamic_pointer_cast<devices::video::nubus::CuteMacVideoCard>(m_nubus.card(slot));
             acceleratedVideo = std::dynamic_pointer_cast<devices::video::nubus::CuteMacAcceleratedVideoCard>(m_nubus.card(slot));
         }
+        // Integrated pointing owns host position events for the lifetime of
+        // the configured card.  The slot-VBL driver may enable its interrupt
+        // late during MODE32 startup, or briefly disable it across a mode
+        // change; keep publishing the latest mailbox coordinates throughout
+        // those intervals and never leak them into relative ADB movement.
         if (integratedVideo && integratedVideo->absolutePointerEnabled()) {
             integratedVideo->setHostPointerPosition(x, y);
         } else if (acceleratedVideo && acceleratedVideo->absolutePointerEnabled()) {

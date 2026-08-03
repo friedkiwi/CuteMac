@@ -49,6 +49,145 @@ bool create800KImage(const QString& path)
     return file.write(QByteArray(800 * 1024, '\0')) == 800 * 1024;
 }
 
+bool createPatternImage(const QString& path, qsizetype size, std::uint8_t seed)
+{
+    QByteArray bytes(size, '\0');
+    for (qsizetype offset = 0; offset < 512; ++offset)
+        bytes[offset] = static_cast<char>(seed + offset * 37);
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+}
+
+QByteArray readFile(const QString& path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray {};
+}
+
+void writeBe32(QByteArray& bytes, qsizetype offset, std::uint32_t value)
+{
+    bytes[offset] = static_cast<char>(value >> 24);
+    bytes[offset + 1] = static_cast<char>(value >> 16);
+    bytes[offset + 2] = static_cast<char>(value >> 8);
+    bytes[offset + 3] = static_cast<char>(value);
+}
+
+std::uint32_t readBe32(const QByteArray& bytes, qsizetype offset)
+{
+    return (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset])) << 24)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 1])) << 16)
+        | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 2])) << 8)
+        | static_cast<std::uint8_t>(bytes[offset + 3]);
+}
+
+std::uint32_t diskCopyChecksum(const QByteArray& bytes)
+{
+    std::uint32_t checksum = 0;
+    for (qsizetype offset = 0; offset + 1 < bytes.size(); offset += 2) {
+        checksum += (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset])) << 8)
+            | static_cast<std::uint8_t>(bytes[offset + 1]);
+        checksum = (checksum >> 1) | (checksum << 31);
+    }
+    return checksum;
+}
+
+bool createDiskCopyImage(const QString& path, qsizetype dataSize)
+{
+    QByteArray image(84 + dataSize, '\0');
+    writeBe32(image, 64, static_cast<std::uint32_t>(dataSize));
+    writeBe32(image, 68, 0);
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(image) == image.size();
+}
+
+bool startIwmMotor(IwmController& iwm)
+{
+    (void)iwm.access(9); // Enable IWM writes.
+    selectDriveRegister(iwm, 0x08); // MOTORON
+    (void)iwm.access(7);
+    (void)iwm.access(6);
+    return iwm.debugState().motorOn;
+}
+
+bool exerciseGcrWrite(const QString& sourcePath, const QString& targetPath, qsizetype imageSize)
+{
+    if (!createPatternImage(sourcePath, imageSize, 0x31)
+        || !createPatternImage(targetPath, imageSize, 0x00)) return false;
+
+    IwmController source;
+    if (!source.loadFloppyImage(sourcePath, true)) return false;
+    const auto track = source.trackBytesForDebug(0, 0);
+    const auto prologue = track.indexOf(QByteArray::fromHex("d5aaad"));
+    if (prologue < 0 || prologue + 710 > track.size()) return false;
+    const auto record = track.mid(prologue, 710);
+
+    IwmController target;
+    if (!target.loadFloppyImage(targetPath) || !startIwmMotor(target)) return false;
+    (void)target.access(13); // Q6 on: data-register write mode.
+    for (const auto byte : record)
+        (void)target.access(15, static_cast<std::uint8_t>(byte), true);
+    (void)target.access(14); // Q7 off flushes the completed write transaction.
+    return readFile(targetPath).left(512) == readFile(sourcePath).left(512);
+}
+
+bool exerciseMfmWrite(const QString& sourcePath, const QString& targetPath)
+{
+    if (!createPatternImage(sourcePath, 1440 * 1024, 0x57)
+        || !createPatternImage(targetPath, 1440 * 1024, 0x00)) return false;
+
+    IwmController source;
+    if (!source.loadFloppyImage(sourcePath, true)) return false;
+    const auto track = source.trackBytesForDebug(0, 0);
+    const auto id = track.indexOf(QByteArray::fromHex("a1a1a1fe"));
+    const auto data = track.indexOf(QByteArray::fromHex("a1a1a1fb"), id + 10);
+    if (id < 0 || data < 0 || data + 518 > track.size()) return false;
+
+    IwmController target;
+    if (!target.loadFloppyImage(targetPath)) return false;
+    for (const auto value : { 0x40, 0x00, 0x40, 0x40 })
+        (void)target.access(15, static_cast<std::uint8_t>(value), true);
+    (void)target.access(7, 0xd2, true); // ISM, internal motor, write ACTION.
+    for (const auto byte : track.mid(id, 10))
+        (void)target.access(8, static_cast<std::uint8_t>(byte), true);
+    for (const auto byte : track.mid(data, 518))
+        (void)target.access(8, static_cast<std::uint8_t>(byte), true);
+    (void)target.access(6, 0x10, true); // End ACTION and flush.
+    return readFile(targetPath).left(512) == readFile(sourcePath).left(512);
+}
+
+bool exerciseDiskCopyWrite(const QString& sourcePath, const QString& targetPath)
+{
+    if (!createPatternImage(sourcePath, 800 * 1024, 0x6b)
+        || !createDiskCopyImage(targetPath, 800 * 1024)) return false;
+    IwmController source;
+    if (!source.loadFloppyImage(sourcePath, true)) return false;
+    const auto track = source.trackBytesForDebug(0, 0);
+    const auto prologue = track.indexOf(QByteArray::fromHex("d5aaad"));
+    if (prologue < 0) return false;
+
+    IwmController target;
+    if (!target.loadFloppyImage(targetPath) || !startIwmMotor(target)) return false;
+    (void)target.access(13);
+    for (const auto byte : track.mid(prologue, 710))
+        (void)target.access(15, static_cast<std::uint8_t>(byte), true);
+    (void)target.access(14);
+    const auto diskCopy = readFile(targetPath);
+    return diskCopy.mid(84, 512) == readFile(sourcePath).left(512)
+        && readBe32(diskCopy, 72) == diskCopyChecksum(diskCopy.mid(84, 800 * 1024));
+}
+
+bool exerciseReadOnlyWriteRejection(const QString& path)
+{
+    if (!createPatternImage(path, 400 * 1024, 0x22)) return false;
+    const auto before = readFile(path);
+    IwmController drive;
+    if (!drive.loadFloppyImage(path, true) || !startIwmMotor(drive)) return false;
+    (void)drive.access(13);
+    for (int i = 0; i < 710; ++i) (void)drive.access(15, 0xff, true);
+    (void)drive.access(14);
+    return !drive.debugState().writable && readFile(path) == before;
+}
+
 bool create1440KImage(const QString& path)
 {
     QFile file(path);
@@ -140,6 +279,48 @@ int main()
     ok &= expect((handshake & 0x01) != 0, "first synchronized MFM byte must be a mark");
     ok &= expect((handshake & 0x0c) == 0, "inserted spinning media must deassert NoReady");
     ok &= expect(swim.access(9) == 0xc2, "first synchronized MFM field must be the C2 index mark");
+
+    IwmController replacement;
+    replacement.reset();
+    ok &= expect(replacement.loadFloppyImage(imagePath, true), "800K image must load before replacement");
+    for (const auto value : { 0x40, 0x00, 0x40, 0x40 }) {
+        (void)replacement.access(15, static_cast<std::uint8_t>(value), true);
+    }
+    (void)replacement.access(7, 0xc2, true); // ISM + motor + internal drive.
+    replacement.setSideSelect(true);
+    (void)replacement.access(4, 0xfd, true); // Select GCR mode, matching a previous 800K access path.
+    ok &= expect((replacement.access(13) & 0x04) != 0, "GCR phase command must select GCR setup");
+
+    ok &= expect(replacement.loadFloppyImage(hdImagePath, true), "1.44 MB replacement image must load");
+    ok &= expect(replacement.debugState().highDensity, "replacement media must report high density immediately");
+    (void)replacement.access(4, 0xfc, true); // Select disk-change latch.
+    ok &= expect((replacement.access(15) & 0x0c) == 0x0c, "media replacement must assert the SWIM disk-change latch");
+    (void)replacement.access(4, 0xf4, true); // Drop the phase strobe before issuing the clear command.
+    (void)replacement.access(4, 0xfc, true); // Strobe clear disk-change latch.
+    ok &= expect((replacement.access(15) & 0x0c) == 0, "clear disk-change phase must clear the SWIM disk-change latch");
+    (void)replacement.access(4, 0xf1, true); // Drop the phase strobe before selecting MFM mode.
+    (void)replacement.access(4, 0xf9, true); // Select MFM mode.
+    ok &= expect((replacement.access(13) & 0x04) == 0, "MFM phase command must clear stale GCR setup");
+    (void)replacement.access(4, 0xff, true); // Select active-low HD aperture sense.
+    ok &= expect((replacement.access(15) & 0x0c) == 0, "1.44 MB replacement must assert the active-low HD aperture sense");
+    (void)replacement.access(7, 0x08, true); // read ACTION
+    ok &= expect((replacement.access(15) & 0x80) != 0, "replacement MFM disk must make data available");
+    ok &= expect(replacement.access(9) == 0xc2, "replacement disk must expose MFM index bytes, not stale 800K GCR data");
+
+    ok &= expect(exerciseGcrWrite(directory.filePath(QStringLiteral("source-400.dsk")),
+                     directory.filePath(QStringLiteral("written-400.dsk")), 400 * 1024),
+        "IWM must decode and persist a valid 400K GCR sector write");
+    ok &= expect(exerciseGcrWrite(directory.filePath(QStringLiteral("source-800.dsk")),
+                     directory.filePath(QStringLiteral("written-800.dsk")), 800 * 1024),
+        "IWM must decode and persist a valid 800K GCR sector write");
+    ok &= expect(exerciseMfmWrite(directory.filePath(QStringLiteral("source-1440.dsk")),
+                     directory.filePath(QStringLiteral("written-1440.dsk"))),
+        "SWIM must validate and persist a valid 1.44 MB MFM sector write");
+    ok &= expect(exerciseDiskCopyWrite(directory.filePath(QStringLiteral("source-dc42.dsk")),
+                     directory.filePath(QStringLiteral("written.dc42"))),
+        "GCR writes must preserve the Disk Copy 4.2 container and update its checksum");
+    ok &= expect(exerciseReadOnlyWriteRejection(directory.filePath(QStringLiteral("readonly-400.dsk"))),
+        "read-only media must reject writes without changing its backing file");
 
     return ok ? 0 : 1;
 }

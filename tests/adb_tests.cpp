@@ -120,6 +120,42 @@ int main()
     ok &= expect(received.size() == 6 && (received[4] & 0x80) != 0,
         "the following poll after a quick click must report button up");
 
+    // A modifier chord commonly queues four edges while a previous ADB
+    // transaction is in progress. The two edges which do not fit in the first
+    // keyboard packet must automatically request a second poll.
+    cutemac::devices::adb::AdbTransceiver keyboardAdb;
+    std::vector<std::uint8_t> keyboardReceived;
+    keyboardAdb.setReceiveByteCallback([&keyboardReceived](std::uint8_t value) { keyboardReceived.push_back(value); });
+    keyboardAdb.reset();
+    keyboardAdb.shiftRegisterWritten(0x2c); // TALK keyboard register 0
+    keyboardAdb.setViaState(0);
+    keyboardAdb.tick(1200);
+    keyboardAdb.setViaState(3);
+    keyboardAdb.queueKey(0x38, true);  // Shift down
+    keyboardAdb.queueKey(0x13, true);  // 2 down
+    keyboardAdb.queueKey(0x13, false); // 2 up
+    keyboardAdb.queueKey(0x38, false); // Shift up
+    keyboardAdb.tick(1200);
+    completeControllerTransfer(keyboardAdb, 1);
+    completeControllerTransfer(keyboardAdb, 2);
+    ok &= expect(keyboardReceived.size() == 3
+            && keyboardReceived[1] == 0x38 && keyboardReceived[2] == 0xff,
+        "first keyboard autopoll must preserve the modifier down edge");
+    keyboardAdb.setViaState(3);
+    keyboardAdb.tick(1200);
+    completeControllerTransfer(keyboardAdb, 1);
+    completeControllerTransfer(keyboardAdb, 2);
+    ok &= expect(keyboardReceived.size() == 6
+            && keyboardReceived[4] == 0x13 && keyboardReceived[5] == 0x93,
+        "second keyboard autopoll must preserve the key down/up edges");
+    keyboardAdb.setViaState(3);
+    keyboardAdb.tick(1200);
+    completeControllerTransfer(keyboardAdb, 1);
+    completeControllerTransfer(keyboardAdb, 2);
+    ok &= expect(keyboardReceived.size() == 9
+            && keyboardReceived[7] == 0xb8 && keyboardReceived[8] == 0xff,
+        "a packet tail must re-arm keyboard autopoll for the modifier release");
+
     // The command byte is sampled at transfer completion, and a controller
     // byte is retried if the ROM leaves the state lines unchanged long enough.
     cutemac::devices::adb::AdbTransceiver retryAdb;

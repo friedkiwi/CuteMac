@@ -48,13 +48,49 @@ struct NuBusDeviceConfiguration {
     bool absolutePointer = true;
 };
 
-enum class SerialDeviceType { ImageWriterII };
+[[nodiscard]] bool isCuteMacVideoDevice(NuBusDeviceType type);
+[[nodiscard]] int cuteMacVideoFramebufferLimitBytes();
+[[nodiscard]] int framebufferStrideBytes(int width, int depth);
+[[nodiscard]] bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device);
+
+enum class SerialDeviceType {
+    ImageWriterII,
+    HayesModem,
+    NullModem,
+};
+
+enum class SerialTcpMode {
+    Listen,
+    Dial,
+};
+
+struct SerialPhonebookEntry {
+    QString number;
+    QString target;
+    bool telnet = false;
+};
+
+struct SerialSlipConfiguration {
+    bool enabled = true;
+    QString localIp = QStringLiteral("172.16.0.1");
+    QString remoteIp = QStringLiteral("172.16.0.2");
+    int mtu = 1006;
+};
 
 struct SerialDeviceConfiguration {
     int channel = 1; // SCC A=0 (modem), B=1 (printer)
     SerialDeviceType type = SerialDeviceType::ImageWriterII;
     QString outputDirectory;
+    bool directTcpDialing = false;
+    QVector<SerialPhonebookEntry> phonebook;
+    SerialSlipConfiguration slip;
+    SerialTcpMode tcpMode = SerialTcpMode::Listen;
+    QString tcpHost = QStringLiteral("127.0.0.1");
+    int tcpPort = 0;
 };
+
+[[nodiscard]] QVector<SerialPhonebookEntry> defaultSerialModemPhonebook();
+[[nodiscard]] bool isValidSerialDeviceConfiguration(const SerialDeviceConfiguration& device);
 
 [[nodiscard]] QString runtimeSpeedName(RuntimeSpeed speed);
 [[nodiscard]] RuntimeSpeed runtimeSpeedFromName(const QString& name);

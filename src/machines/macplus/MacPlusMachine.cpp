@@ -280,6 +280,16 @@ void MacPlusMachine::reset()
                  .arg(overlayEnabled() ? QStringLiteral("on") : QStringLiteral("off")));
 }
 
+bool MacPlusMachine::triggerProgrammersInterrupt()
+{
+    // The classic programmer's switch is a level-7 interrupt edge.  Force a
+    // fresh edge even if the CPU was already observing another interrupt
+    // level; regular device IRQ state is restored by updateInterrupts().
+    m_cpu.setIrqLevel(0);
+    m_cpu.setIrqLevel(7);
+    return true;
+}
+
 int MacPlusMachine::runCycles(int cycles)
 {
     m_audioPlaybackActive = false;

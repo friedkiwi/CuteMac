@@ -11,6 +11,7 @@ public:
     virtual ~SerialEndpoint() = default;
     virtual void reset() {}
     virtual void setTransmitHandler(TransmitHandler handler) { m_transmitHandler = std::move(handler); }
+    virtual void poll() {}
     virtual void receiveByte(std::uint8_t value) = 0;
 
 protected:

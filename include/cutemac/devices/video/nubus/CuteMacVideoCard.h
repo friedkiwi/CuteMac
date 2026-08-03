@@ -11,7 +11,7 @@ namespace cutemac::devices::video::nubus {
 
 class CuteMacVideoCard final : public devices::nubus::NuBusCard {
 public:
-    static constexpr std::uint32_t guestServicesBase = 0x00090000;
+    static constexpr std::uint32_t guestServicesBase = 0x000e1000;
     static constexpr std::uint32_t guestServicesCommand = guestServicesBase + 0x10;
     static constexpr std::uint32_t guestPointerBase = guestServicesBase + 0x18;
 
@@ -26,6 +26,7 @@ public:
     [[nodiscard]] core::GuestPowerRequest takePowerRequest() override;
     [[nodiscard]] const QByteArray& declarationRom() const { return m_declarationRom; }
     [[nodiscard]] bool absolutePointerEnabled() const { return m_absolutePointer; }
+    [[nodiscard]] bool absolutePointerActive() const { return m_absolutePointer && m_vblEnabled; }
     void setHostPointerPosition(std::int16_t x, std::int16_t y);
     void acceleratedVramCopy(std::uint32_t sourceOffset, std::uint32_t destinationOffset,
         std::uint32_t sourceStrideBytes, std::uint32_t destinationStrideBytes,

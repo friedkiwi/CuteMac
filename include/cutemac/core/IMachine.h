@@ -32,6 +32,7 @@ public:
     [[nodiscard]] virtual bool loadFloppyImage(const QString& path, bool readOnly = false) = 0;
     virtual void ejectFloppyImage() = 0;
     virtual void reset() = 0;
+    [[nodiscard]] virtual bool triggerProgrammersInterrupt() { return false; }
     [[nodiscard]] virtual int runCycles(int cycles) = 0;
     [[nodiscard]] virtual std::uint64_t cycleCount() const = 0;
     [[nodiscard]] virtual std::uint32_t programCounter() const = 0;

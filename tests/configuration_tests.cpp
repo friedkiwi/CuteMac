@@ -37,6 +37,20 @@ int main()
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8, true, true });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 1, false });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
+    cutemac::config::SerialDeviceConfiguration modem;
+    modem.channel = 0;
+    modem.type = cutemac::config::SerialDeviceType::HayesModem;
+    modem.directTcpDialing = true;
+    modem.phonebook = cutemac::config::defaultSerialModemPhonebook();
+    modem.phonebook.append({ QStringLiteral("5551212"), QStringLiteral("tcp:bbs.example.org:23"), true });
+    configuration.serialDevices.append(modem);
+    cutemac::config::SerialDeviceConfiguration nullModem;
+    nullModem.channel = 0;
+    nullModem.type = cutemac::config::SerialDeviceType::NullModem;
+    nullModem.tcpMode = cutemac::config::SerialTcpMode::Dial;
+    nullModem.tcpHost = QStringLiteral("debug.example.org");
+    nullModem.tcpPort = 2323;
+    configuration.serialDevices.append(nullModem);
     configuration.skipRamPatternTest = true;
 
     cutemac::config::ConfigurationManager manager;
@@ -56,9 +70,21 @@ int main()
                 && loaded->nubusDevices[1].type == cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated
                 && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
             "NuBus devices did not round-trip");
-        ok &= expect(loaded->serialDevices.size() == 1 && loaded->serialDevices.first().channel == 1
-                && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints"),
-            "serial printer did not round-trip");
+        ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
+                && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
+                && loaded->serialDevices[1].type == cutemac::config::SerialDeviceType::HayesModem
+                && loaded->serialDevices[1].directTcpDialing
+                && loaded->serialDevices[1].phonebook.size() == 3
+                && loaded->serialDevices[1].phonebook.first().number == QStringLiteral("1000")
+                && loaded->serialDevices[1].phonebook.first().target == QStringLiteral("slip:libslirp")
+                && loaded->serialDevices[1].phonebook[1].number == QStringLiteral("1001")
+                && loaded->serialDevices[1].phonebook[1].target == QStringLiteral("ppp:libslirp")
+                && loaded->serialDevices[1].phonebook[2].telnet
+                && loaded->serialDevices[2].type == cutemac::config::SerialDeviceType::NullModem
+                && loaded->serialDevices[2].tcpMode == cutemac::config::SerialTcpMode::Dial
+                && loaded->serialDevices[2].tcpHost == QStringLiteral("debug.example.org")
+                && loaded->serialDevices[2].tcpPort == 2323,
+            "serial devices did not round-trip");
         ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("macplus.skip_ram_pattern_test") },
             "enabled ROM patch ID is incorrect");
     }
@@ -99,9 +125,51 @@ int main()
     ok &= expect(fractionalPlus && fractionalPlus->ramSizeKiB == 2560,
         "the Macintosh Plus 2.5 MiB configuration must be supported");
 
+    QFile oversizedVideo(path);
+    ok &= expect(oversizedVideo.open(QIODevice::WriteOnly | QIODevice::Truncate), "oversized video fixture open failed");
+    oversizedVideo.write("name = \"Oversized Video\"\n[machine]\nid = \"mac-iicx\"\nram_size_kib = 16384\n"
+                         "[[nubus.devices]]\nslot = 9\ntype = \"cutemac_video\"\nwidth = 1152\nheight = 870\ndepth = 8\nvram_mib = 4\n");
+    oversizedVideo.close();
+    ok &= expect(!manager.loadTomlFile(path).has_value(),
+        "CuteMac Video profiles must reject framebuffers that overlap MMIO");
+
+    ok &= expect(cutemac::config::isValidNuBusDeviceConfiguration(
+                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 1024, 768, 8, 4, true, true }),
+        "CuteMac Video must accept the largest current 1024x768 eight-bit profile");
+    ok &= expect(!cutemac::config::isValidNuBusDeviceConfiguration(
+                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 1024, 768, 16, 4, true, true }),
+        "CuteMac Video must reject profiles whose maximum depth exceeds the safe standard-slot aperture");
+
     auto invalidConfiguration = configuration;
     invalidConfiguration.ramSizeKiB = 3072;
     ok &= expect(!manager.saveTomlFile(path, invalidConfiguration), "saving unsupported RAM must fail");
+    auto invalidVideoConfiguration = configuration;
+    invalidVideoConfiguration.nubusDevices[1].width = 1152;
+    invalidVideoConfiguration.nubusDevices[1].height = 870;
+    invalidVideoConfiguration.nubusDevices[1].depth = 8;
+    ok &= expect(!manager.saveTomlFile(path, invalidVideoConfiguration),
+        "saving oversized CuteMac Video geometry must fail");
+    auto invalidModemConfiguration = configuration;
+    invalidModemConfiguration.serialDevices[1].slip.enabled = false;
+    ok &= expect(!manager.saveTomlFile(path, invalidModemConfiguration),
+        "saving a SLIP phonebook target with SLIP disabled must fail");
+    auto invalidNullModemConfiguration = configuration;
+    invalidNullModemConfiguration.serialDevices[2].tcpPort = 0;
+    ok &= expect(!manager.saveTomlFile(path, invalidNullModemConfiguration),
+        "saving a null modem without a TCP port must fail");
+
+    QFile legacyModem(path);
+    ok &= expect(legacyModem.open(QIODevice::WriteOnly | QIODevice::Truncate), "legacy modem fixture open failed");
+    legacyModem.write("name = \"Modem\"\n[machine]\nid = \"mac-plus\"\n[[serial.devices]]\nchannel = 0\ntype = \"hayes_modem\"\n");
+    legacyModem.close();
+    const auto loadedModem = manager.loadTomlFile(path);
+    ok &= expect(loadedModem && loadedModem->serialDevices.size() == 1
+            && loadedModem->serialDevices.first().phonebook.size() == 2
+            && loadedModem->serialDevices.first().phonebook.first().number == QStringLiteral("1000")
+            && loadedModem->serialDevices.first().phonebook.first().target == QStringLiteral("slip:libslirp")
+            && loadedModem->serialDevices.first().phonebook[1].number == QStringLiteral("1001")
+            && loadedModem->serialDevices.first().phonebook[1].target == QStringLiteral("ppp:libslirp"),
+        "Hayes modem must default phone numbers 1000/1001 to SLIP/PPP");
 
     ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-iicx"), 20480),
         "catalog must accept a valid IIcx bank configuration");

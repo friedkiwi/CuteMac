@@ -27,6 +27,7 @@
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/debug/SadMacDetector.h"
+#include "cutemac/devices/serial/SerialEndpoint.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
@@ -471,6 +472,24 @@ public:
     }
 
 private:
+    class DebugSessionNullModem final : public cutemac::devices::serial::SerialEndpoint {
+    public:
+        void receiveByte(std::uint8_t value) override { m_output.append(static_cast<char>(value)); }
+        void sendByte(std::uint8_t value) { transmitByte(value); }
+        [[nodiscard]] bool hasOutput() const { return !m_output.isEmpty(); }
+        [[nodiscard]] qsizetype pendingBytes() const { return m_output.size(); }
+        QByteArray takeOutput()
+        {
+            const auto output = m_output;
+            m_output.clear();
+            return output;
+        }
+        void clear() { m_output.clear(); }
+
+    private:
+        QByteArray m_output;
+    };
+
     struct TraceOptions {
         bool pc = false;
         bool irq = false;
@@ -516,6 +535,7 @@ private:
             QStringLiteral("rom-symbols"), QStringLiteral("screen"), QStringLiteral("sound"),
             QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("disk"),
             QStringLiteral("floppy"), QStringLiteral("mouse"), QStringLiteral("key"),
+            QStringLiteral("serial-debug"),
             QStringLiteral("sadmac"), QStringLiteral("arm"), QStringLiteral("report"),
             QStringLiteral("trace"), QStringLiteral("pc-trace"), QStringLiteral("trap-trace"),
             QStringLiteral("irq-trace"), QStringLiteral("driver-trace"), QStringLiteral("timeline"),
@@ -530,6 +550,9 @@ private:
             QStringLiteral("insert"), QStringLiteral("eject"), QStringLiteral("read"),
             QStringLiteral("write"), QStringLiteral("rw"), QStringLiteral("all"),
             QStringLiteral("symbols"), QStringLiteral("load-symbols"),
+            QStringLiteral("interrupt"),
+            QStringLiteral("attach"), QStringLiteral("send"), QStringLiteral("send-line"),
+            QStringLiteral("send-hex"),
         };
     }
 
@@ -570,7 +593,8 @@ private:
             QStringLiteral("help"), QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("reset"),
             QStringLiteral("run"), QStringLiteral("step"), QStringLiteral("run-until"), QStringLiteral("state"),
             QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("screen"), QStringLiteral("devices"),
-            QStringLiteral("mouse"), QStringLiteral("key"),
+            QStringLiteral("write8"), QStringLiteral("write16"), QStringLiteral("write32"),
+            QStringLiteral("mouse"), QStringLiteral("key"), QStringLiteral("serial-debug"), QStringLiteral("interrupt"),
             QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
         };
         if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
@@ -586,6 +610,8 @@ private:
             loadProfile(parts);
         } else if (command == QStringLiteral("reset")) {
             reloadMachine();
+        } else if (command == QStringLiteral("interrupt")) {
+            triggerProgrammersInterrupt();
         } else if (command == QStringLiteral("run")) {
             runCycles(parts);
         } else if (command == QStringLiteral("step")) {
@@ -642,6 +668,8 @@ private:
             handleMouse(parts);
         } else if (command == QStringLiteral("key")) {
             handleKey(parts);
+        } else if (command == QStringLiteral("serial-debug")) {
+            handleSerialDebug(parts);
         } else if (command == QStringLiteral("sadmac")) {
             handleSadMac(parts);
         } else if (command == QStringLiteral("trace")) {
@@ -672,6 +700,7 @@ private:
             m_out << "unknown command: " << parts[0] << '\n';
         }
 
+        drainDebugSerialOutput();
         m_out.flush();
         return true;
     }
@@ -707,6 +736,7 @@ private:
         m_out << "commands:\n";
         m_out << "  regs | state | devices [via|iwm|swim|scc|scsi|nubus]\n";
         m_out << "  step [count] | run [cycles] | run-until <addr> [max-cycles] | run-until-event floppy-eject [max-cycles]\n";
+        m_out << "  interrupt\n";
         m_out << "  disasm [addr|pc] [count] | mem <addr> [len]\n";
         m_out << "  mem-find <hex> [start len] | mem-snapshot <name> <addr> <len> | memory-diff <name>\n";
         m_out << "  write8|write16|write32 <addr> <value>\n";
@@ -722,6 +752,7 @@ private:
         m_out << "  floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side]\n";
         m_out << "  mouse status | mouse move <x> <y> | mouse delta <dx> <dy> | mouse down|up\n";
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
+        m_out << "  serial-debug attach [0|1|a|b] | serial-debug send <text> | serial-debug send-line <text> | serial-debug send-hex <hex> | serial-debug read|clear|status\n";
         m_out << "  trace [category on|off|dump|clear|save <file>] | pc-trace|trap-trace|irq-trace|driver-trace|timeline [count]\n";
         m_out << "  sadmac arm|run [max-cycles]|status|report|save <prefix>|clear\n";
         m_out << "  bootblock verify | floppy last-window | floppy export-window <file>\n";
@@ -836,6 +867,8 @@ private:
     {
         m_sadMac = {};
         m_debugKeysDown.clear();
+        m_debugSerialEndpoint.reset();
+        m_debugSerialChannel = -1;
         m_session = std::make_unique<cutemac::core::EmulationSession>(m_configuration);
         m_cpuDebug = m_session->debugCpuAccess();
         m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(m_session->debugMachine(QStringLiteral("mac-plus")));
@@ -890,6 +923,18 @@ private:
     {
         if (m_cpuDebug) return m_cpuDebug->stepInstruction();
         return m_machine != nullptr ? m_machine->stepInstruction() : m_iicxMachine->runCycles(1);
+    }
+
+    void triggerProgrammersInterrupt()
+    {
+        if (!requireRom()) {
+            return;
+        }
+        if (m_session != nullptr && m_session->triggerProgrammersInterrupt()) {
+            m_out << "programmer interrupt triggered\n";
+        } else {
+            m_out << "programmer interrupt unsupported for this machine\n";
+        }
     }
 
     [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const
@@ -1178,11 +1223,14 @@ private:
             return;
         }
         if (command == QStringLiteral("write8")) {
-            m_machine->debugWrite8(*address, static_cast<std::uint8_t>(*value));
+            if (m_cpuDebug) m_cpuDebug->debugWrite8(*address, static_cast<std::uint8_t>(*value));
+            else m_machine->debugWrite8(*address, static_cast<std::uint8_t>(*value));
         } else if (command == QStringLiteral("write16")) {
-            m_machine->debugWrite16(*address, static_cast<std::uint16_t>(*value));
+            if (m_cpuDebug) m_cpuDebug->debugWrite16(*address, static_cast<std::uint16_t>(*value));
+            else m_machine->debugWrite16(*address, static_cast<std::uint16_t>(*value));
         } else if (command == QStringLiteral("write32")) {
-            m_machine->debugWrite32(*address, *value);
+            if (m_cpuDebug) m_cpuDebug->debugWrite32(*address, *value);
+            else m_machine->debugWrite32(*address, *value);
         } else {
             m_out << "unknown write command\n";
         }
@@ -1865,6 +1913,120 @@ private:
         m_out << "usage: key status | key down <mac-code> | key up <mac-code> | key reset\n";
     }
 
+    void handleSerialDebug(const QStringList& parts)
+    {
+        const auto subcommand = parts.size() >= 2 ? parts[1].toLower() : QStringLiteral("status");
+        if (subcommand == QStringLiteral("status")) {
+            m_out << "serial-debug attached=" << (m_debugSerialEndpoint ? "yes" : "no");
+            if (m_debugSerialEndpoint) {
+                m_out << " channel=" << m_debugSerialChannel
+                      << " pending=" << m_debugSerialEndpoint->pendingBytes();
+            }
+            m_out << '\n';
+            return;
+        }
+        if (subcommand == QStringLiteral("attach")) {
+            const auto channel = parts.size() >= 3 ? parseSerialDebugChannel(parts[2]) : std::optional<int> {0};
+            if (!channel.has_value()) {
+                m_out << "invalid serial channel; use 0|1|a|b\n";
+                return;
+            }
+            auto endpoint = std::make_shared<DebugSessionNullModem>();
+            if (!attachDebugSerialEndpoint(*channel, endpoint)) {
+                m_out << "serial-debug attach failed\n";
+                return;
+            }
+            m_debugSerialEndpoint = std::move(endpoint);
+            m_debugSerialChannel = *channel;
+            m_out << "serial-debug attached channel=" << m_debugSerialChannel << '\n';
+            return;
+        }
+        if (subcommand == QStringLiteral("clear")) {
+            if (m_debugSerialEndpoint) m_debugSerialEndpoint->clear();
+            m_out << "serial-debug cleared\n";
+            return;
+        }
+        if (subcommand == QStringLiteral("read")) {
+            drainDebugSerialOutput();
+            return;
+        }
+        if (subcommand == QStringLiteral("send") || subcommand == QStringLiteral("send-line")) {
+            if (!requireDebugSerialEndpoint()) return;
+            QByteArray bytes = parts.mid(2).join(QLatin1Char(' ')).toLatin1();
+            if (subcommand == QStringLiteral("send-line")) bytes.append('\r');
+            sendDebugSerialBytes(bytes);
+            m_out << "serial-debug sent bytes=" << bytes.size() << '\n';
+            return;
+        }
+        if (subcommand == QStringLiteral("send-hex")) {
+            if (!requireDebugSerialEndpoint()) return;
+            if (parts.size() < 3) {
+                m_out << "usage: serial-debug send-hex <hex>\n";
+                return;
+            }
+            const auto bytes = hexToBytes(parts.mid(2).join(QString()));
+            if (bytes.isEmpty()) {
+                m_out << "invalid hex bytes\n";
+                return;
+            }
+            sendDebugSerialBytes(bytes);
+            m_out << "serial-debug sent bytes=" << bytes.size() << '\n';
+            return;
+        }
+        m_out << "usage: serial-debug attach [0|1|a|b] | serial-debug send <text> | serial-debug send-line <text> | serial-debug send-hex <hex> | serial-debug read|clear|status\n";
+    }
+
+    [[nodiscard]] std::optional<int> parseSerialDebugChannel(const QString& text) const
+    {
+        const auto value = text.toLower();
+        if (value == QStringLiteral("a")) return 0;
+        if (value == QStringLiteral("b")) return 1;
+        const auto parsed = parseNumber(value);
+        if (parsed && *parsed <= 1) return static_cast<int>(*parsed);
+        return std::nullopt;
+    }
+
+    [[nodiscard]] bool attachDebugSerialEndpoint(int channel, const std::shared_ptr<DebugSessionNullModem>& endpoint)
+    {
+        if (m_machine) {
+            m_machine->attachSerialEndpoint(channel, endpoint);
+            return true;
+        }
+        if (m_iicxMachine) {
+            m_iicxMachine->attachSerialEndpoint(channel, endpoint);
+            return true;
+        }
+        if (m_powerMac8100Machine) {
+            m_powerMac8100Machine->attachSerialEndpoint(channel, endpoint);
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool requireDebugSerialEndpoint()
+    {
+        if (m_debugSerialEndpoint) return true;
+        m_out << "serial-debug is not attached; use serial-debug attach [0|1|a|b]\n";
+        return false;
+    }
+
+    void sendDebugSerialBytes(const QByteArray& bytes)
+    {
+        for (const auto byte : bytes) {
+            m_debugSerialEndpoint->sendByte(static_cast<std::uint8_t>(byte));
+        }
+    }
+
+    void drainDebugSerialOutput()
+    {
+        if (!m_debugSerialEndpoint || !m_debugSerialEndpoint->hasOutput()) return;
+        auto text = QString::fromLatin1(m_debugSerialEndpoint->takeOutput());
+        text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+        text.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+        m_out << "[serial-debug]\n" << text;
+        if (!text.endsWith(QLatin1Char('\n'))) m_out << '\n';
+    }
+
     void configureTrace(const QStringList& parts)
     {
         if (parts.size() == 1) {
@@ -2463,6 +2625,8 @@ private:
     std::int16_t m_debugMouseY = 0;
     bool m_debugMouseButton = false;
     QSet<std::uint8_t> m_debugKeysDown;
+    std::shared_ptr<DebugSessionNullModem> m_debugSerialEndpoint;
+    int m_debugSerialChannel = -1;
     quint16 m_gdbPort = 1234;
     std::set<std::uint32_t> m_breakpoints;
     QStringList m_watches;

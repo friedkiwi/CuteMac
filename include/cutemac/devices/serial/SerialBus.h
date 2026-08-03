@@ -18,6 +18,7 @@ public:
     }
     void detach() { if (m_endpoint) m_endpoint->setTransmitHandler({}); m_endpoint.reset(); }
     void reset() { if (m_endpoint) m_endpoint->reset(); }
+    void poll() { if (m_endpoint) m_endpoint->poll(); }
     void transmit(std::uint8_t value) { if (m_endpoint) m_endpoint->receiveByte(value); }
     [[nodiscard]] bool attached() const { return static_cast<bool>(m_endpoint); }
 

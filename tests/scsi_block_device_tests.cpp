@@ -196,8 +196,13 @@ int main()
         "single-track CD-ROM TOC is wrong");
     const auto cdMode = cdRom.executeCommand(QByteArray::fromHex("1a003f00ff00"), {});
     ok &= expect(cdMode.status == 0 && cdMode.data.contains(QByteArray::fromHex("0d06000d003c004b"))
+            && cdMode.data.contains(QByteArray::fromHex("0106000000000000"))
             && cdMode.data.contains(QByteArray::fromHex("2a0e")),
         "CD-ROM mode pages are missing");
+    const auto cdErrorRecovery = cdRom.executeCommand(QByteArray::fromHex("1a0001001400"), {});
+    ok &= expect(cdErrorRecovery.status == 0
+            && cdErrorRecovery.data.contains(QByteArray::fromHex("0106000000000000")),
+        "CD-ROM read/write error-recovery mode page is missing");
     ok &= expect((static_cast<std::uint8_t>(cdMode.data[2]) & 0x80) != 0,
         "CD-ROM MODE SENSE(6) must advertise write protection");
     const auto cdModeHeader = cdRom.executeCommand(QByteArray::fromHex("1a0000000c00"), {});
@@ -227,6 +232,18 @@ int main()
         "directly polled CD ejection sense must report changed media");
     ok &= expect(cdRom.executeCommand(QByteArray::fromHex("000000000000"), {}).senseKey == 0x02,
         "REQUEST SENSE must consume ejection unit attention");
+    const auto emptyInquiry = cdRom.executeCommand(QByteArray::fromHex("120000002400"), {});
+    ok &= expect(emptyInquiry.status == 0 && !emptyInquiry.data.isEmpty(),
+        "empty CD-ROM drive must still answer INQUIRY");
+    const auto emptyModeSense = cdRom.executeCommand(QByteArray::fromHex("1a003f00ff00"), {});
+    ok &= expect(emptyModeSense.status == 0 && !emptyModeSense.data.isEmpty(),
+        "empty CD-ROM drive must answer MODE SENSE so the guest driver can install media polling");
+    const auto emptyPreventAllow = cdRom.executeCommand(QByteArray::fromHex("1e0000000000"), {});
+    ok &= expect(emptyPreventAllow.status == 0,
+        "empty CD-ROM drive must accept PREVENT/ALLOW MEDIUM REMOVAL");
+    const auto emptyReady = cdRom.executeCommand(QByteArray::fromHex("000000000000"), {});
+    ok &= expect(emptyReady.status == 0x02 && emptyReady.senseKey == 0x02,
+        "empty CD-ROM TEST UNIT READY must still report medium not present");
     ok &= expect(cdRom.loadImage(isoPath), "CD-ROM reload before ejection TEST UNIT READY failed");
     cdRom.acknowledgeMediaChange();
     cdRom.eject();

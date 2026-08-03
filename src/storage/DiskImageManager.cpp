@@ -35,12 +35,33 @@ DiskImageType typeFromKey(const QString& key)
     return DiskImageType::HardDisk;
 }
 
+bool isDiskCopyFloppy(const QFileInfo& file)
+{
+    if (file.size() < 84) return false;
+    QFile image(file.absoluteFilePath());
+    if (!image.open(QIODevice::ReadOnly)) return false;
+    const auto header = image.read(84);
+    if (header.size() != 84) return false;
+    const auto be32 = [&](qsizetype offset) {
+        return (static_cast<std::uint32_t>(static_cast<std::uint8_t>(header[offset])) << 24)
+            | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(header[offset + 1])) << 16)
+            | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(header[offset + 2])) << 8)
+            | static_cast<std::uint8_t>(header[offset + 3]);
+    };
+    const auto dataSize = be32(64);
+    const auto tagSize = be32(68);
+    const bool supportedFloppySize = dataSize == 400 * 1024U || dataSize == 800 * 1024U
+        || dataSize == 1440 * 1024U;
+    return supportedFloppySize && static_cast<quint64>(file.size()) == 84ULL + dataSize + tagSize;
+}
+
 DiskImageType inferType(const QFileInfo& file)
 {
     const auto suffix = file.suffix().toLower();
     if (suffix == QStringLiteral("iso") || suffix == QStringLiteral("cdr")) return DiskImageType::CdRom;
     if (file.size() == 400 * 1024 || file.size() == 800 * 1024 || file.size() == 1440 * 1024) return DiskImageType::Floppy;
-    if (suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image")) return DiskImageType::Floppy;
+    if (suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image") || isDiskCopyFloppy(file))
+        return DiskImageType::Floppy;
     QFile image(file.absoluteFilePath());
     if (image.open(QIODevice::ReadOnly) && image.seek(16LL * 2048 + 1)
         && image.read(5) == QByteArrayLiteral("CD001")) return DiskImageType::CdRom;
@@ -198,8 +219,13 @@ bool DiskImageManager::refresh()
         const QFileInfo file(iterator.next());
         if (file.fileName() == QStringLiteral("library.toml")) continue;
         const auto absolutePath = file.absoluteFilePath();
-        const auto found = std::find_if(m_images.cbegin(), m_images.cend(), [&](const auto& image) { return image.path == absolutePath; });
-        if (found == m_images.cend()) registerImage(absolutePath, inferType(file));
+        const auto found = std::find_if(m_images.begin(), m_images.end(), [&](const auto& image) { return image.path == absolutePath; });
+        if (found == m_images.end()) registerImage(absolutePath, inferType(file));
+        else if (found->type == DiskImageType::HardDisk && isDiskCopyFloppy(file)) {
+            // Migrate entries created before Disk Copy images with an .img suffix
+            // were recognized structurally.
+            found->type = DiskImageType::Floppy;
+        }
     }
     std::sort(m_images.begin(), m_images.end(), [&](const auto& left, const auto& right) {
         return directory.relativeFilePath(left.path).compare(directory.relativeFilePath(right.path), Qt::CaseInsensitive) < 0;

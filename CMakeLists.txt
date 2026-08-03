@@ -17,6 +17,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets)
 find_package(tomlplusplus REQUIRED CONFIG)
 find_package(Readline)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(CUTEMAC_LIBSLIRP QUIET slirp)
+endif()
 
 qt_standard_project_setup()
 
@@ -103,6 +107,8 @@ add_library(CuteMacCore
     src/devices/adb/AdbTransceiver.cpp
     src/devices/floppy/FloppyDiskImage.cpp
     src/devices/iwm/IwmController.cpp
+    src/devices/modem/HayesModem.cpp
+    src/devices/modem/NullModem.cpp
     src/devices/printer/ImageWriterII.cpp
     src/devices/nubus/NuBusBus.cpp
     src/devices/rtc/MacRtc.cpp
@@ -146,6 +152,7 @@ target_link_libraries(CuteMacCore
     PUBLIC
         Qt6::Core
         Qt6::Gui
+        Qt6::Network
         tomlplusplus::tomlplusplus
 )
 
@@ -154,6 +161,15 @@ if(UNIX AND NOT APPLE)
         PRIVATE
         m
     )
+endif()
+
+if(CUTEMAC_LIBSLIRP_FOUND)
+    target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_LIBSLIRP=1)
+    target_include_directories(CuteMacCore PRIVATE ${CUTEMAC_LIBSLIRP_INCLUDE_DIRS})
+    target_link_libraries(CuteMacCore PRIVATE ${CUTEMAC_LIBSLIRP_LIBRARIES})
+    target_link_directories(CuteMacCore PRIVATE ${CUTEMAC_LIBSLIRP_LIBRARY_DIRS})
+else()
+    target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_LIBSLIRP=0)
 endif()
 
 add_library(CuteMacWidgets
@@ -372,6 +388,13 @@ if(BUILD_TESTING)
         src/session/FramebufferRenderer.cpp
     )
     target_link_libraries(CuteMacFramebufferRendererTests PRIVATE CuteMacCore Qt6::Gui)
+
+    add_executable(CuteMacHostInputMapperTests
+        tests/host_input_mapper_tests.cpp
+        src/session/HostInputMapper.cpp
+    )
+    target_link_libraries(CuteMacHostInputMapperTests PRIVATE CuteMacCore Qt6::Gui)
+    add_test(NAME host-input-mapper COMMAND CuteMacHostInputMapperTests)
     add_test(NAME framebuffer-renderer COMMAND CuteMacFramebufferRendererTests)
 
     add_executable(CuteMacAdbTests tests/adb_tests.cpp)
@@ -397,4 +420,13 @@ if(BUILD_TESTING)
     add_executable(CuteMacImageWriterTests tests/imagewriter_tests.cpp)
     target_link_libraries(CuteMacImageWriterTests PRIVATE CuteMacCore Qt6::Gui)
     add_test(NAME imagewriter COMMAND CuteMacImageWriterTests)
+
+    add_executable(CuteMacModemTests tests/modem_tests.cpp)
+    target_link_libraries(CuteMacModemTests PRIVATE CuteMacCore Qt6::Network)
+    if(CUTEMAC_LIBSLIRP_FOUND)
+        target_compile_definitions(CuteMacModemTests PRIVATE CUTEMAC_HAS_LIBSLIRP=1)
+    else()
+        target_compile_definitions(CuteMacModemTests PRIVATE CUTEMAC_HAS_LIBSLIRP=0)
+    endif()
+    add_test(NAME modem COMMAND CuteMacModemTests)
 endif()

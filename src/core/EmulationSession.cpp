@@ -10,6 +10,8 @@
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
+#include "cutemac/devices/modem/HayesModem.h"
+#include "cutemac/devices/modem/NullModem.h"
 #include "cutemac/devices/printer/ImageWriterII.h"
 #include "cutemac/storage/PngPageSink.h"
 #include "cutemac/rom/RomCatalog.h"
@@ -59,11 +61,17 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
     }
     if (!result) return {};
     for (const auto& device : configuration.serialDevices) {
-        if (device.outputDirectory.isEmpty()) continue;
-        auto pngSink = std::make_shared<storage::PngPageSink>(device.outputDirectory);
-        auto printer = std::make_shared<devices::printer::ImageWriterII>(
-            [pngSink](const devices::printer::RasterPage& page) { (void)pngSink->write(page); });
-        result->attachSerialEndpoint(device.channel, std::move(printer));
+        if (device.type == config::SerialDeviceType::ImageWriterII) {
+            if (device.outputDirectory.isEmpty()) continue;
+            auto pngSink = std::make_shared<storage::PngPageSink>(device.outputDirectory);
+            auto printer = std::make_shared<devices::printer::ImageWriterII>(
+                [pngSink](const devices::printer::RasterPage& page) { (void)pngSink->write(page); });
+            result->attachSerialEndpoint(device.channel, std::move(printer));
+        } else if (device.type == config::SerialDeviceType::HayesModem) {
+            result->attachSerialEndpoint(device.channel, std::make_shared<devices::modem::HayesModem>(device));
+        } else if (device.type == config::SerialDeviceType::NullModem) {
+            result->attachSerialEndpoint(device.channel, std::make_shared<devices::modem::NullModem>(device));
+        }
     }
     return result;
 }
@@ -135,6 +143,12 @@ void EmulationSession::reset()
         m_machine->reset();
         m_powerRequest = GuestPowerRequest::None;
     }
+}
+
+bool EmulationSession::triggerProgrammersInterrupt()
+{
+    std::lock_guard lock(m_mutex);
+    return m_machine && m_romLoaded && m_machine->triggerProgrammersInterrupt();
 }
 
 int EmulationSession::runCycles(int cycles)

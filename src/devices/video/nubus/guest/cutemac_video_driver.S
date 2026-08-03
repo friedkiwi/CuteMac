@@ -79,7 +79,7 @@ set_mode_common:
         bsr.w   framebuffer_base
         move.l  %a2,8(%a3)             | csBaseAddr
         bsr.w   card_base
-        adda.l  #0x00080000,%a2
+        adda.l  #0x000e0000,%a2
         move.b  %d1,(%a2)
         moveq   #0,%d0
         bra.w   complete
@@ -98,7 +98,7 @@ switch_mode:
 
 gray_screen:
         bsr.w   card_base
-        adda.l  #0x00080006,%a2
+        adda.l  #0x000e0006,%a2
         clr.b   (%a2)
         moveq   #0,%d0
         bra.w   complete
@@ -118,7 +118,7 @@ set_entries:
         | Video Manager passes csCount as the zero-based last record number.
         | A value of zero therefore still describes one ColorSpec.
         bsr.w   card_base
-        adda.l  #0x00080002,%a2
+        adda.l  #0x000e0002,%a2
 set_entries_loop:
         cmpi.w  #-1,%d3
         bne.s   set_entries_sequential
@@ -132,7 +132,16 @@ set_entries_index_ready:
         tst.w   %d1
         beq.s   set_entries_next        | preserve logical white
         cmpi.w  #255,%d1
-        beq.s   set_entries_next        | preserve logical black
+        beq.s   set_entries_next        | preserve eight-bit logical black
+        cmp.w   %d2,%d1
+        bne.s   set_entries_program
+        cmpi.w  #15,%d2
+        beq.s   set_entries_next        | preserve four-bit logical black
+        cmpi.w  #3,%d2
+        beq.s   set_entries_next        | preserve two-bit logical black
+        cmpi.w  #1,%d2
+        beq.s   set_entries_next        | preserve one-bit logical black
+set_entries_program:
         move.b  %d1,(%a2)
         | System 6 supplies either a colour or grayscale table. Program its
         | RGB values verbatim: SetGray may be ordered after SetEntries.
@@ -190,7 +199,7 @@ enable_interrupts:
         st      16(%a0)
 interrupt_enable_hardware:
         bsr.w   card_base
-        adda.l  #0x00080001,%a2
+        adda.l  #0x000e0001,%a2
         clr.b   (%a2)                   | enable and acknowledge VBL
         moveq   #0,%d0
 interrupt_done:
@@ -201,7 +210,7 @@ interrupt_storage_error:
 
 disable_interrupts:
         bsr.w   card_base
-        adda.l  #0x00080001,%a2
+        adda.l  #0x000e0001,%a2
         move.b  #1,(%a2)
         movea.l 20(%a1),%a0
         tst.l   %a0
@@ -221,10 +230,10 @@ interrupt_disabled:
 
 slot_interrupt:
         bsr.s   card_base
-        adda.l  #0x00080001,%a2
+        adda.l  #0x000e0001,%a2
         clr.b   (%a2)                   | acknowledge while remaining enabled
         bsr.s   card_base
-        adda.l  #0x00090018,%a2
+        adda.l  #0x000e1018,%a2
         btst    #0,(%a2)                | host absolute pointer is valid
         beq.s   slot_cursor_task
         move.b  1(%a2),%d1
@@ -248,12 +257,10 @@ slot_cursor_task:
         rts
 
 card_base:
-        moveq   #0,%d0
-        move.b  40(%a1),%d0            | dCtlSlot
-        lsl.l   #8,%d0
-        lsl.l   #8,%d0
-        lsl.l   #4,%d0                 | 24-bit standard-slot window, $s00000
-        movea.l %d0,%a2
+        | Slot Manager supplies an address valid in the current addressing
+        | mode. Reconstructing $s00000 from dCtlSlot works in 24-bit mode but
+        | stops reaching the card after MODE32 switches to 32-bit addressing.
+        movea.l 42(%a1),%a2            | AuxDCE.dCtlDevBase
         rts
 
 framebuffer_base:
@@ -308,7 +315,7 @@ get_mode:
         bsr.w   framebuffer_base
         move.l  %a2,8(%a3)
         bsr.w   card_base
-        adda.l  #0x00080000,%a2
+        adda.l  #0x000e0000,%a2
         moveq   #0,%d1
         move.b  (%a2),%d1
         andi.w  #7,%d1
@@ -330,7 +337,7 @@ get_current_mode:
         clr.w   6(%a3)                 | csPage
         clr.l   12(%a3)                | csReserved
         bsr.w   card_base
-        adda.l  #0x00080000,%a2
+        adda.l  #0x000e0000,%a2
         moveq   #0,%d1
         move.b  (%a2),%d1
         andi.w  #7,%d1
@@ -354,7 +361,7 @@ get_entries:
         | As in SetEntries, csCount is zero-based and can be used directly
         | as DBRA's terminal counter.
         bsr.w   card_base
-        adda.l  #0x00080002,%a2
+        adda.l  #0x000e0002,%a2
 get_entries_loop:
         cmpi.w  #-1,%d3
         bne.s   get_entries_sequential
@@ -417,7 +424,7 @@ get_interrupt:
         tst.l   %a3
         beq.w   param_error
         bsr.w   card_base
-        adda.l  #0x00080001,%a2
+        adda.l  #0x000e0001,%a2
         move.b  (%a2),(%a3)
         moveq   #0,%d0
 
@@ -436,7 +443,7 @@ shutdown_callback:
         bhi.s   shutdown_done
         addq.b  #1,%d0                 | mailbox commands are 1 and 2
         movea.l service_base(%pc),%a0
-        adda.l  #0x00090010,%a0
+        adda.l  #0x000e1010,%a0
         move.b  %d0,(%a0)
 shutdown_done:
         movem.l (%sp)+,%d0-%d1/%a0-%a1

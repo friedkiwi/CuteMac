@@ -45,6 +45,7 @@ public:
     [[nodiscard]] bool writable() const;
     [[nodiscard]] bool doubleSided() const;
     [[nodiscard]] bool highDensity() const;
+    [[nodiscard]] bool mediaChanged() const;
     [[nodiscard]] Kind kind() const;
     [[nodiscard]] QString path() const;
     [[nodiscard]] QString formatName() const;
@@ -59,10 +60,13 @@ public:
     void setMotorOn(bool on);
     [[nodiscard]] bool motorOn() const;
     [[nodiscard]] bool trackZero() const;
+    void clearMediaChanged();
 
     [[nodiscard]] std::uint8_t nextNibble();
     [[nodiscard]] DiskByte nextDiskByte();
     [[nodiscard]] DiskByte peekDiskByte();
+    [[nodiscard]] bool writeDiskByte(std::uint8_t value, bool mark = false);
+    [[nodiscard]] bool flushWrites();
     void invalidateTrackCache();
     [[nodiscard]] DebugState debugState() const;
     [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
@@ -87,19 +91,30 @@ private:
     void buildMfmTrack(int physicalTrack, int side, QByteArray& bytes, QVector<bool>& marks) const;
     void appendSector(QByteArray& trackBytes, int physicalTrack, int side, int logicalSector) const;
     [[nodiscard]] QByteArray sectorPayload(int physicalTrack, int side, int logicalSector) const;
+    [[nodiscard]] bool processGcrWrites();
+    [[nodiscard]] bool processMfmWrites();
+    [[nodiscard]] bool commitSector(int logicalSector, const QByteArray& data, const QByteArray& tags = {});
+    [[nodiscard]] bool persistImage();
+    [[nodiscard]] int inferMfmSectorAtCursor() const;
 
     QString m_path;
     Kind m_kind = Kind::Empty;
     QByteArray m_data;
     QVector<QByteArray> m_tags;
+    QByteArray m_diskCopyHeader;
     bool m_writable = false;
     bool m_forceReadOnly = false;
     bool m_doubleSided = false;
     bool m_highDensity = false;
+    bool m_mediaChanged = false;
     bool m_motorOn = false;
     int m_currentTrack = 0;
     int m_currentSide = 0;
     TrackCache m_trackCache;
+    QByteArray m_writeBytes;
+    QVector<bool> m_writeMarks;
+    int m_writeMfmSector = -1;
+    bool m_writeFailed = false;
     bool m_traceEnabled = false;
     std::uint32_t m_traceShift = 0;
     QStringList m_traceEvents;

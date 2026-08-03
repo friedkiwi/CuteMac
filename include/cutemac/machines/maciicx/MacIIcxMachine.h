@@ -48,6 +48,7 @@ public:
     void ejectFloppyImage() override;
     void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     void reset() override;
+    [[nodiscard]] bool triggerProgrammersInterrupt() override;
     [[nodiscard]] int runCycles(int cycles) override;
     [[nodiscard]] int stepInstruction() override;
     [[nodiscard]] std::uint64_t cycleCount() const override;

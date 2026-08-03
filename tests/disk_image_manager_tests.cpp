@@ -90,6 +90,22 @@ int main()
         "large DSK files must not be misidentified as floppies by extension alone");
     require(DiskImageManager::detectType(floppyPath) == DiskImageType::Floppy,
         "raw floppy size must identify floppy media");
+    QByteArray diskCopyImg(84 + 1440 * 1024, '\0');
+    putBe32(diskCopyImg, 64, 1440 * 1024);
+    const auto diskCopyImgPath = temporary.filePath(QStringLiteral("installation-boot.img"));
+    writeImage(diskCopyImgPath, diskCopyImg);
+    require(DiskImageManager::detectType(diskCopyImgPath) == DiskImageType::Floppy,
+        "Disk Copy 4.2 floppies with an .img suffix must be recognized structurally");
+    const auto migrationLibrary = temporary.filePath(QStringLiteral("migration-library"));
+    require(QDir().mkpath(migrationLibrary), "migration library should be created");
+    DiskImageManager migrationManager(migrationLibrary);
+    QString legacyDiskCopyPath;
+    require(migrationManager.importImage(diskCopyImgPath, DiskImageType::HardDisk, &legacyDiskCopyPath),
+        "legacy catalog fixture should accept the old hard-disk classification");
+    require(migrationManager.refresh(), "legacy catalog refresh should succeed");
+    require(migrationManager.images(DiskImageType::Floppy).size() == 1
+            && migrationManager.images(DiskImageType::HardDisk).isEmpty(),
+        "refresh must migrate a structurally valid Disk Copy floppy out of the hard-disk catalog");
 
     const auto sourceIso = temporary.filePath(QStringLiteral("install.iso"));
     require(DiskImageManager::createBlankImage(sourceIso, 4096), "test CD image creation should succeed");

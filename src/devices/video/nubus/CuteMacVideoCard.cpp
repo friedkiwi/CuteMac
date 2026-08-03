@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <utility>
 
 namespace cutemac::devices::video::nubus {
 
@@ -10,20 +11,39 @@ namespace {
 
 constexpr std::uint32_t declarationRomBase = 0x00f00000;
 constexpr std::uint32_t standardSlotLocalMask = 0x000fffff;
-constexpr std::uint32_t modeRegister = 0x00080000;
-constexpr std::uint32_t interruptRegister = 0x00080001;
-constexpr std::uint32_t paletteAddressRegister = 0x00080002;
-constexpr std::uint32_t paletteRedRegister = 0x00080003;
-constexpr std::uint32_t paletteGreenRegister = 0x00080004;
-constexpr std::uint32_t paletteBlueRegister = 0x00080005;
-constexpr std::uint32_t grayScreenRegister = 0x00080006;
+constexpr std::uint32_t modeRegister = 0x000e0000;
+constexpr std::uint32_t interruptRegister = 0x000e0001;
+constexpr std::uint32_t paletteAddressRegister = 0x000e0002;
+constexpr std::uint32_t paletteRedRegister = 0x000e0003;
+constexpr std::uint32_t paletteGreenRegister = 0x000e0004;
+constexpr std::uint32_t paletteBlueRegister = 0x000e0005;
+constexpr std::uint32_t grayScreenRegister = 0x000e0006;
 constexpr std::array<std::uint8_t, 4> guestServicesSignature { 'C', 'T', 'M', 'C' };
 constexpr std::uint8_t guestServicesVersion = 2;
-constexpr std::uint8_t guestServicesCleanShutdown = 1U << 0;
 constexpr std::uint8_t guestServicesAbsolutePointer = 1U << 1;
 constexpr int declarationRomBytes = 4096;
 constexpr std::uint64_t cyclesPerVbl = 260608;
-constexpr std::uint64_t cleanShutdownGraceCycles = cyclesPerVbl * 90;
+
+std::pair<std::uint8_t, std::uint8_t> indexedGrayPatterns(int depth)
+{
+    switch (depth) {
+    case 1: return { 0xaa, 0x55 };
+    case 2: return { 0xcc, 0x33 };
+    case 4: return { 0xf0, 0x0f };
+    case 8: return { 0xff, 0x00 };
+    default: return { 0x88, 0x88 };
+    }
+}
+
+int indexedEndpoint(int depth)
+{
+    switch (depth) {
+    case 1: return 1;
+    case 2: return 3;
+    case 4: return 15;
+    default: return 255;
+    }
+}
 
 #include "cutemac_video_driver.generated.h"
 
@@ -92,6 +112,9 @@ void CuteMacVideoCard::reset()
 {
     std::fill(m_vram.begin(), m_vram.end(), 0);
     m_palette[0] = 0xffffffffU;
+    m_palette[1] = 0xff000000U;
+    m_palette[3] = 0xff000000U;
+    m_palette[15] = 0xff000000U;
     m_palette[255] = 0xff000000U;
     m_depth = 1;
     m_vblEnabled = false;
@@ -146,7 +169,7 @@ std::uint8_t CuteMacVideoCard::read8(std::uint32_t offset)
     }
     if (offset == guestServicesBase + 4) return guestServicesVersion;
     if (offset == guestServicesBase + 5) {
-        return guestServicesCleanShutdown | (m_absolutePointer ? guestServicesAbsolutePointer : 0);
+        return m_absolutePointer ? guestServicesAbsolutePointer : 0;
     }
     if (offset == guestServicesCommand) return 0;
     if (offset == guestPointerBase) return m_hostPointerValid ? 1 : 0;
@@ -177,7 +200,7 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
         m_paletteLatch[1] = value;
     } else if (offset == paletteBlueRegister) {
         m_paletteLatch[2] = value;
-        if (m_paletteAddress != 0 && m_paletteAddress != 255) {
+        if (m_paletteAddress != 0 && m_paletteAddress != indexedEndpoint(m_depth)) {
             m_palette[m_paletteAddress] = 0xff000000U | (static_cast<std::uint32_t>(m_paletteLatch[0]) << 16)
                 | (static_cast<std::uint32_t>(m_paletteLatch[1]) << 8) | m_paletteLatch[2];
         }
@@ -185,24 +208,33 @@ void CuteMacVideoCard::write8(std::uint32_t offset, std::uint8_t value)
     } else if (offset == grayScreenRegister) {
         const auto stride = strideBytes();
         const auto required = std::min<qsizetype>(m_vram.size(), static_cast<qsizetype>(stride) * m_height);
-        if (m_depth == 1) {
+        if (m_depth <= 8) {
+            const auto [evenPattern, oddPattern] = indexedGrayPatterns(m_depth);
             for (int y = 0; y < m_height; ++y) {
-                const auto pattern = static_cast<char>((y & 1) == 0 ? 0xaa : 0x55);
                 const auto begin = static_cast<qsizetype>(y) * stride;
-                std::fill(m_vram.begin() + begin, m_vram.begin() + std::min(required, begin + stride), pattern);
+                const auto end = std::min(required, begin + stride);
+                if (m_depth == 8) {
+                    for (auto offset = begin; offset < end; ++offset) {
+                        const auto x = offset - begin;
+                        m_vram[offset] = static_cast<char>(((x + y) & 1) == 0 ? evenPattern : oddPattern);
+                    }
+                } else {
+                    const auto pattern = static_cast<char>((y & 1) == 0 ? evenPattern : oddPattern);
+                    std::fill(m_vram.begin() + begin, m_vram.begin() + end, pattern);
+                }
             }
         } else {
             std::fill(m_vram.begin(), m_vram.begin() + required, static_cast<char>(0x88));
         }
     } else if (offset == guestServicesCommand) {
         if (value == 1) {
-            // The Shutdown Manager callback runs before System 6 draws its
-            // final safe-to-power-off screen. Leave enough emulated time for
-            // the normal shutdown path to finish before closing the host.
-            m_deferredPowerRequest = core::GuestPowerRequest::PowerOff;
-            m_powerRequestDelayCycles = cleanShutdownGraceCycles;
-        }
-        else if (value == 2) m_powerRequest = core::GuestPowerRequest::Restart;
+            // sdOnPowerOff reaches us while the guest's safe-to-turn-off
+            // screen is still live. Do not stop emulation here: Mac OS keeps
+            // servicing input so the user can click that screen's Restart
+            // button, which arrives as the separate restart command below.
+            m_deferredPowerRequest = core::GuestPowerRequest::None;
+            m_powerRequestDelayCycles = 0;
+        } else if (value == 2) m_powerRequest = core::GuestPowerRequest::Restart;
     } else if (offset < static_cast<std::uint32_t>(m_vram.size())) m_vram[static_cast<qsizetype>(offset)] = static_cast<char>(value);
 }
 
@@ -273,9 +305,8 @@ VideoFrame CuteMacVideoCard::videoFrame() const
     if (required > m_vram.size()) return {};
     if (m_depth <= 8) {
         QVector<std::uint16_t> mapping(1 << m_depth);
-        const auto maximum = mapping.size() - 1;
         for (int value = 0; value < mapping.size(); ++value) {
-            mapping[value] = static_cast<std::uint16_t>(value * 255 / maximum);
+            mapping[value] = static_cast<std::uint16_t>(value);
         }
         return { m_width, m_height, stride, PixelStorage::Indexed, m_depth, ByteOrder::BigEndian,
             BitOrder::MostSignificantFirst, m_vram.left(required), m_palette, mapping, {} };
@@ -300,6 +331,11 @@ void CuteMacVideoCard::initializePalette()
         m_palette[index] = 0xff000000U | (static_cast<std::uint32_t>(level) << 16)
             | (static_cast<std::uint32_t>(level) << 8) | level;
     }
+    m_palette[0] = 0xffffffffU;
+    m_palette[1] = 0xff000000U;
+    m_palette[3] = 0xff000000U;
+    m_palette[15] = 0xff000000U;
+    m_palette[255] = 0xff000000U;
 }
 
 QByteArray CuteMacVideoCard::buildDeclarationRom(int width, int height, int vramBytes, int maximumDepth)

@@ -109,6 +109,8 @@ void Z8530Scc::writeData(Channel channel, std::uint8_t value)
 
 void Z8530Scc::tick(int cycles)
 {
+    m_busA.poll();
+    m_busB.poll();
     for (auto* channel : {&m_channelA, &m_channelB}) {
         if (channel->transmitCycles > 0) {
             channel->transmitCycles = std::max(0, channel->transmitCycles - cycles);

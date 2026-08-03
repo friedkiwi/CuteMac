@@ -772,12 +772,19 @@ unsigned int m68k_get_pmmu_crp_limit(void) { return m68ki_cpu.mmu_crp_limit; }
 unsigned int m68k_get_pmmu_crp_address(void) { return m68ki_cpu.mmu_crp_aptr; }
 unsigned int m68k_get_pmmu_srp_limit(void) { return m68ki_cpu.mmu_srp_limit; }
 unsigned int m68k_get_pmmu_srp_address(void) { return m68ki_cpu.mmu_srp_aptr; }
+unsigned int m68k_get_pmmu_kind(void) { return (unsigned int)m68ki_cpu.mmu_kind; }
+unsigned int m68k_get_pmmu_mmusr(void) { return m68ki_cpu.mmu_sr; }
+unsigned int m68k_get_pmmu_fault_address(void) { return m68ki_cpu.mmu_fault_address; }
 
 unsigned int m68k_translate_address(unsigned int address)
 {
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-		return pmmu_translate_addr(address);
+	{
+		const uint fc = (m68ki_get_sr() & 0x2000)
+			? FUNCTION_CODE_SUPERVISOR_PROGRAM : FUNCTION_CODE_USER_PROGRAM;
+		return pmmu_debug_translate_addr(address, fc);
+	}
 #endif
 	return ADDRESS_68K(address);
 }
@@ -874,6 +881,10 @@ void m68k_set_instr_hook_callback(void  (*callback)(unsigned int pc))
 /* Set the CPU type. */
 void m68k_set_cpu_type(unsigned int cpu_type)
 {
+	HAS_PMMU = 0;
+	PMMU_ENABLED = 0;
+	m68ki_cpu.mmu_kind = M68K_MMU_KIND_NONE;
+	pmmu_atc_flush();
 	switch(cpu_type)
 	{
 		case M68K_CPU_TYPE_68000:
@@ -965,6 +976,7 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 0;
 			CYC_RESET        = 518;
 			HAS_PMMU	       = 1;
+			m68ki_cpu.mmu_kind = M68K_MMU_KIND_68030;
 			return;
 		case M68K_CPU_TYPE_68EC030:
 			CPU_TYPE         = CPU_TYPE_EC030;
@@ -999,6 +1011,7 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			CYC_SHIFT        = 0;
 			CYC_RESET        = 518;
 			HAS_PMMU	 = 1;
+			m68ki_cpu.mmu_kind = M68K_MMU_KIND_68040;
 			return;
 		case M68K_CPU_TYPE_68EC040: // Just a 68040 without pmmu apparently...
 			CPU_TYPE         = CPU_TYPE_EC040;
@@ -1032,8 +1045,23 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 			m68ki_cpu.cyc_shift        = 0;
 			m68ki_cpu.cyc_reset        = 518;
 			HAS_PMMU	       = 1;
+			m68ki_cpu.mmu_kind = M68K_MMU_KIND_68040;
 			return;
 	}
+}
+
+void m68k_set_external_pmmu(unsigned int enabled)
+{
+	/* The supported classic-Mac configuration is a full 68020 with an
+	 * external MC68851 on coprocessor ID zero. EC parts and integrated-MMU
+	 * processors retain the capabilities selected by their CPU model. */
+	if (CPU_TYPE != CPU_TYPE_020)
+		return;
+	HAS_PMMU = enabled ? 1 : 0;
+	m68ki_cpu.mmu_kind = enabled ? M68K_MMU_KIND_68851 : M68K_MMU_KIND_NONE;
+	if (!enabled)
+		PMMU_ENABLED = 0;
+	pmmu_atc_flush();
 }
 
 /* Execute some instructions until we use up num_cycles clock cycles */
@@ -1197,6 +1225,21 @@ void m68k_pulse_bus_error(void)
 	m68ki_exception_bus_error();
 }
 
+void m68k_report_physical_bus_error(unsigned int address, unsigned int is_write, unsigned int size)
+{
+	if (m68ki_cpu.mmu_tablewalk)
+	{
+		m68ki_cpu.mmu_tmp_sr |= M68K_MMU_SR_BUS_ERROR | M68K_MMU_SR_INVALID;
+		return;
+	}
+	m68ki_cpu.mmu_fault_address = address;
+	m68ki_cpu.mmu_fault_fc = (uint8)(FLAG_S | FUNCTION_CODE_USER_DATA);
+	m68ki_cpu.mmu_fault_rw = is_write ? 0 : 1;
+	m68ki_cpu.mmu_fault_size = (uint8)size;
+	m68ki_cpu.mmu_fault_is_mmu = 0;
+	m68ki_exception_bus_error();
+}
+
 /* Pulse the RESET line on the CPU */
 void m68k_pulse_reset(void)
 {
@@ -1204,6 +1247,14 @@ void m68k_pulse_reset(void)
 	m68ki_cpu.pmmu_enabled = 0;
 	m68ki_cpu.mmu_tt0 = 0;
 	m68ki_cpu.mmu_tt1 = 0;
+	m68ki_cpu.mmu_sr = 0;
+	m68ki_cpu.mmu_tmp_sr = 0;
+	m68ki_cpu.mmu_fault_address = 0;
+	m68ki_cpu.mmu_fault_fc = 0;
+	m68ki_cpu.mmu_fault_rw = 0;
+	m68ki_cpu.mmu_fault_size = 0;
+	m68ki_cpu.mmu_fault_is_mmu = 0;
+	m68ki_cpu.mmu_tablewalk = 0;
 	pmmu_atc_flush();
 	m68k_pmmu_atc_reset_statistics();
 

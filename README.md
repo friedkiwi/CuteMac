@@ -21,7 +21,7 @@ Ubuntu/WSL2 prerequisites:
 
 ```sh
 sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev qt6-multimedia-dev
-sudo apt-get install libreadline-dev libtomlplusplus-dev
+sudo apt-get install libreadline-dev libtomlplusplus-dev libslirp-dev
 ```
 
 The build also requires a Retro68 toolchain for the project-owned CuteMac Video declaration ROM. Put `m68k-apple-macos-as` and `m68k-apple-macos-objcopy` on `PATH`, install Retro68 at `/opt/Retro68/toolchain/bin`, or pass `-DCUTEMAC_RETRO68_TOOLCHAIN_BIN=/path/to/toolchain/bin` when configuring.
@@ -57,6 +57,42 @@ Runtime speed can be changed live from the session's Machine menu and persisted 
 ```toml
 [runtime]
 speed = "realtime" # or "unlimited"
+```
+
+Serial ports can be configured from the profile dialog. The Hayes modem supports phonebook dialing, optional direct `host:port` TCP dialing, telnet negotiation filtering for phonebook TCP targets, and SLIP/PPP networking through libslirp when CuteMac is built with `libslirp-dev`. Phone number `1000` maps to the SLIP/libslirp backend by default, while `1001` maps to PPP/libslirp. Guest-side SLIP setup should use the configured guest IP as the Macintosh IP address, the configured host IP as router/gateway and DNS server, subnet mask `255.255.255.0`, and MTU `1006` unless changed in the profile. PPP negotiates the guest address and DNS through IPCP, and accepts blank authentication or any username/password:
+
+```toml
+[[serial.devices]]
+channel = 0 # SCC A, modem port
+type = "hayes_modem"
+direct_tcp_dialing = false
+
+[serial.devices.slip]
+enabled = true
+local_ip = "172.16.0.1"
+remote_ip = "172.16.0.2"
+mtu = 1006
+
+[[serial.devices.phonebook]]
+number = "1000"
+target = "slip:libslirp"
+telnet = false
+
+[[serial.devices.phonebook]]
+number = "1001"
+target = "ppp:libslirp"
+telnet = false
+```
+
+For debugger consoles, terminal tools, or null-modem workflows, configure a raw terminal/null-modem attachment. Listener mode exposes the emulated serial port on a TCP port; dial mode connects it to an existing TCP service. This endpoint does not parse modem AT commands:
+
+```toml
+[[serial.devices]]
+channel = 0
+type = "null_modem"
+tcp_mode = "listen" # or "dial"
+tcp_host = "127.0.0.1"
+tcp_port = 2323
 ```
 
 Mac Plus profiles can configure a 256-byte NVRAM image. RTC reads expose the current host-local date/time in the classic Macintosh epoch; guest time writes are intentionally discarded, while PRAM changes persist to this image:

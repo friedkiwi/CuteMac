@@ -43,7 +43,7 @@ public:
     QWidget* serialTab = nullptr;
     std::array<QComboBox*, 2> serialDevice {};
     std::array<QPushButton*, 2> serialConfigure {};
-    std::array<QString, 2> serialOutputDirectory;
+    std::array<config::SerialDeviceConfiguration, 2> serialConfiguration;
     QWidget* iwmTab = nullptr;
     QLineEdit* floppy = nullptr;
     QCheckBox* floppyReadOnly = nullptr;
@@ -76,6 +76,34 @@ QString nubusCardName(config::NuBusDeviceType type)
         return QStringLiteral("Apple Macintosh II Video Card");
     }
     return QStringLiteral("Unknown card");
+}
+
+QString nubusValidationMessage(const config::NuBusDeviceConfiguration& device)
+{
+    if (config::isValidNuBusDeviceConfiguration(device)) return {};
+    if (config::isCuteMacVideoDevice(device.type)) {
+        const auto bytes = config::framebufferStrideBytes(device.width, device.depth) * device.height;
+        return QStringLiteral("CuteMac Video %1x%2 at %3-bit needs %4 bytes, but the 24-bit NuBus framebuffer window is limited to %5 bytes before MMIO.")
+            .arg(device.width)
+            .arg(device.height)
+            .arg(device.depth)
+            .arg(bytes)
+            .arg(config::cuteMacVideoFramebufferLimitBytes());
+    }
+    return QStringLiteral("Invalid NuBus device configuration.");
+}
+
+QString serialDeviceName(config::SerialDeviceType type)
+{
+    switch (type) {
+    case config::SerialDeviceType::NullModem:
+        return QStringLiteral("Terminal/null modem");
+    case config::SerialDeviceType::HayesModem:
+        return QStringLiteral("Hayes modem");
+    case config::SerialDeviceType::ImageWriterII:
+    default:
+        return QStringLiteral("ImageWriter II");
+    }
 }
 
 bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
@@ -127,7 +155,23 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     outer->addWidget(buttons);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        auto candidate = device;
+        candidate.slot = slot->currentData().toInt();
+        if (candidate.type == config::NuBusDeviceType::CuteMacVideo
+            || candidate.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
+            candidate.width = width->value();
+            candidate.height = height->value();
+            candidate.depth = depth->currentData().toInt();
+            candidate.vramMiB = vram->value();
+        }
+        const auto validation = nubusValidationMessage(candidate);
+        if (!validation.isEmpty()) {
+            QMessageBox::warning(&dialog, dialog.windowTitle(), validation);
+            return;
+        }
+        dialog.accept();
+    });
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return false;
 
@@ -178,6 +222,186 @@ bool editImageWriterII(QString& outputDirectory, QWidget* parent)
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return false;
     outputDirectory = output->text().trimmed();
+    return true;
+}
+
+bool editHayesModem(config::SerialDeviceConfiguration& device, QWidget* parent)
+{
+    if (device.phonebook.isEmpty()) device.phonebook = config::defaultSerialModemPhonebook();
+
+    QDialog dialog(parent);
+    dialog.setWindowTitle(QStringLiteral("Hayes Modem Configuration"));
+    dialog.resize(720, 520);
+    auto* outer = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    outer->addLayout(form);
+
+    auto* directTcp = new QCheckBox;
+    directTcp->setChecked(device.directTcpDialing);
+    form->addRow(QStringLiteral("Allow direct TCP dialing"), directTcp);
+
+    auto* slipEnabled = new QCheckBox;
+    slipEnabled->setChecked(device.slip.enabled);
+    form->addRow(QStringLiteral("Enable SLIP backend"), slipEnabled);
+
+    auto* localIp = new QLineEdit(device.slip.localIp);
+    auto* remoteIp = new QLineEdit(device.slip.remoteIp);
+    auto* mtu = new QSpinBox;
+    mtu->setRange(296, 1006);
+    mtu->setValue(device.slip.mtu);
+    form->addRow(QStringLiteral("SLIP host IP"), localIp);
+    form->addRow(QStringLiteral("SLIP guest IP"), remoteIp);
+    form->addRow(QStringLiteral("SLIP MTU"), mtu);
+
+    auto* note = new QLabel(QStringLiteral(
+        "Default phonebook entry: dial 1000 to connect to the SLIP/libslirp backend.\n\n"
+        "PPP is also available by default as phone number 1001 and can automatically negotiate the guest IP settings.\n\n"
+        "Guest setup: install/configure MacTCP or Open Transport for SLIP on this serial port. "
+        "Use the SLIP guest IP shown above as the Macintosh IP address, the SLIP host IP as router/gateway and DNS server, "
+        "subnet mask 255.255.255.0, and MTU 1006 unless changed here. For PPP, choose PPP on this serial port and leave authentication blank or use any username/password."));
+    note->setWordWrap(true);
+    outer->addWidget(note);
+
+    auto* phonebook = new QTableWidget(0, 3);
+    phonebook->setHorizontalHeaderLabels({ QStringLiteral("Phone number"), QStringLiteral("Target"), QStringLiteral("Telnet") });
+    phonebook->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    phonebook->setSelectionBehavior(QAbstractItemView::SelectRows);
+    phonebook->setSelectionMode(QAbstractItemView::SingleSelection);
+    outer->addWidget(new QLabel(QStringLiteral("Phonebook targets use slip:libslirp, ppp:libslirp, or tcp:host:port.")));
+    outer->addWidget(phonebook, 1);
+
+    auto addEntry = [phonebook](const config::SerialPhonebookEntry& entry) {
+        const int row = phonebook->rowCount();
+        phonebook->insertRow(row);
+        phonebook->setItem(row, 0, new QTableWidgetItem(entry.number));
+        phonebook->setItem(row, 1, new QTableWidgetItem(entry.target));
+        auto* telnet = new QCheckBox;
+        telnet->setChecked(entry.telnet);
+        phonebook->setCellWidget(row, 2, telnet);
+    };
+    for (const auto& entry : device.phonebook) addEntry(entry);
+
+    auto* phoneButtons = new QHBoxLayout;
+    auto* add = new QPushButton(QStringLiteral("Add"));
+    auto* addSlipDefault = new QPushButton(QStringLiteral("Add 1000 → SLIP"));
+    auto* addPppDefault = new QPushButton(QStringLiteral("Add 1001 → PPP"));
+    auto* remove = new QPushButton(QStringLiteral("Remove"));
+    phoneButtons->addWidget(add);
+    phoneButtons->addWidget(addSlipDefault);
+    phoneButtons->addWidget(addPppDefault);
+    phoneButtons->addWidget(remove);
+    phoneButtons->addStretch();
+    outer->addLayout(phoneButtons);
+
+    QObject::connect(add, &QPushButton::clicked, &dialog, [&]() {
+        addEntry({ QStringLiteral("5551212"), QStringLiteral("tcp:example.org:23"), true });
+    });
+    QObject::connect(addSlipDefault, &QPushButton::clicked, &dialog, [&]() {
+        addEntry({ QStringLiteral("1000"), QStringLiteral("slip:libslirp"), false });
+    });
+    QObject::connect(addPppDefault, &QPushButton::clicked, &dialog, [&]() {
+        addEntry({ QStringLiteral("1001"), QStringLiteral("ppp:libslirp"), false });
+    });
+    QObject::connect(remove, &QPushButton::clicked, &dialog, [&]() {
+        if (phonebook->currentRow() >= 0) phonebook->removeRow(phonebook->currentRow());
+    });
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    outer->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        config::SerialDeviceConfiguration candidate = device;
+        candidate.type = config::SerialDeviceType::HayesModem;
+        candidate.outputDirectory.clear();
+        candidate.directTcpDialing = directTcp->isChecked();
+        candidate.slip.enabled = slipEnabled->isChecked();
+        candidate.slip.localIp = localIp->text().trimmed();
+        candidate.slip.remoteIp = remoteIp->text().trimmed();
+        candidate.slip.mtu = mtu->value();
+        candidate.phonebook.clear();
+        for (int row = 0; row < phonebook->rowCount(); ++row) {
+            candidate.phonebook.append({
+                phonebook->item(row, 0) ? phonebook->item(row, 0)->text().trimmed() : QString(),
+                phonebook->item(row, 1) ? phonebook->item(row, 1)->text().trimmed() : QString(),
+                qobject_cast<QCheckBox*>(phonebook->cellWidget(row, 2))->isChecked(),
+            });
+        }
+        if (!config::isValidSerialDeviceConfiguration(candidate)) {
+            QMessageBox::warning(&dialog, dialog.windowTitle(),
+                QStringLiteral("Check the modem configuration. Phone numbers must be unique, targets must use slip:, ppp:, or tcp:, and SLIP/PPP targets require the network backend to be enabled."));
+            return;
+        }
+        dialog.accept();
+    });
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return false;
+
+    device.type = config::SerialDeviceType::HayesModem;
+    device.outputDirectory.clear();
+    device.directTcpDialing = directTcp->isChecked();
+    device.slip.enabled = slipEnabled->isChecked();
+    device.slip.localIp = localIp->text().trimmed();
+    device.slip.remoteIp = remoteIp->text().trimmed();
+    device.slip.mtu = mtu->value();
+    device.phonebook.clear();
+    for (int row = 0; row < phonebook->rowCount(); ++row) {
+        device.phonebook.append({
+            phonebook->item(row, 0) ? phonebook->item(row, 0)->text().trimmed() : QString(),
+            phonebook->item(row, 1) ? phonebook->item(row, 1)->text().trimmed() : QString(),
+            qobject_cast<QCheckBox*>(phonebook->cellWidget(row, 2))->isChecked(),
+        });
+    }
+    return true;
+}
+
+bool editNullModem(config::SerialDeviceConfiguration& device, QWidget* parent)
+{
+    QDialog dialog(parent);
+    dialog.setWindowTitle(QStringLiteral("Terminal / Null Modem Configuration"));
+    auto* outer = new QVBoxLayout(&dialog);
+    auto* form = new QFormLayout;
+    outer->addLayout(form);
+
+    auto* mode = new QComboBox;
+    mode->addItem(QStringLiteral("Listen for TCP connection"), static_cast<int>(config::SerialTcpMode::Listen));
+    mode->addItem(QStringLiteral("Dial out to TCP host"), static_cast<int>(config::SerialTcpMode::Dial));
+    mode->setCurrentIndex(qMax(0, mode->findData(static_cast<int>(device.tcpMode))));
+    form->addRow(QStringLiteral("Mode"), mode);
+
+    auto* host = new QLineEdit(device.tcpHost);
+    auto* port = new QSpinBox;
+    port->setRange(1, 65535);
+    port->setValue(device.tcpPort > 0 ? device.tcpPort : 2323);
+    form->addRow(QStringLiteral("Host / bind address"), host);
+    form->addRow(QStringLiteral("TCP port"), port);
+
+    auto* note = new QLabel(QStringLiteral(
+        "This is a raw byte-stream attachment. Use listener mode to expose the Mac serial port on a local TCP port, "
+        "or dial-out mode to connect the Mac serial port to an existing TCP service. It does not parse AT commands."));
+    note->setWordWrap(true);
+    outer->addWidget(note);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    outer->addWidget(buttons);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        config::SerialDeviceConfiguration candidate = device;
+        candidate.type = config::SerialDeviceType::NullModem;
+        candidate.tcpMode = static_cast<config::SerialTcpMode>(mode->currentData().toInt());
+        candidate.tcpHost = host->text().trimmed();
+        candidate.tcpPort = port->value();
+        if (!config::isValidSerialDeviceConfiguration(candidate)) {
+            QMessageBox::warning(&dialog, dialog.windowTitle(), QStringLiteral("Enter a valid TCP host/address and port."));
+            return;
+        }
+        dialog.accept();
+    });
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return false;
+
+    device.type = config::SerialDeviceType::NullModem;
+    device.outputDirectory.clear();
+    device.tcpMode = static_cast<config::SerialTcpMode>(mode->currentData().toInt());
+    device.tcpHost = host->text().trimmed();
+    device.tcpPort = port->value();
     return true;
 }
 
@@ -234,6 +458,8 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         auto* device = new QComboBox;
         device->addItem(QStringLiteral("None"), -1);
         device->addItem(QStringLiteral("ImageWriter II"), static_cast<int>(config::SerialDeviceType::ImageWriterII));
+        device->addItem(QStringLiteral("Hayes modem"), static_cast<int>(config::SerialDeviceType::HayesModem));
+        device->addItem(QStringLiteral("Terminal / null modem"), static_cast<int>(config::SerialDeviceType::NullModem));
         auto* configure = new QPushButton(QStringLiteral("Configure..."));
         auto* row = new QHBoxLayout;
         row->addWidget(device, 1);
@@ -241,19 +467,37 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         serialForm->addRow(portNames[channel], row);
         m_impl->serialDevice[channel] = device;
         m_impl->serialConfigure[channel] = configure;
+        m_impl->serialConfiguration[channel].channel = channel;
+        m_impl->serialConfiguration[channel].type = config::SerialDeviceType::ImageWriterII;
         const auto configured = std::find_if(m_impl->original.serialDevices.cbegin(), m_impl->original.serialDevices.cend(),
             [channel](const auto& entry) { return entry.channel == channel; });
         if (configured != m_impl->original.serialDevices.cend()) {
             device->setCurrentIndex(device->findData(static_cast<int>(configured->type)));
-            m_impl->serialOutputDirectory[channel] = configured->outputDirectory;
+            m_impl->serialConfiguration[channel] = *configured;
         }
         configure->setEnabled(device->currentData().toInt() >= 0);
         connect(device, &QComboBox::currentIndexChanged, configure,
-            [device, configure]() { configure->setEnabled(device->currentData().toInt() >= 0); });
+            [this, channel, device, configure]() {
+                configure->setEnabled(device->currentData().toInt() >= 0);
+                if (device->currentData().toInt() >= 0) {
+                    auto& serial = m_impl->serialConfiguration[channel];
+                    serial.channel = channel;
+                    serial.type = static_cast<config::SerialDeviceType>(device->currentData().toInt());
+                    if (serial.type == config::SerialDeviceType::HayesModem && serial.phonebook.isEmpty()) {
+                        serial.phonebook = config::defaultSerialModemPhonebook();
+                    }
+                }
+            });
         connect(configure, &QPushButton::clicked, this, [this, channel]() {
-            if (m_impl->serialDevice[channel]->currentData().toInt()
-                == static_cast<int>(config::SerialDeviceType::ImageWriterII)) {
-                (void)editImageWriterII(m_impl->serialOutputDirectory[channel], this);
+            auto& serial = m_impl->serialConfiguration[channel];
+            serial.channel = channel;
+            serial.type = static_cast<config::SerialDeviceType>(m_impl->serialDevice[channel]->currentData().toInt());
+            if (serial.type == config::SerialDeviceType::ImageWriterII) {
+                (void)editImageWriterII(serial.outputDirectory, this);
+            } else if (serial.type == config::SerialDeviceType::HayesModem) {
+                (void)editHayesModem(serial, this);
+            } else if (serial.type == config::SerialDeviceType::NullModem) {
+                (void)editNullModem(serial, this);
             }
         });
     }
@@ -515,11 +759,15 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             return;
         }
         for (int channel = 0; channel < 2; ++channel) {
-            if (m_impl->serialDevice[channel]->currentData().toInt() >= 0
-                && m_impl->serialOutputDirectory[channel].trimmed().isEmpty()) {
+            if (m_impl->serialDevice[channel]->currentData().toInt() < 0) continue;
+            auto serial = m_impl->serialConfiguration[channel];
+            serial.channel = channel;
+            serial.type = static_cast<config::SerialDeviceType>(m_impl->serialDevice[channel]->currentData().toInt());
+            if (!config::isValidSerialDeviceConfiguration(serial)) {
                 QMessageBox::warning(this, windowTitle(),
-                    QStringLiteral("Configure the device attached to the %1 port.")
-                        .arg(channel == 0 ? QStringLiteral("modem") : QStringLiteral("printer")));
+                    QStringLiteral("Configure the %1 attached to the %2 port.")
+                        .arg(serialDeviceName(serial.type),
+                            channel == 0 ? QStringLiteral("modem") : QStringLiteral("printer")));
                 return;
             }
         }
@@ -537,6 +785,11 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             const int slot = device.slot;
             if (occupiedSlots.contains(slot)) {
                 QMessageBox::warning(this, windowTitle(), QStringLiteral("Each NuBus slot can only be used once."));
+                return;
+            }
+            const auto validation = nubusValidationMessage(device);
+            if (!validation.isEmpty()) {
+                QMessageBox::warning(this, windowTitle(), validation);
                 return;
             }
             occupiedSlots.insert(slot);
@@ -572,9 +825,13 @@ config::Configuration ConfigurationDialog::configuration() const
     result.serialDevices.clear();
     for (int channel = 0; channel < 2; ++channel) {
         if (m_impl->serialDevice[channel]->currentData().toInt() >= 0) {
-            result.serialDevices.append({ channel,
-                static_cast<config::SerialDeviceType>(m_impl->serialDevice[channel]->currentData().toInt()),
-                m_impl->serialOutputDirectory[channel].trimmed() });
+            auto serial = m_impl->serialConfiguration[channel];
+            serial.channel = channel;
+            serial.type = static_cast<config::SerialDeviceType>(m_impl->serialDevice[channel]->currentData().toInt());
+            if (serial.type == config::SerialDeviceType::HayesModem && serial.phonebook.isEmpty()) {
+                serial.phonebook = config::defaultSerialModemPhonebook();
+            }
+            result.serialDevices.append(serial);
         }
     }
     result.iwmDevices = { { m_impl->floppy->text().trimmed(), m_impl->floppyReadOnly->isChecked() } };

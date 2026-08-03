@@ -53,6 +53,11 @@ void SessionControlServer::processLine(QTcpSocket& socket, const QByteArray& lin
         m_runner.setPaused(false);
     } else if (command == QStringLiteral("reset")) {
         m_session.reset();
+    } else if (command == QStringLiteral("interrupt")) {
+        if (!m_session.triggerProgrammersInterrupt()) {
+            socket.write(QJsonDocument(QJsonObject { { QStringLiteral("ok"), false }, { QStringLiteral("error"), QStringLiteral("programmer interrupt unsupported") } }).toJson(QJsonDocument::Compact) + '\n');
+            return;
+        }
     } else if (command == QStringLiteral("set_speed")) {
         const auto speed = document.object().value(QStringLiteral("speed")).toString();
         if (speed != QStringLiteral("realtime") && speed != QStringLiteral("unlimited")) {

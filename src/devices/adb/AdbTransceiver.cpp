@@ -399,7 +399,12 @@ void AdbTransceiver::requestAutoPoll()
         m_errorReportPending = false;
         return;
     }
-    m_autoPollRequested = false;
+    // A keyboard TALK carries at most two transitions. If more host edges
+    // accumulated while the PIC was busy, keep service pending so the next
+    // idle S3 interval starts another TALK instead of stranding the tail of
+    // a modifier combination in m_keyEvents.
+    m_autoPollRequested = !m_keyEvents.empty() || !m_mouseButtonEvents.empty()
+        || m_mouseDx != 0 || m_mouseDy != 0;
     m_autoWakePending = true;
     m_serviceRequest = true;
     m_phase = Phase::AutoPoll;

@@ -2,6 +2,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 
 #include <algorithm>
 #include <array>
@@ -40,6 +41,76 @@ constexpr std::array<std::uint8_t, 64> gcrEncodeTable {
         | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 1])) << 16)
         | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset + 2])) << 8)
         | static_cast<std::uint8_t>(bytes[offset + 3]);
+}
+
+void writeBe32(QByteArray& bytes, qsizetype offset, std::uint32_t value)
+{
+    if (offset + 4 > bytes.size()) return;
+    bytes[offset] = static_cast<char>(value >> 24);
+    bytes[offset + 1] = static_cast<char>(value >> 16);
+    bytes[offset + 2] = static_cast<char>(value >> 8);
+    bytes[offset + 3] = static_cast<char>(value);
+}
+
+[[nodiscard]] int decodeGcr(std::uint8_t value)
+{
+    const auto found = std::find(gcrEncodeTable.begin(), gcrEncodeTable.end(), value);
+    return found == gcrEncodeTable.end() ? -1 : static_cast<int>(found - gcrEncodeTable.begin());
+}
+
+[[nodiscard]] std::uint32_t diskCopyChecksum(const QByteArray& bytes)
+{
+    std::uint32_t checksum = 0;
+    for (qsizetype offset = 0; offset + 1 < bytes.size(); offset += 2) {
+        checksum += (static_cast<std::uint32_t>(static_cast<std::uint8_t>(bytes[offset])) << 8)
+            | static_cast<std::uint8_t>(bytes[offset + 1]);
+        checksum = (checksum >> 1) | (checksum << 31);
+    }
+    return checksum;
+}
+
+[[nodiscard]] bool decodeGcrPayload(const QByteArray& encoded, QByteArray& payload)
+{
+    if (encoded.size() != 703) return false;
+    payload = QByteArray(encodedPayloadBytes, '\0');
+    std::uint8_t checksumA = 0, checksumB = 0, checksumC = 0;
+    qsizetype input = 0;
+    for (int group = 0; group < 175; ++group) {
+        const auto packed = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+        const auto lowA = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+        const auto lowB = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+        const auto lowC = group != 174 ? decodeGcr(static_cast<std::uint8_t>(encoded[input++])) : 0;
+        if (packed < 0 || lowA < 0 || lowB < 0 || lowC < 0) return false;
+
+        const auto encodedA = static_cast<std::uint8_t>(lowA | ((packed & 0x30) << 2));
+        const auto encodedB = static_cast<std::uint8_t>(lowB | ((packed & 0x0c) << 4));
+        const auto encodedC = static_cast<std::uint8_t>(lowC | ((packed & 0x03) << 6));
+        checksumC = static_cast<std::uint8_t>((checksumC << 1) | (checksumC >> 7));
+        const auto plainA = static_cast<std::uint8_t>(encodedA ^ checksumC);
+        const auto sumA = static_cast<unsigned>(checksumA) + plainA + (checksumC & 1U);
+        checksumA = static_cast<std::uint8_t>(sumA);
+        const auto plainB = static_cast<std::uint8_t>(encodedB ^ checksumA);
+        const auto sumB = static_cast<unsigned>(checksumB) + plainB + (sumA > 0xff ? 1U : 0U);
+        checksumB = static_cast<std::uint8_t>(sumB);
+        const auto plainC = static_cast<std::uint8_t>(encodedC ^ checksumB);
+        if (group != 174) {
+            checksumC = static_cast<std::uint8_t>(static_cast<unsigned>(checksumC) + plainC
+                + (sumB > 0xff ? 1U : 0U));
+        }
+        const auto output = group * 3;
+        payload[output] = static_cast<char>(plainA);
+        payload[output + 1] = static_cast<char>(plainB);
+        if (group != 174) payload[output + 2] = static_cast<char>(plainC);
+    }
+
+    const auto packed = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+    const auto checkA = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+    const auto checkB = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+    const auto checkC = decodeGcr(static_cast<std::uint8_t>(encoded[input++]));
+    if (packed < 0 || checkA < 0 || checkB < 0 || checkC < 0) return false;
+    return static_cast<std::uint8_t>(checkA | ((packed & 0x30) << 2)) == checksumA
+        && static_cast<std::uint8_t>(checkB | ((packed & 0x0c) << 4)) == checksumB
+        && static_cast<std::uint8_t>(checkC | ((packed & 0x03) << 6)) == checksumC;
 }
 
 [[nodiscard]] int sectorsForTrack(int track)
@@ -217,10 +288,13 @@ bool FloppyDiskImage::load(const QString& path, bool readOnly)
 
 void FloppyDiskImage::eject()
 {
+    (void)flushWrites();
+    m_mediaChanged = m_kind != Kind::Empty || m_mediaChanged;
     m_path.clear();
     m_kind = Kind::Empty;
     m_data.clear();
     m_tags.clear();
+    m_diskCopyHeader.clear();
     m_writable = false;
     m_doubleSided = false;
     m_highDensity = false;
@@ -228,12 +302,17 @@ void FloppyDiskImage::eject()
     m_currentTrack = 0;
     m_currentSide = 0;
     invalidateTrackCache();
+    m_writeBytes.clear();
+    m_writeMarks.clear();
+    m_writeMfmSector = -1;
+    m_writeFailed = false;
 }
 
 bool FloppyDiskImage::inserted() const { return m_kind != Kind::Empty; }
 bool FloppyDiskImage::writable() const { return m_writable; }
 bool FloppyDiskImage::doubleSided() const { return m_doubleSided; }
 bool FloppyDiskImage::highDensity() const { return m_highDensity; }
+bool FloppyDiskImage::mediaChanged() const { return m_mediaChanged; }
 FloppyDiskImage::Kind FloppyDiskImage::kind() const { return m_kind; }
 QString FloppyDiskImage::path() const { return m_path; }
 std::uint32_t FloppyDiskImage::blockCount() const { return static_cast<std::uint32_t>(m_data.size() / bytesPerSector); }
@@ -242,6 +321,11 @@ int FloppyDiskImage::currentTrack() const { return m_currentTrack; }
 int FloppyDiskImage::currentSide() const { return m_currentSide; }
 bool FloppyDiskImage::motorOn() const { return m_motorOn; }
 bool FloppyDiskImage::trackZero() const { return m_currentTrack == 0; }
+
+void FloppyDiskImage::clearMediaChanged()
+{
+    m_mediaChanged = false;
+}
 
 QString FloppyDiskImage::formatName() const
 {
@@ -264,6 +348,7 @@ void FloppyDiskImage::setCurrentTrack(int track)
 {
     const auto clamped = std::clamp(track, 0, tracksPerSide - 1);
     if (m_currentTrack != clamped) {
+        (void)flushWrites();
         m_currentTrack = clamped;
         invalidateTrackCache();
     }
@@ -278,6 +363,7 @@ void FloppyDiskImage::setCurrentSide(int side)
 {
     const auto clamped = m_doubleSided ? std::clamp(side, 0, 1) : 0;
     if (m_currentSide != clamped) {
+        (void)flushWrites();
         m_currentSide = clamped;
         invalidateTrackCache();
     }
@@ -285,6 +371,7 @@ void FloppyDiskImage::setCurrentSide(int side)
 
 void FloppyDiskImage::setMotorOn(bool on)
 {
+    if (m_motorOn && !on) (void)flushWrites();
     m_motorOn = on;
 }
 
@@ -337,6 +424,200 @@ FloppyDiskImage::DiskByte FloppyDiskImage::nextDiskByte()
         }
     }
     return diskByte;
+}
+
+bool FloppyDiskImage::writeDiskByte(std::uint8_t value, bool mark)
+{
+    if (!m_writable || !inserted() || !m_motorOn) {
+        m_writeFailed = true;
+        return false;
+    }
+    if (m_trackCache.bytes.isEmpty() || m_trackCache.track != m_currentTrack
+        || m_trackCache.side != m_currentSide) {
+        rebuildTrackCache();
+    }
+    if (m_highDensity && m_writeBytes.isEmpty() && m_writeMfmSector < 0)
+        m_writeMfmSector = inferMfmSectorAtCursor();
+    m_writeBytes.append(static_cast<char>(value));
+    m_writeMarks.append(mark);
+    if (!m_trackCache.bytes.isEmpty())
+        m_trackCache.cursor = (m_trackCache.cursor + 1) % m_trackCache.bytes.size();
+    const auto committed = m_highDensity ? processMfmWrites() : processGcrWrites();
+    constexpr qsizetype maximumWriteWindow = 16384;
+    if (m_writeBytes.size() > maximumWriteWindow) {
+        const auto remove = m_writeBytes.size() - maximumWriteWindow;
+        m_writeBytes.remove(0, remove);
+        m_writeMarks.remove(0, remove);
+    }
+    return committed || !m_writeFailed;
+}
+
+bool FloppyDiskImage::flushWrites()
+{
+    if (!m_writeBytes.isEmpty()) {
+        if (m_highDensity) (void)processMfmWrites();
+        else (void)processGcrWrites();
+    }
+    m_writeBytes.clear();
+    m_writeMarks.clear();
+    m_writeMfmSector = -1;
+    const auto ok = !m_writeFailed;
+    m_writeFailed = false;
+    return ok;
+}
+
+bool FloppyDiskImage::processGcrWrites()
+{
+    bool committed = false;
+    for (;;) {
+        const auto prologue = m_writeBytes.indexOf(QByteArray::fromHex("d5aaad"));
+        if (prologue < 0) {
+            if (m_writeBytes.size() > 2) {
+                m_writeBytes.remove(0, m_writeBytes.size() - 2);
+                m_writeMarks.remove(0, m_writeMarks.size() - 2);
+            }
+            return committed;
+        }
+        if (prologue > 0) {
+            m_writeBytes.remove(0, prologue);
+            m_writeMarks.remove(0, prologue);
+        }
+        constexpr qsizetype recordBytes = 710;
+        if (m_writeBytes.size() < recordBytes) return committed;
+        if (m_writeBytes.mid(707, 3) != QByteArray::fromHex("deaaff")) {
+            m_writeBytes.remove(0, 1);
+            m_writeMarks.remove(0, 1);
+            continue;
+        }
+        const auto sector = decodeGcr(static_cast<std::uint8_t>(m_writeBytes[3]));
+        QByteArray payload;
+        if (sector >= 0 && sector < sectorsForTrack(m_currentTrack)
+            && decodeGcrPayload(m_writeBytes.mid(4, 703), payload)) {
+            committed |= commitSector(sector, payload.mid(tagBytesPerSector, bytesPerSector),
+                payload.left(tagBytesPerSector));
+        } else {
+            m_writeFailed = true;
+        }
+        m_writeBytes.remove(0, recordBytes);
+        m_writeMarks.remove(0, recordBytes);
+    }
+}
+
+bool FloppyDiskImage::processMfmWrites()
+{
+    bool committed = false;
+    for (;;) {
+        const auto prologue = m_writeBytes.indexOf(QByteArray::fromHex("a1a1a1"));
+        if (prologue < 0) {
+            if (m_writeBytes.size() > 2) {
+                m_writeBytes.remove(0, m_writeBytes.size() - 2);
+                m_writeMarks.remove(0, m_writeMarks.size() - 2);
+            }
+            return committed;
+        }
+        if (prologue > 0) {
+            m_writeBytes.remove(0, prologue);
+            m_writeMarks.remove(0, prologue);
+        }
+        if (m_writeBytes.size() < 4) return committed;
+        const auto type = static_cast<std::uint8_t>(m_writeBytes[3]);
+        if (type == 0xfe) {
+            constexpr qsizetype addressBytes = 10;
+            if (m_writeBytes.size() < addressBytes) return committed;
+            const auto field = m_writeBytes.left(8);
+            const auto expected = mfmCrc(field);
+            const auto actual = static_cast<std::uint16_t>(static_cast<std::uint8_t>(m_writeBytes[8]) << 8)
+                | static_cast<std::uint8_t>(m_writeBytes[9]);
+            if (expected == actual && static_cast<std::uint8_t>(m_writeBytes[4]) == m_currentTrack
+                && static_cast<std::uint8_t>(m_writeBytes[5]) == m_currentSide
+                && static_cast<std::uint8_t>(m_writeBytes[7]) == 2) {
+                m_writeMfmSector = static_cast<int>(static_cast<std::uint8_t>(m_writeBytes[6])) - 1;
+            } else if (m_traceEnabled) {
+                m_traceEvents.append(QStringLiteral("MFM rejected ID field track=%1 side=%2 crc=%3/%4")
+                                         .arg(m_currentTrack).arg(m_currentSide).arg(actual, 4, 16, QLatin1Char('0'))
+                                         .arg(expected, 4, 16, QLatin1Char('0')));
+            }
+            m_writeBytes.remove(0, addressBytes);
+            m_writeMarks.remove(0, addressBytes);
+            continue;
+        }
+        if (type == 0xfb || type == 0xf8) {
+            constexpr qsizetype dataRecordBytes = 3 + 1 + bytesPerSector + 2;
+            if (m_writeBytes.size() < dataRecordBytes) return committed;
+            const auto expected = mfmCrc(m_writeBytes.left(4 + bytesPerSector));
+            const auto actual = static_cast<std::uint16_t>(
+                                    static_cast<std::uint8_t>(m_writeBytes[4 + bytesPerSector]) << 8)
+                | static_cast<std::uint8_t>(m_writeBytes[5 + bytesPerSector]);
+            if (m_writeMfmSector >= 0 && m_writeMfmSector < 18 && expected == actual)
+                committed |= commitSector(m_writeMfmSector, m_writeBytes.mid(4, bytesPerSector));
+            else {
+                m_writeFailed = true;
+                if (m_traceEnabled)
+                    m_traceEvents.append(QStringLiteral("MFM rejected data field sector=%1 crc=%2/%3")
+                                             .arg(m_writeMfmSector).arg(actual, 4, 16, QLatin1Char('0'))
+                                             .arg(expected, 4, 16, QLatin1Char('0')));
+            }
+            m_writeBytes.remove(0, dataRecordBytes);
+            m_writeMarks.remove(0, dataRecordBytes);
+            continue;
+        }
+        m_writeBytes.remove(0, 1);
+        m_writeMarks.remove(0, 1);
+    }
+}
+
+bool FloppyDiskImage::commitSector(int logicalSector, const QByteArray& data, const QByteArray& tags)
+{
+    if (data.size() != bytesPerSector) return false;
+    qsizetype block = 0;
+    if (m_highDensity)
+        block = (m_currentTrack * 2 + m_currentSide) * 18 + logicalSector;
+    else
+        block = firstBlockForTrack(m_currentTrack, m_currentSide, m_doubleSided) + logicalSector;
+    if (block < 0 || block >= m_data.size() / bytesPerSector) return false;
+    std::copy(data.begin(), data.end(), m_data.begin() + block * bytesPerSector);
+    if (!tags.isEmpty() && block < m_tags.size() && tags.size() == tagBytesPerSector)
+        m_tags[static_cast<int>(block)] = tags;
+    if (!persistImage()) {
+        m_writeFailed = true;
+        return false;
+    }
+    invalidateTrackCache();
+    return true;
+}
+
+bool FloppyDiskImage::persistImage()
+{
+    if (!m_writable || m_path.isEmpty()) return false;
+    QByteArray output;
+    if (m_kind == Kind::DiskCopy42) {
+        output = m_diskCopyHeader;
+        if (output.size() != 84) return false;
+        output.append(m_data);
+        QByteArray tagBytes;
+        for (const auto& tag : m_tags) tagBytes.append(tag);
+        output.append(tagBytes);
+        writeBe32(output, 72, diskCopyChecksum(m_data));
+        // Disk Copy excludes the first sector's 12-byte tag from its tag checksum.
+        writeBe32(output, 76, diskCopyChecksum(tagBytes.mid(tagBytesPerSector)));
+    } else {
+        output = m_data;
+    }
+    QSaveFile file(m_path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(output) != output.size()) return false;
+    return file.commit();
+}
+
+int FloppyDiskImage::inferMfmSectorAtCursor() const
+{
+    if (m_trackCache.bytes.isEmpty()) return -1;
+    int sector = -1;
+    const auto limit = std::min(m_trackCache.cursor, m_trackCache.bytes.size());
+    for (qsizetype offset = 0; offset + 7 < limit; ++offset) {
+        if (m_trackCache.bytes.mid(offset, 4) == QByteArray::fromHex("a1a1a1fe"))
+            sector = static_cast<int>(static_cast<std::uint8_t>(m_trackCache.bytes[offset + 6])) - 1;
+    }
+    return sector;
 }
 
 void FloppyDiskImage::invalidateTrackCache()
@@ -396,16 +677,24 @@ QByteArray FloppyDiskImage::lastNibblesForDebug() const
 
 bool FloppyDiskImage::loadRaw(const QString& path, const QByteArray& bytes, Kind kind)
 {
+    const auto previousKind = m_kind;
+    const auto previousPath = m_path;
     m_path = path;
     m_kind = kind;
     m_data = bytes;
     m_tags.clear();
+    m_diskCopyHeader.clear();
     m_writable = !m_forceReadOnly && QFileInfo(path).isWritable();
     m_doubleSided = kind != Kind::Raw400K;
     m_highDensity = kind == Kind::Raw1440K;
     m_currentTrack = 0;
     m_currentSide = 0;
+    m_mediaChanged = previousKind != Kind::Empty || previousPath != path || m_mediaChanged;
     invalidateTrackCache();
+    m_writeBytes.clear();
+    m_writeMarks.clear();
+    m_writeMfmSector = -1;
+    m_writeFailed = false;
     return true;
 }
 
@@ -421,8 +710,11 @@ bool FloppyDiskImage::loadDiskCopy42(const QString& path, const QByteArray& byte
         return false;
     }
 
+    const auto previousKind = m_kind;
+    const auto previousPath = m_path;
     m_path = path;
     m_kind = Kind::DiskCopy42;
+    m_diskCopyHeader = bytes.left(84);
     m_data = bytes.mid(84, static_cast<qsizetype>(dataSize));
     m_tags.clear();
     if (tagSize != 0) {
@@ -438,7 +730,12 @@ bool FloppyDiskImage::loadDiskCopy42(const QString& path, const QByteArray& byte
     m_highDensity = dataSize == raw1440KBytes;
     m_currentTrack = 0;
     m_currentSide = 0;
+    m_mediaChanged = previousKind != Kind::Empty || previousPath != path || m_mediaChanged;
     invalidateTrackCache();
+    m_writeBytes.clear();
+    m_writeMarks.clear();
+    m_writeMfmSector = -1;
+    m_writeFailed = false;
     return true;
 }
 

@@ -89,6 +89,12 @@ void M68kCpuCore::setModel(Model model)
     m68k_set_cpu_type(musashiCpuType(model));
 }
 
+void M68kCpuCore::setExternal68851(bool enabled)
+{
+    activeCpu = this;
+    m68k_set_external_pmmu(enabled ? 1U : 0U);
+}
+
 void M68kCpuCore::setBus(M68kBus* bus)
 {
     m_bus = bus;
@@ -159,6 +165,11 @@ M68kCpuCore::RegisterSnapshot M68kCpuCore::registers() const
     snapshot.pmmuCrpAddress = m68k_get_pmmu_crp_address();
     snapshot.pmmuSrpLimit = m68k_get_pmmu_srp_limit();
     snapshot.pmmuSrpAddress = m68k_get_pmmu_srp_address();
+    snapshot.pmmuKind = m68k_get_pmmu_kind();
+    snapshot.pmmuMmusr = static_cast<std::uint16_t>(m68k_get_pmmu_mmusr());
+    snapshot.pmmuFaultAddress = m68k_get_pmmu_fault_address();
+    snapshot.pmmuAtcHits = m68k_get_pmmu_atc_hits();
+    snapshot.pmmuAtcMisses = m68k_get_pmmu_atc_misses();
     snapshot.physicalPc = m68k_translate_address(snapshot.pc);
     return snapshot;
 }
@@ -189,26 +200,36 @@ void M68kCpuCore::setProgramCounter(std::uint32_t address)
 extern "C" unsigned int m68k_read_memory_8(unsigned int address)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
-    return bus == nullptr ? 0xffU : bus->read8(address);
+    if (bus == nullptr) return 0xffU;
+    const auto result = bus->readPhysical8(address);
+    if (result.busError) m68k_report_physical_bus_error(address, 0, 1);
+    return result.value;
 }
 
 extern "C" unsigned int m68k_read_memory_16(unsigned int address)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
-    return bus == nullptr ? 0xffffU : bus->read16(address);
+    if (bus == nullptr) return 0xffffU;
+    const auto result = bus->readPhysical16(address);
+    if (result.busError) m68k_report_physical_bus_error(address, 0, 2);
+    return result.value;
 }
 
 extern "C" unsigned int m68k_read_memory_32(unsigned int address)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
-    return bus == nullptr ? 0xffffffffU : bus->read32(address);
+    if (bus == nullptr) return 0xffffffffU;
+    const auto result = bus->readPhysical32(address);
+    if (result.busError) m68k_report_physical_bus_error(address, 0, 4);
+    return result.value;
 }
 
 extern "C" void m68k_write_memory_8(unsigned int address, unsigned int value)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
     if (bus != nullptr) {
-        bus->write8(address, static_cast<std::uint8_t>(value));
+        if (!bus->writePhysical8(address, static_cast<std::uint8_t>(value)))
+            m68k_report_physical_bus_error(address, 1, 1);
     }
 }
 
@@ -216,7 +237,8 @@ extern "C" void m68k_write_memory_16(unsigned int address, unsigned int value)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
     if (bus != nullptr) {
-        bus->write16(address, static_cast<std::uint16_t>(value));
+        if (!bus->writePhysical16(address, static_cast<std::uint16_t>(value)))
+            m68k_report_physical_bus_error(address, 1, 2);
     }
 }
 
@@ -224,7 +246,8 @@ extern "C" void m68k_write_memory_32(unsigned int address, unsigned int value)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
     if (bus != nullptr) {
-        bus->write32(address, value);
+        if (!bus->writePhysical32(address, value))
+            m68k_report_physical_bus_error(address, 1, 4);
     }
 }
 

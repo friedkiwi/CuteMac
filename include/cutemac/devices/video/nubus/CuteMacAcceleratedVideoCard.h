@@ -15,7 +15,7 @@ public:
     static constexpr std::uint32_t guestServicesBase = CuteMacVideoCard::guestServicesBase;
     static constexpr std::uint32_t guestServicesCommand = CuteMacVideoCard::guestServicesCommand;
     static constexpr std::uint32_t guestPointerBase = CuteMacVideoCard::guestPointerBase;
-    static constexpr std::uint32_t acceleratorBase = 0x000a0000;
+    static constexpr std::uint32_t acceleratorBase = 0x000e2000;
     static constexpr std::uint32_t acceleratorBytes = 0x200;
 
     enum class AcceleratorRegister : std::uint32_t {
@@ -90,6 +90,7 @@ public:
     [[nodiscard]] const QByteArray& declarationRom() const;
     [[nodiscard]] bool accelerationEnabled() const { return m_acceleration; }
     [[nodiscard]] bool absolutePointerEnabled() const;
+    [[nodiscard]] bool absolutePointerActive() const;
     void setHostPointerPosition(std::int16_t x, std::int16_t y);
 
 private:

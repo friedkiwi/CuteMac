@@ -33,6 +33,7 @@ public:
     [[nodiscard]] bool initialize();
     [[nodiscard]] bool reconfigure(config::Configuration configuration);
     void reset();
+    [[nodiscard]] bool triggerProgrammersInterrupt();
     [[nodiscard]] int runCycles(int cycles);
     void setPaused(bool paused);
     [[nodiscard]] bool paused() const;

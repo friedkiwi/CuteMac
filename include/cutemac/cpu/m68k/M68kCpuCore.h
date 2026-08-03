@@ -27,6 +27,11 @@ public:
         std::uint32_t pmmuCrpAddress = 0;
         std::uint32_t pmmuSrpLimit = 0;
         std::uint32_t pmmuSrpAddress = 0;
+        std::uint32_t pmmuKind = 0;
+        std::uint16_t pmmuMmusr = 0;
+        std::uint32_t pmmuFaultAddress = 0;
+        std::uint32_t pmmuAtcHits = 0;
+        std::uint32_t pmmuAtcMisses = 0;
         std::uint32_t physicalPc = 0;
     };
 
@@ -52,6 +57,7 @@ public:
     void reset() override;
 
     void setModel(Model model);
+    void setExternal68851(bool enabled);
     void setBus(M68kBus* bus);
     void setIrqLevel(unsigned int level);
 

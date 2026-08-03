@@ -91,7 +91,19 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
         m_unitAttention = false;
         return checkCondition(senseUnitAttention, ascMediumChanged);
     }
-    if (!ready() && opcode != 0x03 && opcode != 0x12) return checkCondition(senseNotReady, ascMediumNotPresent);
+    // An empty removable drive remains a usable SCSI logical unit. Device-level
+    // commands must still work so the Macintosh CD-ROM driver can finish opening
+    // the drive and install its SystemTask media poll. Only commands which
+    // actually require medium should report NOT READY / MEDIUM NOT PRESENT.
+    const bool allowedWithoutMedium = opcode == 0x03 // REQUEST SENSE
+        || opcode == 0x12                           // INQUIRY
+        || opcode == 0x15                           // MODE SELECT(6)
+        || opcode == 0x1a                           // MODE SENSE(6)
+        || opcode == 0x1b                           // START STOP UNIT
+        || opcode == 0x1e                           // PREVENT/ALLOW MEDIUM REMOVAL
+        || opcode == 0x55                           // MODE SELECT(10)
+        || opcode == 0x5a;                          // MODE SENSE(10)
+    if (!ready() && !allowedWithoutMedium) return checkCondition(senseNotReady, ascMediumNotPresent);
 
     switch (opcode) {
     case 0x00: return good();
@@ -250,9 +262,13 @@ ScsiCommandResult ScsiCdRomDevice::modeSense(bool tenByte, bool disableBlockDesc
         data.append(descriptor);
         data[tenByte ? 7 : 3] = 8;
     }
+    // Read/write error recovery. Apple CD-ROM software, including the A/UX 3
+    // startup extension, explicitly probes this mandatory direct-access page.
+    // Report the conservative defaults used by early SCSI CD-ROM drives.
+    if (pageCode == 0x01 || pageCode == 0x3f) data.append(QByteArray::fromHex("0106000000000000"));
     if (pageCode == 0x0d || pageCode == 0x3f) data.append(QByteArray::fromHex("0d06000d003c004b"));
     if (pageCode == 0x2a || pageCode == 0x3f) data.append(QByteArray::fromHex("2a0e0000000328000562000000400562"));
-    if (pageCode != 0x00 && pageCode != 0x0d && pageCode != 0x2a && pageCode != 0x3f)
+    if (pageCode != 0x00 && pageCode != 0x01 && pageCode != 0x0d && pageCode != 0x2a && pageCode != 0x3f)
         return { {}, 0x02, 0, senseIllegalRequest };
     if (tenByte) {
         const auto length = static_cast<std::uint16_t>(data.size() - 2);

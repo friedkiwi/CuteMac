@@ -130,6 +130,7 @@ VideoFrame CuteMacAcceleratedVideoCard::videoFrame() const { return m_compatible
 core::GuestPowerRequest CuteMacAcceleratedVideoCard::takePowerRequest() { return m_compatibleCard.takePowerRequest(); }
 const QByteArray& CuteMacAcceleratedVideoCard::declarationRom() const { return m_declarationRom; }
 bool CuteMacAcceleratedVideoCard::absolutePointerEnabled() const { return m_compatibleCard.absolutePointerEnabled(); }
+bool CuteMacAcceleratedVideoCard::absolutePointerActive() const { return m_compatibleCard.absolutePointerActive(); }
 void CuteMacAcceleratedVideoCard::setHostPointerPosition(std::int16_t x, std::int16_t y)
 {
     m_compatibleCard.setHostPointerPosition(x, y);

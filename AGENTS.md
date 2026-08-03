@@ -27,6 +27,7 @@
 
 - Separate CPU emulation cores from machine definitions and reusable hardware devices.
 - The M68k CPU core starts from Musashi-derived source maintained directly in the CuteMac source tree, not as a third-party vendor subtree.
+- Gate address-translation behavior by the selected M68k CPU: 68000/68010 and EC parts have no PMMU, a full 68020 may explicitly attach an external MC68851, the 68030 uses its integrated PMMU, and the 68040 has a distinct native-MMU dispatch boundary rather than reusing 68030 descriptors or instructions. Keep debugger translation side-effect free and report physical bus faults separately from MMU translation faults.
 - Preserve provenance notices for imported or derived code under `licenses/`.
 - Compose machine models from reusable devices where practical, for example SCSI, ADB, VIA, SCC, video, sound, memory, storage, and bus glue.
 - Attach serial peripherals through the controller-independent `SerialEndpoint`/`SerialBus` boundary. The ImageWriter II is a serial device, while sequential PNG encoding is an interchangeable host output sink; do not couple SCC implementations to printers or filesystem output.

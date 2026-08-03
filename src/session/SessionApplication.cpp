@@ -88,8 +88,22 @@ bool sameSerialDevices(const QVector<cutemac::config::SerialDeviceConfiguration>
 {
     if (left.size() != right.size()) return false;
     for (qsizetype i = 0; i < left.size(); ++i) {
+        if (left[i].phonebook.size() != right[i].phonebook.size()) return false;
         if (left[i].channel != right[i].channel || left[i].type != right[i].type
-            || left[i].outputDirectory != right[i].outputDirectory) return false;
+            || left[i].outputDirectory != right[i].outputDirectory
+            || left[i].directTcpDialing != right[i].directTcpDialing
+            || left[i].slip.enabled != right[i].slip.enabled
+            || left[i].slip.localIp != right[i].slip.localIp
+            || left[i].slip.remoteIp != right[i].slip.remoteIp
+            || left[i].slip.mtu != right[i].slip.mtu
+            || left[i].tcpMode != right[i].tcpMode
+            || left[i].tcpHost != right[i].tcpHost
+            || left[i].tcpPort != right[i].tcpPort) return false;
+        for (qsizetype entry = 0; entry < left[i].phonebook.size(); ++entry) {
+            if (left[i].phonebook[entry].number != right[i].phonebook[entry].number
+                || left[i].phonebook[entry].target != right[i].phonebook[entry].target
+                || left[i].phonebook[entry].telnet != right[i].phonebook[entry].telnet) return false;
+        }
     }
     return true;
 }
@@ -588,6 +602,15 @@ private:
         auto* reset = m_toolbar->addAction(style()->standardIcon(QStyle::SP_BrowserReload), QStringLiteral("Reset"));
         reset->setToolTip(QStringLiteral("Reset the emulated machine"));
         connect(reset, &QAction::triggered, this, [this]() { loadAndReset(); });
+        auto* interrupt = m_toolbar->addAction(style()->standardIcon(QStyle::SP_MessageBoxInformation), QStringLiteral("Interrupt"));
+        interrupt->setToolTip(QStringLiteral("Trigger the classic programmer's interrupt for guest debuggers such as MacsBug"));
+        connect(interrupt, &QAction::triggered, this, [this]() {
+            if (m_session.triggerProgrammersInterrupt()) {
+                statusBar()->showMessage(QStringLiteral("Programmer interrupt triggered"), 2000);
+            } else {
+                statusBar()->showMessage(QStringLiteral("Programmer interrupt is unsupported for this machine"), 4000);
+            }
+        });
         m_toolbar->addSeparator();
 
         if (!m_configuration.iwmDevices.isEmpty()) {

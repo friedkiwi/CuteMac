@@ -29453,8 +29453,28 @@ rte_loop:
 				CPU_INSTR_MODE = INSTRUCTION_YES;
 				CPU_RUN_MODE = RUN_MODE_NORMAL;
 				return;
+			case 10: /* 68020/68030 short access fault (format A) */
+				new_sr = m68ki_pull_16();
+				new_pc = m68ki_pull_32();
+				m68ki_fake_pull_16(); /* format word */
+				REG_A[7] = MASK_OUT_ABOVE_32(REG_A[7] + 24);
+				m68ki_jump(new_pc);
+				m68ki_set_sr(new_sr);
+				CPU_INSTR_MODE = INSTRUCTION_YES;
+				CPU_RUN_MODE = RUN_MODE_NORMAL;
+				return;
+			case 11: /* 68020/68030 long access fault (format B) */
+				new_sr = m68ki_pull_16();
+				new_pc = m68ki_pull_32();
+				m68ki_fake_pull_16(); /* format word */
+				REG_A[7] = MASK_OUT_ABOVE_32(REG_A[7] + 84);
+				m68ki_jump(new_pc);
+				m68ki_set_sr(new_sr);
+				CPU_INSTR_MODE = INSTRUCTION_YES;
+				CPU_RUN_MODE = RUN_MODE_NORMAL;
+				return;
 		}
-		/* Not handling long or short bus fault */
+		/* Unknown frame format. */
 		CPU_INSTR_MODE = INSTRUCTION_YES;
 		CPU_RUN_MODE = RUN_MODE_NORMAL;
 		m68ki_exception_format_error();
@@ -36479,4 +36499,3 @@ void m68ki_build_opcode_table(void)
 /* ======================================================================== */
 /* ============================== END OF FILE ============================= */
 /* ======================================================================== */
-

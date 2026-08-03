@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QSet>
 
 #include <toml++/toml.hpp>
 
@@ -39,6 +40,69 @@ QString safeProfileFileBase(QString profileName)
 }
 
 } // namespace
+
+bool isCuteMacVideoDevice(NuBusDeviceType type)
+{
+    return type == NuBusDeviceType::CuteMacVideo || type == NuBusDeviceType::CuteMacVideoAccelerated;
+}
+
+int cuteMacVideoFramebufferLimitBytes()
+{
+    return 0x000e0000;
+}
+
+int framebufferStrideBytes(int width, int depth)
+{
+    return ((width * depth + 31) / 32) * 4;
+}
+
+bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
+{
+    if (device.slot < 9 || device.slot > 14) return false;
+    if (device.type == NuBusDeviceType::MacintoshIIVideo) return true;
+    if (!isCuteMacVideoDevice(device.type)) return false;
+    if (device.width < 320 || device.height < 200) return false;
+    if (device.depth != 1 && device.depth != 2 && device.depth != 4
+        && device.depth != 8 && device.depth != 16 && device.depth != 32) return false;
+    if (device.vramMiB < 1 || device.vramMiB > 14) return false;
+    const auto stride = framebufferStrideBytes(device.width, device.depth);
+    return stride > 0 && stride * device.height <= cuteMacVideoFramebufferLimitBytes();
+}
+
+QVector<SerialPhonebookEntry> defaultSerialModemPhonebook()
+{
+    return {
+        { QStringLiteral("1000"), QStringLiteral("slip:libslirp"), false },
+        { QStringLiteral("1001"), QStringLiteral("ppp:libslirp"), false },
+    };
+}
+
+bool isValidSerialDeviceConfiguration(const SerialDeviceConfiguration& device)
+{
+    if (device.channel < 0 || device.channel > 1) return false;
+    if (device.type == SerialDeviceType::ImageWriterII) return !device.outputDirectory.trimmed().isEmpty();
+    if (device.type == SerialDeviceType::NullModem) {
+        if (device.tcpPort < 1 || device.tcpPort > 65535) return false;
+        if (device.tcpMode == SerialTcpMode::Dial && device.tcpHost.trimmed().isEmpty()) return false;
+        return true;
+    }
+    if (device.type != SerialDeviceType::HayesModem) return false;
+    if (device.slip.enabled) {
+        if (device.slip.localIp.trimmed().isEmpty() || device.slip.remoteIp.trimmed().isEmpty()) return false;
+        if (device.slip.mtu < 296 || device.slip.mtu > 1006) return false;
+    }
+    QSet<QString> numbers;
+    for (const auto& entry : device.phonebook) {
+        const auto number = entry.number.trimmed();
+        const auto target = entry.target.trimmed();
+        if (number.isEmpty() || target.isEmpty()) return false;
+        if (numbers.contains(number)) return false;
+        numbers.insert(number);
+        if ((target == QStringLiteral("slip:libslirp") || target == QStringLiteral("ppp:libslirp")) && !device.slip.enabled) return false;
+        if (!target.startsWith(QStringLiteral("slip:")) && !target.startsWith(QStringLiteral("ppp:")) && !target.startsWith(QStringLiteral("tcp:"))) return false;
+    }
+    return true;
+}
 
 QString runtimeSpeedName(RuntimeSpeed speed)
 {
@@ -213,11 +277,39 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
         if (const auto* devices = document["serial"]["devices"].as_array()) {
             for (const auto& node : *devices) {
                 if (const auto* device = node.as_table()) {
-                    configuration.serialDevices.append({
-                        static_cast<int>((*device)["channel"].value_or<std::int64_t>(1)),
-                        SerialDeviceType::ImageWriterII,
-                        fromTomlString((*device)["output_directory"].value_or<std::string>("")),
-                    });
+                    const auto typeName = fromTomlString((*device)["type"].value_or<std::string>("imagewriter_ii"));
+                    SerialDeviceConfiguration serial;
+                    serial.channel = static_cast<int>((*device)["channel"].value_or<std::int64_t>(1));
+                    serial.type = typeName == QStringLiteral("hayes_modem") ? SerialDeviceType::HayesModem
+                        : typeName == QStringLiteral("null_modem")           ? SerialDeviceType::NullModem
+                                                                             : SerialDeviceType::ImageWriterII;
+                    serial.outputDirectory = fromTomlString((*device)["output_directory"].value_or<std::string>(""));
+                    const auto tcpMode = fromTomlString((*device)["tcp_mode"].value_or<std::string>("listen"));
+                    serial.tcpMode = tcpMode == QStringLiteral("dial") ? SerialTcpMode::Dial : SerialTcpMode::Listen;
+                    serial.tcpHost = fromTomlString((*device)["tcp_host"].value_or<std::string>("127.0.0.1"));
+                    serial.tcpPort = static_cast<int>((*device)["tcp_port"].value_or<std::int64_t>(0));
+                    serial.directTcpDialing = (*device)["direct_tcp_dialing"].value_or(false);
+                    if (const auto* slip = (*device)["slip"].as_table()) {
+                        serial.slip.enabled = (*slip)["enabled"].value_or(true);
+                        serial.slip.localIp = fromTomlString((*slip)["local_ip"].value_or<std::string>("172.16.0.1"));
+                        serial.slip.remoteIp = fromTomlString((*slip)["remote_ip"].value_or<std::string>("172.16.0.2"));
+                        serial.slip.mtu = static_cast<int>((*slip)["mtu"].value_or<std::int64_t>(1006));
+                    }
+                    if (const auto* phonebook = (*device)["phonebook"].as_array()) {
+                        for (const auto& phoneNode : *phonebook) {
+                            if (const auto* entry = phoneNode.as_table()) {
+                                serial.phonebook.append({
+                                    fromTomlString((*entry)["number"].value_or<std::string>("")),
+                                    fromTomlString((*entry)["target"].value_or<std::string>("")),
+                                    (*entry)["telnet"].value_or(false),
+                                });
+                            }
+                        }
+                    }
+                    if (serial.type == SerialDeviceType::HayesModem && serial.phonebook.isEmpty()) {
+                        serial.phonebook = defaultSerialModemPhonebook();
+                    }
+                    configuration.serialDevices.append(serial);
                 }
             }
         }
@@ -241,6 +333,12 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     } else if (!configuration.scsiDevices.isEmpty()) {
         configuration.diskPath = configuration.scsiDevices.first().imagePath;
     }
+    for (const auto& device : configuration.nubusDevices) {
+        if (!isValidNuBusDeviceConfiguration(device)) return std::nullopt;
+    }
+    for (const auto& device : configuration.serialDevices) {
+        if (!isValidSerialDeviceConfiguration(device)) return std::nullopt;
+    }
 
     return configuration;
 }
@@ -249,6 +347,12 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
 {
     if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
         return false;
+    }
+    for (const auto& device : configuration.nubusDevices) {
+        if (!isValidNuBusDeviceConfiguration(device)) return false;
+    }
+    for (const auto& device : configuration.serialDevices) {
+        if (!isValidSerialDeviceConfiguration(device)) return false;
     }
     (void)ensureDirectories();
 
@@ -290,11 +394,37 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
     }
     toml::array serialDevices;
     for (const auto& device : configuration.serialDevices) {
-        serialDevices.push_back(toml::table {
+        toml::table serialDevice {
             { "channel", device.channel },
-            { "type", "imagewriter_ii" },
-            { "output_directory", toTomlString(device.outputDirectory) },
-        });
+            { "type", device.type == SerialDeviceType::HayesModem ? "hayes_modem"
+                    : device.type == SerialDeviceType::NullModem   ? "null_modem"
+                                                                   : "imagewriter_ii" },
+        };
+        if (device.type == SerialDeviceType::ImageWriterII) {
+            serialDevice.insert("output_directory", toTomlString(device.outputDirectory));
+        } else if (device.type == SerialDeviceType::NullModem) {
+            serialDevice.insert("tcp_mode", device.tcpMode == SerialTcpMode::Dial ? "dial" : "listen");
+            serialDevice.insert("tcp_host", toTomlString(device.tcpHost));
+            serialDevice.insert("tcp_port", device.tcpPort);
+        } else {
+            serialDevice.insert("direct_tcp_dialing", device.directTcpDialing);
+            serialDevice.insert("slip", toml::table {
+                { "enabled", device.slip.enabled },
+                { "local_ip", toTomlString(device.slip.localIp) },
+                { "remote_ip", toTomlString(device.slip.remoteIp) },
+                { "mtu", device.slip.mtu },
+            });
+            toml::array phonebook;
+            for (const auto& entry : device.phonebook) {
+                phonebook.push_back(toml::table {
+                    { "number", toTomlString(entry.number) },
+                    { "target", toTomlString(entry.target) },
+                    { "telnet", entry.telnet },
+                });
+            }
+            serialDevice.insert("phonebook", std::move(phonebook));
+        }
+        serialDevices.push_back(std::move(serialDevice));
     }
 
     toml::table document {

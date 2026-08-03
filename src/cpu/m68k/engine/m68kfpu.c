@@ -1939,6 +1939,14 @@ void m68040_fpu_op1(void)
 		{
 			switch (mode)
 			{
+				case 2: // (An)
+					addr = REG_A[reg];
+					if (m68ki_cpu.fpu_just_reset)
+						m68ki_write_32(addr, 0);
+					else
+						perform_fsave(addr, 1);
+					break;
+
 				case 3:	// (An)+
 		    			addr = EA_AY_PI_32();
 
@@ -2035,6 +2043,5 @@ void m68040_fpu_op1(void)
 		default:	fatalerror("m68040_fpu_op1: unimplemented op %d at %08X\n", (REG_IR >> 6) & 0x3, REG_PC-2);
 	}
 }
-
 
 

@@ -14,7 +14,7 @@ accelerated_install_guest_helpers:
 accelerated_slot_vbl_hook:
         movem.l %d0-%d7/%a0-%a6,-(%sp)
         bsr.w   card_base
-        movea.l 0x000a0038(%a2),%a0     | resident Guest Tools callback
+        movea.l 0x000e2038(%a2),%a0     | resident Guest Tools callback
         cmpa.l  #0,%a0
         beq.s   accelerated_slot_vbl_done
         jsr     (%a0)
@@ -44,11 +44,11 @@ accelerated_install_std_bits_hook:
 
         lea     accelerated_card_base(%pc),%a2
         movea.l (%a2),%a2
-        move.l  #0x43564131,0x000a002c(%a2) | guest adapter = CVA1
+        move.l  #0x43564131,0x000e202c(%a2) | guest adapter = CVA1
         move.w  0x015a,%d0               | SysVersion
-        move.w  %d0,0x000a0032(%a2)
-        move.l  #1,0x000a0034(%a2)       | ROM _StdBits hook version
-        move.b  #2,0x000a005f(%a2)       | controlGuestAttach
+        move.w  %d0,0x000e2032(%a2)
+        move.l  #1,0x000e2034(%a2)       | ROM _StdBits hook version
+        move.b  #2,0x000e205f(%a2)       | controlGuestAttach
 accelerated_std_bits_install_done:
         rts
 
@@ -58,7 +58,7 @@ accelerated_std_bits_hook:
         movea.l (%a0),%a0
         tst.l   %a0
         beq.s   accelerated_std_bits_chain
-        move.b  #4,0x000a005f(%a0)       | controlRecordFallback
+        move.b  #4,0x000e205f(%a0)       | controlRecordFallback
 accelerated_std_bits_chain:
         movem.l (%sp)+,%d0-%d7/%a0-%a6
         lea     accelerated_old_std_bits(%pc),%a0

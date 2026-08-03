@@ -935,14 +935,25 @@ typedef union
 	double f;
 } fp_reg;
 
-#define M68K_MMU_ATC_ENTRIES 256
+#define M68K_MMU_ATC_ENTRIES 22
+
+enum
+{
+	M68K_MMU_KIND_NONE = 0,
+	M68K_MMU_KIND_68851,
+	M68K_MMU_KIND_68030,
+	M68K_MMU_KIND_68040
+};
 
 typedef struct
 {
 	uint logical_page;
 	uint physical_page;
 	uint8 page_shift;
-	uint8 supervisor;
+	uint8 function_code;
+	uint8 write_protect;
+	uint8 modified;
+	uint8 fault;
 	uint8 valid;
 } m68ki_mmu_atc_entry;
 
@@ -985,6 +996,7 @@ typedef struct
 	uint run_mode;     /* Stores whether we are processing a reset, bus error, address error, or something else */
 	int    has_pmmu;     /* Indicates if a PMMU available (yes on 030, 040, no on EC030) */
 	int    pmmu_enabled; /* Indicates if the PMMU is enabled */
+	int    mmu_kind;     /* None, external 68851, integrated 68030, or integrated 68040. */
 	int    fpu_just_reset; /* Indicates the FPU was just reset */
 	uint reset_cycles;
 
@@ -1009,6 +1021,14 @@ typedef struct
 	uint mmu_tt0, mmu_tt1;
 	uint mmu_tc;
 	uint16 mmu_sr;
+	uint16 mmu_tmp_sr;
+	uint mmu_last_logical_addr;
+	uint mmu_fault_address;
+	uint8 mmu_fault_fc;
+	uint8 mmu_fault_rw;
+	uint8 mmu_fault_size;
+	uint8 mmu_fault_is_mmu;
+	uint8 mmu_tablewalk;
 	m68ki_mmu_atc_entry mmu_atc[M68K_MMU_ATC_ENTRIES];
 	uint mmu_atc_hits;
 	uint mmu_atc_misses;
@@ -1065,6 +1085,8 @@ char* m68ki_disassemble_quick(unsigned int pc, unsigned int cpu_type);
 
 extern uint pmmu_translate_addr(uint addr_in);
 extern uint pmmu_translate_addr_fc(uint addr_in, uint fc, uint rw);
+extern uint pmmu_translate_addr_fc_size(uint addr_in, uint fc, uint rw, uint size);
+extern uint pmmu_debug_translate_addr(uint addr_in, uint fc);
 extern void pmmu_atc_flush(void);
 
 /* Handles all immediate reads, does address error check, function code setting,
@@ -1148,7 +1170,7 @@ static inline uint m68ki_read_8_fc(uint address, uint fc)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 1);
+	    address = pmmu_translate_addr_fc_size(address, fc, 1, 1);
 #endif
 
 	return m68k_read_memory_8(ADDRESS_68K(address));
@@ -1161,7 +1183,7 @@ static inline uint m68ki_read_16_fc(uint address, uint fc)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 1);
+	    address = pmmu_translate_addr_fc_size(address, fc, 1, 2);
 #endif
 
 	return m68k_read_memory_16(ADDRESS_68K(address));
@@ -1174,7 +1196,7 @@ static inline uint m68ki_read_32_fc(uint address, uint fc)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 1);
+	    address = pmmu_translate_addr_fc_size(address, fc, 1, 4);
 #endif
 
 	return m68k_read_memory_32(ADDRESS_68K(address));
@@ -1187,7 +1209,7 @@ static inline void m68ki_write_8_fc(uint address, uint fc, uint value)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 0);
+	    address = pmmu_translate_addr_fc_size(address, fc, 0, 1);
 #endif
 
 	m68k_write_memory_8(ADDRESS_68K(address), value);
@@ -1200,7 +1222,7 @@ static inline void m68ki_write_16_fc(uint address, uint fc, uint value)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 0);
+	    address = pmmu_translate_addr_fc_size(address, fc, 0, 2);
 #endif
 
 	m68k_write_memory_16(ADDRESS_68K(address), value);
@@ -1213,7 +1235,7 @@ static inline void m68ki_write_32_fc(uint address, uint fc, uint value)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 0);
+	    address = pmmu_translate_addr_fc_size(address, fc, 0, 4);
 #endif
 
 	m68k_write_memory_32(ADDRESS_68K(address), value);
@@ -1228,7 +1250,7 @@ static inline void m68ki_write_32_pd_fc(uint address, uint fc, uint value)
 
 #if M68K_EMULATE_PMMU
 	if (HAS_PMMU && PMMU_ENABLED)
-	    address = pmmu_translate_addr_fc(address, fc, 0);
+	    address = pmmu_translate_addr_fc_size(address, fc, 0, 4);
 #endif
 
 	m68k_write_memory_32_pd(ADDRESS_68K(address), value);
@@ -1733,7 +1755,8 @@ static inline void m68ki_stack_frame_1000(uint pc, uint sr, uint vector)
  * if the error happens at an instruction boundary.
  * PC stacked is address of next instruction.
  */
-static inline void m68ki_stack_frame_1010(uint sr, uint vector, uint pc)
+static inline void m68ki_stack_frame_1010(uint sr, uint vector, uint pc,
+	uint fault_address, uint ssw)
 {
 	/* INTERNAL REGISTER */
 	m68ki_push_16(0);
@@ -1751,7 +1774,7 @@ static inline void m68ki_stack_frame_1010(uint sr, uint vector, uint pc)
 	m68ki_push_16(0);
 
 	/* DATA CYCLE FAULT ADDRESS (2 words) */
-	m68ki_push_32(0);
+	m68ki_push_32(fault_address);
 
 	/* INSTRUCTION PIPE STAGE B */
 	m68ki_push_16(0);
@@ -1760,7 +1783,7 @@ static inline void m68ki_stack_frame_1010(uint sr, uint vector, uint pc)
 	m68ki_push_16(0);
 
 	/* SPECIAL STATUS REGISTER */
-	m68ki_push_16(0);
+	m68ki_push_16(ssw);
 
 	/* INTERNAL REGISTER */
 	m68ki_push_16(0);
@@ -1780,7 +1803,8 @@ static inline void m68ki_stack_frame_1010(uint sr, uint vector, uint pc)
  * if the error happens during instruction execution.
  * PC stacked is address of instruction in progress.
  */
-static inline void m68ki_stack_frame_1011(uint sr, uint vector, uint pc)
+static inline void m68ki_stack_frame_1011(uint sr, uint vector, uint pc,
+	uint fault_address, uint ssw)
 {
 	/* INTERNAL REGISTERS (18 words) */
 	m68ki_push_32(0);
@@ -1823,7 +1847,7 @@ static inline void m68ki_stack_frame_1011(uint sr, uint vector, uint pc)
 	m68ki_push_16(0);
 
 	/* DATA CYCLE FAULT ADDRESS (2 words) */
-	m68ki_push_32(0);
+	m68ki_push_32(fault_address);
 
 	/* INSTRUCTION PIPE STAGE B */
 	m68ki_push_16(0);
@@ -1832,7 +1856,7 @@ static inline void m68ki_stack_frame_1011(uint sr, uint vector, uint pc)
 	m68ki_push_16(0);
 
 	/* SPECIAL STATUS REGISTER */
-	m68ki_push_16(0);
+	m68ki_push_16(ssw);
 
 	/* INTERNAL REGISTER */
 	m68ki_push_16(0);
@@ -1962,8 +1986,23 @@ static inline void m68ki_exception_bus_error(void)
 
 	uint sr = m68ki_init_exception();
 
-	/* Note: This is implemented for 68010 only! */
-	m68ki_stack_frame_1000(REG_PPC, sr, EXCEPTION_BUS_ERROR);
+	if (CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
+	{
+		uint ssw = 0x0100U | (m68ki_cpu.mmu_fault_rw ? 0x0040U : 0)
+			| (m68ki_cpu.mmu_fault_fc & 7U);
+		if (m68ki_cpu.mmu_fault_size == 2) ssw |= 0x0010U;
+		else if (m68ki_cpu.mmu_fault_size == 4) ssw |= 0x0020U;
+		if (m68ki_cpu.mmu_fault_is_mmu)
+			m68ki_stack_frame_1010(sr, EXCEPTION_BUS_ERROR, REG_PPC,
+				m68ki_cpu.mmu_fault_address, ssw);
+		else
+			m68ki_stack_frame_1011(sr, EXCEPTION_BUS_ERROR, REG_PPC,
+				m68ki_cpu.mmu_fault_address, ssw);
+	}
+	else
+	{
+		m68ki_stack_frame_1000(REG_PPC, sr, EXCEPTION_BUS_ERROR);
+	}
 
 	m68ki_jump_vector(EXCEPTION_BUS_ERROR);
 
