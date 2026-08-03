@@ -11,9 +11,9 @@ work/
 Thumbs.db
 *.swp
 *.swo
-core
-core.*
-core-*
+/core
+/core.*
+/core-*
 
 # Runtime state produced by emulator and reference-emulator sessions.
 cfg/
