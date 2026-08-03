@@ -616,6 +616,9 @@ void MacIIcxMachine::applyInput(const core::GuestInputEvent& event)
 
 void MacIIcxMachine::updateInterrupts()
 {
+    // Mac II GLUE routes the ASC FIFO IRQ, active high at the chip, through
+    // an inverter to VIA2 CB1.
+    m_via2.setCb1(!m_asc.interruptActive());
     const auto level = m_scc.interruptActive() ? 4U
         : (m_via2.interruptActive() ? 2U : (m_via1.interruptActive() ? 1U : 0U));
     m_cpu.setIrqLevel(level);
@@ -638,6 +641,7 @@ void MacIIcxMachine::updateViaInputs()
 void MacIIcxMachine::advanceDevices(int cpuCycles)
 {
     m_scc.tick(cpuCycles);
+    m_asc.tick(static_cast<std::uint64_t>(cpuCycles));
     m_adbTransceiver.tick(cpuCycles);
     m_viaCycleRemainder += cpuCycles;
     const auto viaCycles = m_viaCycleRemainder / cpuToViaRatio;

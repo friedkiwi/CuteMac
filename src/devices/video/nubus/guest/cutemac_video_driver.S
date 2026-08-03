@@ -129,12 +129,17 @@ set_entries_sequential:
         addq.w  #1,%d3
 set_entries_index_ready:
         andi.w  #0x00ff,%d1            | ColorSpec.value may carry flags above the CLUT index
+        tst.w   %d1
+        beq.s   set_entries_next        | preserve logical white
+        cmpi.w  #255,%d1
+        beq.s   set_entries_next        | preserve logical black
         move.b  %d1,(%a2)
         | System 6 supplies either a colour or grayscale table. Program its
         | RGB values verbatim: SetGray may be ordered after SetEntries.
         move.b  2(%a3),1(%a2)
         move.b  4(%a3),2(%a2)
         move.b  6(%a3),3(%a2)
+set_entries_next:
         adda.w  #8,%a3
         dbra    %d2,set_entries_loop
         moveq   #0,%d0

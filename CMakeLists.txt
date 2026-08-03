@@ -304,6 +304,10 @@ if(BUILD_TESTING)
 
     add_test(NAME via-port-inputs COMMAND CuteMacViaTests)
 
+    add_executable(CuteMacAppleSoundChipTests tests/apple_sound_chip_tests.cpp)
+    target_link_libraries(CuteMacAppleSoundChipTests PRIVATE CuteMacCore)
+    add_test(NAME apple-sound-chip COMMAND CuteMacAppleSoundChipTests)
+
     add_executable(CuteMacRomPatchTests
         tests/rom_patch_tests.cpp
     )
