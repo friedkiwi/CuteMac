@@ -486,6 +486,17 @@ QStringList MacIIcxMachine::debugRegisterLines() const
                      .arg(regs.pc, 8, 16, QLatin1Char('0')).arg(regs.sr, 4, 16, QLatin1Char('0'))
                      .arg(regs.usp, 8, 16, QLatin1Char('0')).arg(regs.isp, 8, 16, QLatin1Char('0'))
                      .arg(regs.msp, 8, 16, QLatin1Char('0')).arg(regs.vbr, 8, 16, QLatin1Char('0')));
+    lines.append(QStringLiteral("PMMU=%1 TC=%2 TT0=%3 TT1=%4 PHYS_PC=%5")
+                     .arg(regs.pmmuEnabled ? QStringLiteral("on") : QStringLiteral("off"))
+                     .arg(regs.pmmuTc, 8, 16, QLatin1Char('0'))
+                     .arg(regs.pmmuTt0, 8, 16, QLatin1Char('0'))
+                     .arg(regs.pmmuTt1, 8, 16, QLatin1Char('0'))
+                     .arg(regs.physicalPc, 8, 16, QLatin1Char('0')));
+    lines.append(QStringLiteral("CRP=%1:%2 SRP=%3:%4")
+                     .arg(regs.pmmuCrpLimit, 8, 16, QLatin1Char('0'))
+                     .arg(regs.pmmuCrpAddress, 8, 16, QLatin1Char('0'))
+                     .arg(regs.pmmuSrpLimit, 8, 16, QLatin1Char('0'))
+                     .arg(regs.pmmuSrpAddress, 8, 16, QLatin1Char('0')));
     return lines;
 }
 

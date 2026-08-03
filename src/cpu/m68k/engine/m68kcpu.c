@@ -750,10 +750,33 @@ unsigned int m68k_get_pmmu_tc(void)
 #endif
 }
 
+unsigned int m68k_get_pmmu_tt0(void)
+{
+#if M68K_EMULATE_PMMU
+	return m68ki_cpu.mmu_tt0;
+#else
+	return 0;
+#endif
+}
+
+unsigned int m68k_get_pmmu_tt1(void)
+{
+#if M68K_EMULATE_PMMU
+	return m68ki_cpu.mmu_tt1;
+#else
+	return 0;
+#endif
+}
+
+unsigned int m68k_get_pmmu_crp_limit(void) { return m68ki_cpu.mmu_crp_limit; }
+unsigned int m68k_get_pmmu_crp_address(void) { return m68ki_cpu.mmu_crp_aptr; }
+unsigned int m68k_get_pmmu_srp_limit(void) { return m68ki_cpu.mmu_srp_limit; }
+unsigned int m68k_get_pmmu_srp_address(void) { return m68ki_cpu.mmu_srp_aptr; }
+
 unsigned int m68k_translate_address(unsigned int address)
 {
 #if M68K_EMULATE_PMMU
-	if (PMMU_ENABLED)
+	if (HAS_PMMU && PMMU_ENABLED)
 		return pmmu_translate_addr(address);
 #endif
 	return ADDRESS_68K(address);
@@ -1179,6 +1202,8 @@ void m68k_pulse_reset(void)
 {
 	/* Disable the PMMU on reset */
 	m68ki_cpu.pmmu_enabled = 0;
+	m68ki_cpu.mmu_tt0 = 0;
+	m68ki_cpu.mmu_tt1 = 0;
 	pmmu_atc_flush();
 	m68k_pmmu_atc_reset_statistics();
 

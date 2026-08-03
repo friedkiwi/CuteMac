@@ -153,6 +153,12 @@ M68kCpuCore::RegisterSnapshot M68kCpuCore::registers() const
     snapshot.vbr = m68k_get_reg(nullptr, M68K_REG_VBR);
     snapshot.pmmuEnabled = m68k_get_pmmu_enabled() != 0;
     snapshot.pmmuTc = m68k_get_pmmu_tc();
+    snapshot.pmmuTt0 = m68k_get_pmmu_tt0();
+    snapshot.pmmuTt1 = m68k_get_pmmu_tt1();
+    snapshot.pmmuCrpLimit = m68k_get_pmmu_crp_limit();
+    snapshot.pmmuCrpAddress = m68k_get_pmmu_crp_address();
+    snapshot.pmmuSrpLimit = m68k_get_pmmu_srp_limit();
+    snapshot.pmmuSrpAddress = m68k_get_pmmu_srp_address();
     snapshot.physicalPc = m68k_translate_address(snapshot.pc);
     return snapshot;
 }

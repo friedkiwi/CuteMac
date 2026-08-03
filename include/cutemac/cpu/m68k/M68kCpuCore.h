@@ -21,6 +21,12 @@ public:
         std::uint32_t vbr = 0;
         bool pmmuEnabled = false;
         std::uint32_t pmmuTc = 0;
+        std::uint32_t pmmuTt0 = 0;
+        std::uint32_t pmmuTt1 = 0;
+        std::uint32_t pmmuCrpLimit = 0;
+        std::uint32_t pmmuCrpAddress = 0;
+        std::uint32_t pmmuSrpLimit = 0;
+        std::uint32_t pmmuSrpAddress = 0;
         std::uint32_t physicalPc = 0;
     };
 

@@ -387,6 +387,12 @@ void m68k_set_reg(m68k_register_t reg, unsigned int value);
 /* 68030 PMMU inspection for debugger frontends. */
 unsigned int m68k_get_pmmu_enabled(void);
 unsigned int m68k_get_pmmu_tc(void);
+unsigned int m68k_get_pmmu_tt0(void);
+unsigned int m68k_get_pmmu_tt1(void);
+unsigned int m68k_get_pmmu_crp_limit(void);
+unsigned int m68k_get_pmmu_crp_address(void);
+unsigned int m68k_get_pmmu_srp_limit(void);
+unsigned int m68k_get_pmmu_srp_address(void);
 unsigned int m68k_translate_address(unsigned int address);
 void m68k_pmmu_atc_flush(void);
 void m68k_pmmu_atc_reset_statistics(void);

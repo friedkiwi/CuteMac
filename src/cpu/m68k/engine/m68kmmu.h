@@ -32,16 +32,38 @@ static uint pmmu_atc_page_shift(void)
 	return 32 - table_bits;
 }
 
-uint pmmu_translate_addr(uint addr_in)
+static int pmmu_match_tt(uint addr_in, uint fc, uint tt, uint rw)
+{
+	uint address_base, address_mask, fc_mask, fc_bits;
+
+	if (!(tt & 0x00008000U))
+		return 0;
+
+	address_base = tt & 0xff000000U;
+	address_mask = ((tt << 8) & 0xff000000U) ^ 0xff000000U;
+	fc_mask = (~tt) & 7U;
+	fc_bits = (tt >> 4) & 7U;
+	return (addr_in & address_mask) == (address_base & address_mask)
+		&& (fc & fc_mask) == (fc_bits & fc_mask)
+		&& ((tt & 0x100U) || (rw != 0) == (((tt >> 9) & 1U) != 0));
+}
+
+uint pmmu_translate_addr_fc(uint addr_in, uint fc, uint rw)
 {
 	uint32 addr_out, tbl_entry = 0, tbl_entry2, tamode = 0, tbmode = 0, tcmode = 0;
 	uint root_aptr, root_limit, tofs, is, abits, bbits, cbits;
 	uint resolved, tptr, shift, page_shift, page_mask, supervisor, atc_index;
 	m68ki_mmu_atc_entry *atc_entry;
 
+	/* The 68030 transparent translation registers are checked before the
+	 * ATC and page tables.  A match maps the logical address unchanged. */
+	if (pmmu_match_tt(addr_in, fc, m68ki_cpu.mmu_tt0, rw)
+		|| pmmu_match_tt(addr_in, fc, m68ki_cpu.mmu_tt1, rw))
+		return addr_in;
+
 	page_shift = pmmu_atc_page_shift();
 	page_mask = 0xffffffffU >> (32 - page_shift);
-	supervisor = (m68ki_get_sr() & 0x2000) != 0;
+	supervisor = (fc & 4U) != 0;
 	atc_index = ((addr_in >> page_shift) ^ (supervisor ? 0x80U : 0U)) & (M68K_MMU_ATC_ENTRIES - 1);
 	atc_entry = &m68ki_cpu.mmu_atc[atc_index];
 	if (atc_entry->valid && atc_entry->page_shift == page_shift
@@ -57,7 +79,7 @@ uint pmmu_translate_addr(uint addr_in)
 	addr_out = addr_in;
 
 	// if SRP is enabled and we're in supervisor mode, use it
-	if ((m68ki_cpu.mmu_tc & 0x02000000) && (m68ki_get_sr() & 0x2000))
+	if ((m68ki_cpu.mmu_tc & 0x02000000) && supervisor)
 	{
 		root_aptr = m68ki_cpu.mmu_srp_aptr;
 		root_limit = m68ki_cpu.mmu_srp_limit;
@@ -212,6 +234,48 @@ uint pmmu_translate_addr(uint addr_in)
 	return addr_out;
 }
 
+uint pmmu_translate_addr(uint addr_in)
+{
+	const uint fc = (m68ki_get_sr() & 0x2000)
+		? FUNCTION_CODE_SUPERVISOR_PROGRAM : FUNCTION_CODE_USER_PROGRAM;
+	return pmmu_translate_addr_fc(addr_in, fc, 1);
+}
+
+static int pmmu_decode_ea(uint ea, uint *address)
+{
+	const uint mode = (ea >> 3) & 7;
+	const uint reg = ea & 7;
+
+	switch (mode)
+	{
+		case 2: *address = REG_A[reg]; return 1;
+		case 5: *address = EA_AY_DI_32(); return 1;
+		case 6: *address = EA_AY_IX_32(); return 1;
+		case 7:
+			switch (reg)
+			{
+				case 0: *address = EA_AW_32(); return 1;
+				case 1: *address = EA_AL_32(); return 1;
+			}
+	}
+
+	m68ki_exception_1111();
+	return 0;
+}
+
+static uint pmmu_fc_from_modes(uint modes)
+{
+	if ((modes & 0x1f) == 0)
+		return REG_SFC;
+	if ((modes & 0x1f) == 1)
+		return REG_DFC;
+	if (((modes >> 3) & 3) == 1)
+		return REG_D[modes & 7] & 7;
+	if (((modes >> 3) & 3) == 2)
+		return modes & 7;
+	return 0;
+}
+
 /*
 
 	m68881_mmu_ops: COP 0 MMU opcode handling
@@ -244,7 +308,15 @@ void m68881_mmu_ops(void)
 
 				if ((modes & 0xfde0) == 0x2000)	// PLOAD
 				{
-					fprintf(stderr,"680x0: unhandled PLOAD\n");
+					uint address;
+					if (!(m68ki_cpu.cpu_type & CPU_TYPE_030))
+					{
+						m68ki_exception_1111();
+						return;
+					}
+					if (pmmu_decode_ea(ea, &address))
+						(void)pmmu_translate_addr_fc(address,
+							pmmu_fc_from_modes(modes), (modes & 0x200) != 0);
 					return;
 				}
 				else if ((modes & 0xe200) == 0x2000)	// PFLUSH
@@ -276,8 +348,33 @@ void m68881_mmu_ops(void)
 				{
 					switch ((modes>>13) & 0x7)
 					{
-						case 0:	// MC68030/040 form with FD bit
-						case 2:	// MC68881 form, FD never set
+						case 0:	// MC68030 transparent translation registers
+							if (!(m68ki_cpu.cpu_type & CPU_TYPE_030))
+							{
+								m68ki_exception_1111();
+								return;
+							}
+							if (((modes >> 10) & 7) != 2 && ((modes >> 10) & 7) != 3)
+							{
+								m68ki_exception_1111();
+								return;
+							}
+							if (modes & 0x200)
+								WRITE_EA_32(ea, ((modes >> 10) & 7) == 2
+									? m68ki_cpu.mmu_tt0 : m68ki_cpu.mmu_tt1);
+							else
+							{
+								const uint value = READ_EA_32(ea);
+								if (((modes >> 10) & 7) == 2)
+									m68ki_cpu.mmu_tt0 = value;
+								else
+									m68ki_cpu.mmu_tt1 = value;
+								if (!(modes & 0x100))
+									pmmu_atc_flush();
+							}
+							break;
+
+						case 2:	// TC/SRP/CRP (68030 or external 68851)
 							if (modes & 0x200)
 							{
 							 	switch ((modes>>10) & 7)
@@ -303,9 +400,10 @@ void m68881_mmu_ops(void)
 							{
 							 	switch ((modes>>10) & 7)
 								{
-									case 0:	// translation control register
-										m68ki_cpu.mmu_tc = READ_EA_32(ea);
-										pmmu_atc_flush();
+					case 0:	// translation control register
+						m68ki_cpu.mmu_tc = READ_EA_32(ea);
+						if (!(modes & 0x100))
+							pmmu_atc_flush();
 
 										if (m68ki_cpu.mmu_tc & 0x80000000)
 										{
@@ -319,16 +417,18 @@ void m68881_mmu_ops(void)
 
 									case 2:	// supervisor root pointer
 										temp64 = READ_EA_64(ea);
-										m68ki_cpu.mmu_srp_limit = (temp64>>32) & 0xffffffff;
-										m68ki_cpu.mmu_srp_aptr = temp64 & 0xffffffff;
-										pmmu_atc_flush();
+						m68ki_cpu.mmu_srp_limit = (temp64>>32) & 0xffffffff;
+						m68ki_cpu.mmu_srp_aptr = temp64 & 0xffffffff;
+						if (!(modes & 0x100))
+							pmmu_atc_flush();
 										break;
 
 									case 3:	// CPU root pointer
 										temp64 = READ_EA_64(ea);
-										m68ki_cpu.mmu_crp_limit = (temp64>>32) & 0xffffffff;
-										m68ki_cpu.mmu_crp_aptr = temp64 & 0xffffffff;
-										pmmu_atc_flush();
+						m68ki_cpu.mmu_crp_limit = (temp64>>32) & 0xffffffff;
+						m68ki_cpu.mmu_crp_aptr = temp64 & 0xffffffff;
+						if (!(modes & 0x100))
+							pmmu_atc_flush();
 										break;
 
 									default:

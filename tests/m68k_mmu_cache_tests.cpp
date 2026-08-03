@@ -140,5 +140,48 @@ int main()
     core.reset();
     ok &= expect(m68k_get_pmmu_atc_hits() == 0 && m68k_get_pmmu_atc_misses() == 0,
         "CPU reset must flush the ATC and reset its statistics");
+
+    // The 68030 PMOVE encoding group zero addresses TT0/TT1. Older CuteMac
+    // code incorrectly treated these as the 64-bit SRP/CRP registers.
+    bus.write16(0x0100, 0xf010U); // PMOVE (A0),TT0
+    bus.write16(0x0102, 0x0800U);
+    bus.write32(0x0200, 0x50008107U); // $50xxxxxx, all FCs/RW, enabled
+    m68ki_cpu.dar[8] = 0x0200;
+    core.setProgramCounter(0x0100);
+    (void)core.stepInstruction();
+    ok &= expect(m68k_get_pmmu_tt0() == 0x50008107U,
+        "68030 PMOVE must load TT0 as a 32-bit register");
+
+    m68ki_cpu.mmu_tc = 0x82004000U;
+    m68ki_cpu.pmmu_enabled = 1;
+    m68k_pmmu_atc_flush();
+    bus.reads = 0;
+    ok &= expect(pmmu_translate_addr_fc(0x50f04000U, 5, 1) == 0x50f04000U
+            && bus.reads == 0,
+        "a matching 68030 TT must bypass the ATC and page-table walk");
+    bus.write32(0x1010, 0x30000001U);
+    ok &= expect(pmmu_translate_addr_fc(0x40f04000U, 1, 1) != 0x40f04000U
+            && bus.reads != 0,
+        "a nonmatching address must continue through normal translation");
+
+    // FC and R/W qualification are architectural parts of a 68030 TT.
+    m68ki_cpu.mmu_tt0 = 0x50008250U; // $50xxxxxx, supervisor-data reads only
+    ok &= expect(pmmu_translate_addr_fc(0x50f04000U, 5, 1) == 0x50f04000U,
+        "TT function-code and read qualification must accept a matching access");
+    bus.reads = 0;
+    bus.write32(0x1014, 0x30000001U);
+    (void)pmmu_translate_addr_fc(0x50f04000U, 1, 1);
+    ok &= expect(bus.reads != 0,
+        "TT function-code qualification must reject a nonmatching access");
+
+    // CPU selection gates integrated PMMU registers. A plain 68020 has no
+    // integrated PMMU; a future external 68851 remains a separate capability.
+    core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68020);
+    m68ki_cpu.mmu_tt0 = 0x12345678U;
+    m68ki_cpu.dar[8] = 0x0200;
+    core.setProgramCounter(0x0100);
+    (void)core.stepInstruction();
+    ok &= expect(m68ki_cpu.mmu_tt0 == 0x12345678U,
+        "68020 selection must not expose integrated 68030 TT registers");
     return ok ? 0 : 1;
 }
