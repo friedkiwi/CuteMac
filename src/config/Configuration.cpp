@@ -39,6 +39,33 @@ QString safeProfileFileBase(QString profileName)
     return profileName.isEmpty() ? QStringLiteral("Mac_Plus") : profileName;
 }
 
+bool machineHasFloppyController(const QString& machineId)
+{
+    const auto machine = machines::MachineCatalog::find(machineId);
+    if (!machine) return false;
+    return machine->reusableDevices.contains(QStringLiteral("device.iwm"))
+        || machine->reusableDevices.contains(QStringLiteral("device.swim1"));
+}
+
+void normalizeFloppyDevices(Configuration& configuration)
+{
+    if (!machineHasFloppyController(configuration.machineId)) {
+        configuration.iwmDevices.clear();
+        configuration.floppyPath.clear();
+        return;
+    }
+    if (configuration.iwmDevices.isEmpty()) {
+        configuration.iwmDevices.append({ configuration.floppyPath, false });
+    }
+    while (configuration.iwmDevices.size() < 2) {
+        configuration.iwmDevices.append(IwmDeviceConfiguration {});
+    }
+    if (configuration.iwmDevices.size() > 2) {
+        configuration.iwmDevices.resize(2);
+    }
+    configuration.floppyPath = configuration.iwmDevices.first().imagePath;
+}
+
 } // namespace
 
 bool isCuteMacVideoDevice(NuBusDeviceType type)
@@ -125,10 +152,10 @@ RuntimeSpeed runtimeSpeedFromName(const QString& name)
 QStringList Configuration::enabledRomPatches() const
 {
     QStringList patches;
-    if (skipRamPatternTest) {
-        patches.append(machineId == QStringLiteral("mac-iicx")
-                ? QStringLiteral("maciicx.skip_ram_pattern_test")
-                : QStringLiteral("macplus.skip_ram_pattern_test"));
+    if (skipRamPatternTest && machineId == QStringLiteral("mac-iicx")) {
+        patches.append(QStringLiteral("maciicx.skip_ram_pattern_test"));
+    } else if (skipRamPatternTest && machineId == QStringLiteral("mac-plus")) {
+        patches.append(QStringLiteral("macplus.skip_ram_pattern_test"));
     }
     return patches;
 }
@@ -163,6 +190,7 @@ Configuration ConfigurationManager::defaultMacPlusConfiguration()
     configuration.machineId = QStringLiteral("mac-plus");
     configuration.ramSizeKiB = 4096;
     configuration.cyclesPerFrame = 130560;
+    configuration.iwmDevices.append(IwmDeviceConfiguration {});
     configuration.iwmDevices.append(IwmDeviceConfiguration {});
     return configuration;
 }
@@ -323,11 +351,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     if (configuration.machineId.isEmpty()) {
         configuration.machineId = QStringLiteral("mac-plus");
     }
-    if (configuration.iwmDevices.isEmpty()) {
-        configuration.iwmDevices.append({ configuration.floppyPath, false });
-    } else {
-        configuration.floppyPath = configuration.iwmDevices.first().imagePath;
-    }
+    normalizeFloppyDevices(configuration);
     if (configuration.scsiDevices.isEmpty() && !configuration.diskPath.isEmpty()) {
         configuration.scsiDevices.append({ 0, ScsiDeviceType::HardDisk, configuration.diskPath, false });
     } else if (!configuration.scsiDevices.isEmpty()) {

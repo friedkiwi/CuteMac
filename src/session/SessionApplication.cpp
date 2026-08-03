@@ -58,6 +58,23 @@ bool sameIwmDevices(const QVector<cutemac::config::IwmDeviceConfiguration>& left
     return true;
 }
 
+void ensureFloppyDriveCount(cutemac::config::Configuration& configuration)
+{
+    if (configuration.iwmDevices.isEmpty()) return;
+    while (configuration.iwmDevices.size() < 2) {
+        configuration.iwmDevices.append(cutemac::config::IwmDeviceConfiguration {});
+    }
+    if (configuration.iwmDevices.size() > 2) {
+        configuration.iwmDevices.resize(2);
+    }
+    configuration.floppyPath = configuration.iwmDevices.first().imagePath;
+}
+
+QString floppyDriveName(int drive)
+{
+    return drive == 0 ? QStringLiteral("Internal Floppy") : QStringLiteral("External Floppy");
+}
+
 bool sameScsiDevices(const QVector<cutemac::config::ScsiDeviceConfiguration>& left,
     const QVector<cutemac::config::ScsiDeviceConfiguration>& right)
 {
@@ -412,6 +429,7 @@ public:
         , m_controlServer(m_session, m_runner, this)
         , m_audioOutput(this)
     {
+        ensureFloppyDriveCount(m_configuration);
         setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
         m_display = new DisplayWidget;
         m_display->setMouseCallback([this](int x, int y, bool pressed) {
@@ -543,18 +561,14 @@ private:
         connect(m_zoomCustomAction, &QAction::triggered, this, [this]() { setCustomZoom(); });
 
         auto* mediaMenu = menuBar()->addMenu(QStringLiteral("Media"));
-        mediaMenu->addAction(QStringLiteral("Insert Floppy Image"), this, [this]() {
-            const auto path = cutemac::ui::DiskImagePickerDialog::getImage(cutemac::storage::DiskImageType::Floppy,
-                QStringLiteral("Insert Floppy Image"), this);
-            if (!path.isEmpty() && !m_configuration.iwmDevices.isEmpty()) insertFloppyPath(path);
-        });
-        mediaMenu->addAction(QStringLiteral("Eject Floppy Image"), this, [this]() {
-            m_configuration.floppyPath.clear();
-            if (!m_configuration.iwmDevices.isEmpty()) m_configuration.iwmDevices[0].imagePath.clear();
-            m_session.ejectFloppy();
-            saveConfiguration();
-            updateStatus();
-        });
+        if (!m_configuration.iwmDevices.isEmpty()) {
+            ensureFloppyDriveCount(m_configuration);
+            for (int drive = 0; drive < 2; ++drive) {
+                auto* floppyMenu = mediaMenu->addMenu(floppyDriveName(drive));
+                floppyMenu->addAction(QStringLiteral("Insert Image..."), this, [this, drive]() { insertFloppyFromToolbar(drive); });
+                floppyMenu->addAction(QStringLiteral("Eject Image"), this, [this, drive]() { ejectFloppy(drive); });
+            }
+        }
 
     }
 
@@ -614,40 +628,42 @@ private:
         m_toolbar->addSeparator();
 
         if (!m_configuration.iwmDevices.isEmpty()) {
-            if (!m_configuration.iwmDevices.first().imagePath.isEmpty())
-                rememberRecentImage(cutemac::storage::DiskImageType::Floppy, m_configuration.iwmDevices.first().imagePath);
-            auto* floppy = new QToolButton(m_toolbar);
-            floppy->setIcon(style()->standardIcon(QStyle::SP_DriveFDIcon));
-            floppy->setToolTip(QStringLiteral("Internal floppy drive"));
-            floppy->setPopupMode(QToolButton::InstantPopup);
-            auto* menu = new QMenu(floppy);
-            menu->addAction(QStringLiteral("Insert..."), this, [this]() { insertFloppyFromToolbar(); });
-            const auto recentFloppies = recentImages(cutemac::storage::DiskImageType::Floppy);
-            if (!recentFloppies.isEmpty()) {
-                auto* recent = menu->addMenu(QStringLiteral("Recent Images"));
-                for (const auto& path : recentFloppies)
-                    recent->addAction(QFileInfo(path).fileName(), this, [this, path]() { insertFloppyPath(path); });
+            ensureFloppyDriveCount(m_configuration);
+            for (int drive = 0; drive < 2; ++drive) {
+                if (!m_configuration.iwmDevices[drive].imagePath.isEmpty())
+                    rememberRecentImage(cutemac::storage::DiskImageType::Floppy, m_configuration.iwmDevices[drive].imagePath);
+                auto* floppy = new QToolButton(m_toolbar);
+                floppy->setIcon(style()->standardIcon(QStyle::SP_DriveFDIcon));
+                const auto imageName = m_configuration.iwmDevices[drive].imagePath.isEmpty()
+                    ? QStringLiteral("empty")
+                    : QFileInfo(m_configuration.iwmDevices[drive].imagePath).fileName();
+                floppy->setToolTip(QStringLiteral("%1: %2").arg(floppyDriveName(drive), imageName));
+                floppy->setText(drive == 0 ? QStringLiteral("FD1") : QStringLiteral("FD2"));
+                floppy->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                floppy->setPopupMode(QToolButton::InstantPopup);
+                auto* menu = new QMenu(floppy);
+                menu->addAction(QStringLiteral("Insert..."), this, [this, drive]() { insertFloppyFromToolbar(drive); });
+                const auto recentFloppies = recentImages(cutemac::storage::DiskImageType::Floppy);
+                if (!recentFloppies.isEmpty()) {
+                    auto* recent = menu->addMenu(QStringLiteral("Recent Images"));
+                    for (const auto& path : recentFloppies)
+                        recent->addAction(QFileInfo(path).fileName(), this, [this, drive, path]() { insertFloppyPath(drive, path); });
+                }
+                menu->addAction(QStringLiteral("Eject"), this, [this, drive]() { ejectFloppy(drive); });
+                menu->addAction(QStringLiteral("New 800K Image..."), this, [this, drive]() { createFloppyFromToolbar(drive, 800LL * 1024); });
+                menu->addAction(QStringLiteral("New 1.44 MB Image..."), this, [this, drive]() { createFloppyFromToolbar(drive, 1440LL * 1024); });
+                menu->addSeparator();
+                auto* readOnly = menu->addAction(QStringLiteral("Read-only"));
+                readOnly->setCheckable(true);
+                readOnly->setChecked(m_configuration.iwmDevices[drive].readOnly);
+                connect(readOnly, &QAction::toggled, this, [this, drive](bool enabled) {
+                    m_configuration.iwmDevices[drive].readOnly = enabled;
+                    saveConfiguration();
+                    statusBar()->showMessage(QStringLiteral("Floppy access mode will apply when the media is next inserted"), 3000);
+                });
+                floppy->setMenu(menu);
+                m_toolbar->addWidget(floppy);
             }
-            menu->addAction(QStringLiteral("Eject"), this, [this]() {
-                m_configuration.floppyPath.clear();
-                m_configuration.iwmDevices[0].imagePath.clear();
-                m_session.ejectFloppy();
-                saveConfiguration();
-                updateStatus();
-            });
-            menu->addAction(QStringLiteral("New 800K Image..."), this, [this]() { createFloppyFromToolbar(800LL * 1024); });
-            menu->addAction(QStringLiteral("New 1.44 MB Image..."), this, [this]() { createFloppyFromToolbar(1440LL * 1024); });
-            menu->addSeparator();
-            auto* readOnly = menu->addAction(QStringLiteral("Read-only"));
-            readOnly->setCheckable(true);
-            readOnly->setChecked(m_configuration.iwmDevices.first().readOnly);
-            connect(readOnly, &QAction::toggled, this, [this](bool enabled) {
-                m_configuration.iwmDevices[0].readOnly = enabled;
-                saveConfiguration();
-                statusBar()->showMessage(QStringLiteral("Floppy access mode will apply when the media is next inserted"), 3000);
-            });
-            floppy->setMenu(menu);
-            m_toolbar->addWidget(floppy);
         }
 
         for (const auto& device : m_configuration.scsiDevices) {
@@ -670,8 +686,10 @@ private:
                             [this, id = device.id, type = device.type, path]() { insertScsiPath(id, type, path); });
                 }
             }
-            auto* eject = menu->addAction(QStringLiteral("Eject"), this, [this, id = device.id]() { ejectScsiFromToolbar(id); });
-            eject->setEnabled(!device.imagePath.isEmpty());
+            if (cdRom) {
+                auto* eject = menu->addAction(QStringLiteral("Eject"), this, [this, id = device.id]() { ejectScsiFromToolbar(id); });
+                eject->setEnabled(!device.imagePath.isEmpty());
+            }
             if (!cdRom) {
                 menu->addAction(QStringLiteral("New Hard Disk Image..."), this,
                     [this, id = device.id]() { createHardDiskFromToolbar(id); });
@@ -718,10 +736,12 @@ private:
 
     void ejectScsiFromToolbar(int id)
     {
-        m_session.ejectScsiDevice(id);
         const auto iterator = std::find_if(m_configuration.scsiDevices.begin(), m_configuration.scsiDevices.end(),
             [id](const auto& device) { return device.id == id; });
-        if (iterator != m_configuration.scsiDevices.end()) iterator->imagePath.clear();
+        if (iterator == m_configuration.scsiDevices.end()
+            || iterator->type != cutemac::config::ScsiDeviceType::CdRom) return;
+        m_session.ejectScsiDevice(id);
+        iterator->imagePath.clear();
         saveConfiguration();
         QTimer::singleShot(0, this, [this]() { buildToolbar(); });
         updateStatus();
@@ -768,19 +788,24 @@ private:
                 .arg(cdRom || iterator->readOnly ? QStringLiteral("Read-only") : QStringLiteral("Read/write")));
     }
 
-    void insertFloppyFromToolbar()
+    void insertFloppyFromToolbar(int drive)
     {
         const auto path = cutemac::ui::DiskImagePickerDialog::getImage(cutemac::storage::DiskImageType::Floppy,
-            QStringLiteral("Insert Floppy Image"), this);
+            QStringLiteral("Insert %1 Image").arg(floppyDriveName(drive)), this);
         if (path.isEmpty()) return;
-        insertFloppyPath(path);
+        insertFloppyPath(drive, path);
     }
 
-    void insertFloppyPath(const QString& path)
+    void insertFloppyPath(int drive, const QString& path)
     {
-        m_configuration.floppyPath = path;
-        m_configuration.iwmDevices[0].imagePath = path;
-        if (!m_session.insertFloppy(path, m_configuration.iwmDevices.first().readOnly)) {
+        if (drive < 0 || drive >= 2 || m_configuration.iwmDevices.isEmpty()) return;
+        ensureFloppyDriveCount(m_configuration);
+        const auto previousPath = m_configuration.iwmDevices[drive].imagePath;
+        m_configuration.iwmDevices[drive].imagePath = path;
+        if (drive == 0) m_configuration.floppyPath = path;
+        if (!m_session.insertFloppy(drive, path, m_configuration.iwmDevices[drive].readOnly)) {
+            m_configuration.iwmDevices[drive].imagePath = previousPath;
+            if (drive == 0) m_configuration.floppyPath = previousPath;
             statusBar()->showMessage(QStringLiteral("Failed to load floppy image"), 3000);
             return;
         }
@@ -813,16 +838,28 @@ private:
                 ? QStringLiteral("recentMedia/floppy") : QStringLiteral("recentMedia/cdRom"), paths);
     }
 
-    void createFloppyFromToolbar(qint64 sizeBytes)
+    void ejectFloppy(int drive)
+    {
+        if (drive < 0 || drive >= 2 || m_configuration.iwmDevices.isEmpty()) return;
+        ensureFloppyDriveCount(m_configuration);
+        m_configuration.iwmDevices[drive].imagePath.clear();
+        if (drive == 0) m_configuration.floppyPath.clear();
+        m_session.ejectFloppy(drive);
+        saveConfiguration();
+        QTimer::singleShot(0, this, [this]() { buildToolbar(); });
+        updateStatus();
+    }
+
+    void createFloppyFromToolbar(int drive, qint64 sizeBytes)
     {
         const auto path = cutemac::ui::createDiskImage(cutemac::storage::DiskImageType::Floppy, this, sizeBytes);
         if (path.isEmpty()) return;
-        insertCreatedFloppy(path);
+        insertCreatedFloppy(drive, path);
     }
 
-    void insertCreatedFloppy(const QString& path)
+    void insertCreatedFloppy(int drive, const QString& path)
     {
-        insertFloppyPath(path);
+        insertFloppyPath(drive, path);
     }
 
     void buildStatusBar()
@@ -971,6 +1008,14 @@ private:
 
         const auto state = m_session.status();
         updateSpeedActions();
+        const auto floppyStatus = [this]() {
+            if (m_configuration.iwmDevices.isEmpty()) return QStringLiteral("none");
+            auto driveText = [](const QVector<cutemac::config::IwmDeviceConfiguration>& devices, int drive) {
+                if (drive >= devices.size() || devices[drive].imagePath.isEmpty()) return QStringLiteral("empty");
+                return QFileInfo(devices[drive].imagePath).fileName();
+            };
+            return QStringLiteral("I:%1 E:%2").arg(driveText(m_configuration.iwmDevices, 0), driveText(m_configuration.iwmDevices, 1));
+        }();
         m_status->setText(QStringLiteral("%1 | %2 | %3 | PC 0x%4 | cycles %5 | overlay %6 | frames %7 | ROM %8 | disk %9 | floppy %10")
                               .arg(m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"))
                               .arg(state.machineId)
@@ -981,7 +1026,7 @@ private:
                               .arg(m_frames)
                               .arg(m_romLoaded ? QStringLiteral("loaded") : QStringLiteral("missing"))
                               .arg(m_configuration.diskPath.isEmpty() ? QStringLiteral("none") : QFileInfo(m_configuration.diskPath).fileName())
-                              .arg(m_configuration.floppyPath.isEmpty() ? QStringLiteral("none") : QFileInfo(m_configuration.floppyPath).fileName()));
+                              .arg(floppyStatus));
     }
 
     cutemac::config::Configuration m_configuration;

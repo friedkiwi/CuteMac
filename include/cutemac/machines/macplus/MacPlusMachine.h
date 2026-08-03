@@ -29,6 +29,13 @@ namespace cutemac::machines::macplus {
 
 class MacPlusMachine final : public core::IMachine, public core::IDebugCpuAccess, public cpu::m68k::M68kBus {
 public:
+    enum class Model {
+        Macintosh128K,
+        Macintosh512K,
+        Macintosh512Ke,
+        MacintoshPlus,
+    };
+
     struct BusAccess {
         QString operation;
         QString region;
@@ -66,7 +73,8 @@ public:
         bool loaded = false;
     };
 
-    explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024, const QString& nvramPath = {});
+    explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024, const QString& nvramPath = {},
+        Model model = Model::MacintoshPlus);
 
     [[nodiscard]] QString machineId() const override;
     [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {}) override;
@@ -77,7 +85,9 @@ public:
     void ejectScsiCdRom(int id) override;
     void ejectScsiDevice(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly = false) override;
+    [[nodiscard]] bool loadFloppyImage(int drive, const QString& path, bool readOnly = false) override;
     void ejectFloppyImage() override;
+    void ejectFloppyImage(int drive) override;
     void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     void reset() override;
     [[nodiscard]] bool triggerProgrammersInterrupt() override;
@@ -122,6 +132,7 @@ public:
     [[nodiscard]] RomInfo romInfo() const;
     [[nodiscard]] QString diskImagePath() const;
     [[nodiscard]] QString floppyImagePath() const;
+    [[nodiscard]] QString floppyImagePath(int drive) const;
     [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const;
     [[nodiscard]] devices::iwm::IwmController::DebugState iwmDebugState() const;
     [[nodiscard]] QByteArray floppyTrackBytesForDebug(int track, int side) const;
@@ -187,11 +198,13 @@ private:
     void advanceAudio(int cycles);
     [[nodiscard]] std::uint32_t soundBufferBase(bool mainPage) const;
     [[nodiscard]] QString regionName(Region region) const;
+    [[nodiscard]] std::uint8_t readRomByte(std::uint32_t address) const;
     [[nodiscard]] std::uint32_t readRom32Direct(std::uint32_t offset) const;
 
+    Model m_model = Model::MacintoshPlus;
     cpu::m68k::M68kCpuCore m_cpu;
     QVector<std::uint8_t> m_ram;
-    std::array<std::uint8_t, 128 * 1024> m_rom {};
+    QVector<std::uint8_t> m_rom;
 
     devices::via6522::Via6522 m_via;
     devices::rtc::MacRtc m_rtc;

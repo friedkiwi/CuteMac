@@ -19,6 +19,11 @@ RomCatalog::RomCatalog(QString directoryPath)
 QVector<RomDefinition> RomCatalog::definitions()
 {
     return {
+        { QStringLiteral("mac128k-28ba61ce"), QStringLiteral("Macintosh 128K"), RomKind::Machine, QStringLiteral("mac-128k"), QStringLiteral("0x28BA61CE"), 64 * 1024, {}, {}, QByteArray::fromHex("28ba61ce"), 10, false },
+        { QStringLiteral("mac512k-28ba4e50"), QStringLiteral("Macintosh 512K"), RomKind::Machine, QStringLiteral("mac-512k"), QStringLiteral("0x28BA4E50"), 64 * 1024, {}, {}, QByteArray::fromHex("28ba4e50"), 10, false },
+        { QStringLiteral("mac512ke-v3"), QStringLiteral("Macintosh 512Ke"), RomKind::Machine, QStringLiteral("mac-512ke"), QStringLiteral("v3 / Plus 0x4D1F8172"), 128 * 1024, QByteArray::fromHex("dd908e2b65772a6b1f0c859c24e9a0d3dcde17b1c6a24f4abd8955846d7895e7"), {}, QByteArray::fromHex("4d1f8172"), 30, false },
+        { QStringLiteral("mac512ke-v2"), QStringLiteral("Macintosh 512Ke"), RomKind::Machine, QStringLiteral("mac-512ke"), QStringLiteral("v2 / Plus 0x4D1EEAE1"), 128 * 1024, {}, {}, QByteArray::fromHex("4d1eeae1"), 20, true },
+        { QStringLiteral("mac512ke-v1"), QStringLiteral("Macintosh 512Ke"), RomKind::Machine, QStringLiteral("mac-512ke"), QStringLiteral("v1 / Plus 0x4D1EEEE1"), 128 * 1024, {}, {}, QByteArray::fromHex("4d1eeee1"), 10, true },
         { QStringLiteral("macplus-v3"), QStringLiteral("Macintosh Plus"), RomKind::Machine, QStringLiteral("mac-plus"), QStringLiteral("v3 (Loud Harmonicas)"), 128 * 1024, QByteArray::fromHex("dd908e2b65772a6b1f0c859c24e9a0d3dcde17b1c6a24f4abd8955846d7895e7"), {}, QByteArray::fromHex("4d1f8172"), 30, false },
         { QStringLiteral("macplus-v2"), QStringLiteral("Macintosh Plus"), RomKind::Machine, QStringLiteral("mac-plus"), QStringLiteral("v2 (Lonely Heifers)"), 128 * 1024, {}, {}, QByteArray::fromHex("4d1eeae1"), 20, true },
         { QStringLiteral("macplus-v1"), QStringLiteral("Macintosh Plus"), RomKind::Machine, QStringLiteral("mac-plus"), QStringLiteral("v1 (Lonely Hearts)"), 128 * 1024, {}, {}, QByteArray::fromHex("4d1eeee1"), 10, true },

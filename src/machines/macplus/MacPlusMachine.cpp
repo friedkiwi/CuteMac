@@ -14,6 +14,7 @@ namespace {
 constexpr std::uint32_t ramBase = 0x000000;
 constexpr std::uint32_t romBase = 0x400000;
 constexpr std::uint32_t overlayRamBase = 0x600000;
+constexpr std::uint32_t overlayRamWindowBytes = 0x100000;
 constexpr std::uint32_t scsiBase = 0x580000;
 constexpr std::uint32_t sccReadBase = 0x9ffff8;
 constexpr std::uint32_t sccWriteBase = 0xbffff9;
@@ -40,6 +41,8 @@ constexpr qsizetype maxPendingAudioBytes = soundSampleRate / 2; // About 250 ms 
 constexpr std::uint64_t inputDebounceCycles = 130560;
 constexpr qsizetype maxBusTraceEntries = 4096;
 constexpr qsizetype maxSoundCaptureBytes = 22255 * 30;
+constexpr qsizetype rom64KBytes = 64 * 1024;
+constexpr qsizetype rom128KBytes = 128 * 1024;
 
 constexpr std::uint32_t regionMask = 0xc00000;
 constexpr std::uint32_t offset4MiBMask = 0x3fffff;
@@ -62,17 +65,53 @@ constexpr std::uint8_t viaRtcEnableBit = 0x04;
     return static_cast<std::uint8_t>(value);
 }
 
+[[nodiscard]] QString machineIdForModel(MacPlusMachine::Model model)
+{
+    switch (model) {
+    case MacPlusMachine::Model::Macintosh128K:
+        return QStringLiteral("mac-128k");
+    case MacPlusMachine::Model::Macintosh512K:
+        return QStringLiteral("mac-512k");
+    case MacPlusMachine::Model::Macintosh512Ke:
+        return QStringLiteral("mac-512ke");
+    case MacPlusMachine::Model::MacintoshPlus:
+    default:
+        return QStringLiteral("mac-plus");
+    }
+}
+
+[[nodiscard]] bool modelHasScsi(MacPlusMachine::Model model)
+{
+    return model == MacPlusMachine::Model::MacintoshPlus;
+}
+
+[[nodiscard]] bool modelSupportsDoubleSidedFloppy(MacPlusMachine::Model model)
+{
+    return model == MacPlusMachine::Model::Macintosh512Ke
+        || model == MacPlusMachine::Model::MacintoshPlus;
+}
+
+[[nodiscard]] qsizetype romSizeForModel(MacPlusMachine::Model model)
+{
+    return model == MacPlusMachine::Model::Macintosh128K
+            || model == MacPlusMachine::Model::Macintosh512K
+        ? rom64KBytes
+        : rom128KBytes;
+}
+
 } // namespace
 
-QString MacPlusMachine::machineId() const { return QStringLiteral("mac-plus"); }
+QString MacPlusMachine::machineId() const { return machineIdForModel(m_model); }
 
 void MacPlusMachine::attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint)
 {
     m_scc.attachEndpoint(channel == 0 ? devices::scc::Z8530Scc::Channel::A : devices::scc::Z8530Scc::Channel::B, std::move(endpoint));
 }
 
-MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath)
-    : m_ram(static_cast<qsizetype>(ramSize), 0)
+MacPlusMachine::MacPlusMachine(std::size_t ramSize, const QString& nvramPath, Model model)
+    : m_model(model)
+    , m_ram(static_cast<qsizetype>(ramSize), 0)
+    , m_rom(static_cast<qsizetype>(romSizeForModel(model)), 0)
     , m_scsiBus(m_scsi, {
           devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
           devices::scsi::ncr5380::MacintoshNcr5380Bus::RegisterLane::LeastSignificant,
@@ -161,7 +200,7 @@ bool MacPlusMachine::loadRomFile(const QString& path, const QStringList& enabled
         return false;
     }
 
-    const auto patchResult = rom::RomPatcher::apply(data, QStringLiteral("mac-plus"), enabledPatches);
+    const auto patchResult = rom::RomPatcher::apply(data, machineId(), enabledPatches);
     m_romSha256 = QString::fromLatin1(patchResult.originalSha256.toHex());
     m_romPatchError = patchResult.error;
     if (!patchResult.success) {
@@ -176,11 +215,13 @@ bool MacPlusMachine::loadRomFile(const QString& path, const QStringList& enabled
 
 bool MacPlusMachine::loadDiskImage(const QString& path)
 {
+    if (!modelHasScsi(m_model)) return false;
     return loadScsiDisk(0, path, false);
 }
 
 bool MacPlusMachine::loadScsiDisk(int id, const QString& path, bool readOnly)
 {
+    if (!modelHasScsi(m_model)) return false;
     if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) {
         return false;
     }
@@ -198,6 +239,7 @@ bool MacPlusMachine::loadScsiDisk(int id, const QString& path, bool readOnly)
 
 bool MacPlusMachine::loadScsiCdRom(int id, const QString& path)
 {
+    if (!modelHasScsi(m_model)) return false;
     if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return false;
     auto cdRom = m_scsiCdRoms[static_cast<std::size_t>(id)];
     if (!cdRom) cdRom = std::make_shared<devices::scsi::ScsiCdRomDevice>();
@@ -210,6 +252,7 @@ bool MacPlusMachine::loadScsiCdRom(int id, const QString& path)
 
 void MacPlusMachine::ejectScsiCdRom(int id)
 {
+    if (!modelHasScsi(m_model)) return;
     if (id < 0 || id >= static_cast<int>(m_scsiCdRoms.size())) return;
     const auto& cdRom = m_scsiCdRoms[static_cast<std::size_t>(id)];
     if (cdRom) cdRom->eject();
@@ -223,6 +266,7 @@ void MacPlusMachine::ejectDiskImage()
 
 void MacPlusMachine::ejectScsiDevice(int id)
 {
+    if (!modelHasScsi(m_model)) return;
     if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return;
     auto& disk = m_scsiDisks[static_cast<std::size_t>(id)];
     if (disk) disk->eject();
@@ -236,12 +280,28 @@ void MacPlusMachine::ejectScsiDevice(int id)
 
 bool MacPlusMachine::loadFloppyImage(const QString& path, bool readOnly)
 {
-    return m_iwm.loadFloppyImage(path, readOnly);
+    return loadFloppyImage(0, path, readOnly);
+}
+
+bool MacPlusMachine::loadFloppyImage(int drive, const QString& path, bool readOnly)
+{
+    if (!m_iwm.loadFloppyImage(drive, path, readOnly)) return false;
+    const auto state = m_iwm.debugState(drive);
+    if (!modelSupportsDoubleSidedFloppy(m_model) && (state.doubleSided || state.highDensity)) {
+        m_iwm.ejectFloppyImage(drive);
+        return false;
+    }
+    return true;
 }
 
 void MacPlusMachine::ejectFloppyImage()
 {
-    m_iwm.ejectFloppyImage();
+    ejectFloppyImage(0);
+}
+
+void MacPlusMachine::ejectFloppyImage(int drive)
+{
+    m_iwm.ejectFloppyImage(drive);
 }
 
 void MacPlusMachine::reset()
@@ -456,10 +516,7 @@ std::uint8_t MacPlusMachine::read8(std::uint32_t address)
     }
     if (region == Region::Rom) {
         ++m_accessSummary.romReads;
-        const auto offset = (address - romBase) & offset4MiBMask;
-        const auto value = offset < m_rom.size()
-            ? m_rom[romOffset(address)]
-            : static_cast<std::uint8_t>(0x5a ^ (offset >> 9) ^ (offset >> 17));
+        const auto value = readRomByte(address);
         recordBusAccess("read", region, address, value, 1);
         return value;
     }
@@ -530,18 +587,13 @@ void MacPlusMachine::write32(std::uint32_t address, std::uint32_t value)
 
 MacPlusMachine::Region MacPlusMachine::regionFor(std::uint32_t address) const
 {
-    if (m_overlayEnabled && address < m_rom.size()) {
-        return Region::Rom;
-    }
-    if (m_overlayEnabled && address >= overlayRamBase && address < overlayRamBase + static_cast<std::uint32_t>(m_ram.size())) {
-        return Region::Ram;
-    }
-    if (!m_overlayEnabled && address < static_cast<std::uint32_t>(m_ram.size())) {
+    if (address < romBase) return m_overlayEnabled ? Region::Rom : Region::Ram;
+    if (address >= overlayRamBase && address < overlayRamBase + overlayRamWindowBytes) {
         return Region::Ram;
     }
     if ((address & regionMask) == romBase) {
         const auto offset = address & offset4MiBMask;
-        if (offset >= (scsiBase - romBase) && offset < (scsiBase - romBase + 0x1000)) {
+        if (modelHasScsi(m_model) && offset >= (scsiBase - romBase) && offset < (scsiBase - romBase + 0x1000)) {
             return Region::Scsi;
         }
         return Region::Rom;
@@ -575,7 +627,7 @@ std::uint32_t MacPlusMachine::ramOffset(std::uint32_t address) const
 
 std::uint32_t MacPlusMachine::romOffset(std::uint32_t address) const
 {
-    if (m_overlayEnabled && address < m_rom.size()) {
+    if (m_overlayEnabled && address < romBase) {
         return address % static_cast<std::uint32_t>(m_rom.size());
     }
     return (address - romBase) % static_cast<std::uint32_t>(m_rom.size());
@@ -649,11 +701,7 @@ std::uint8_t MacPlusMachine::debugRead8(std::uint32_t address) const
         return m_ram[ramOffset(address)];
     }
     if (region == Region::Rom) {
-        const auto offset = (address - romBase) & offset4MiBMask;
-        if (offset < m_rom.size()) {
-            return m_rom[romOffset(address)];
-        }
-        return static_cast<std::uint8_t>(0x5a ^ (offset >> 9) ^ (offset >> 17));
+        return readRomByte(address);
     }
     if (region == Region::Configuration) {
         return 0;
@@ -794,7 +842,12 @@ QString MacPlusMachine::diskImagePath() const
 
 QString MacPlusMachine::floppyImagePath() const
 {
-    return m_iwm.floppyImagePath();
+    return floppyImagePath(0);
+}
+
+QString MacPlusMachine::floppyImagePath(int drive) const
+{
+    return m_iwm.floppyImagePath(drive);
 }
 
 devices::scsi::ncr5380::Ncr5380::DebugState MacPlusMachine::scsiDebugState() const
@@ -1087,6 +1140,18 @@ QString MacPlusMachine::regionName(Region region) const
     }
 
     return QStringLiteral("unknown");
+}
+
+std::uint8_t MacPlusMachine::readRomByte(std::uint32_t address) const
+{
+    const auto offset = m_overlayEnabled && address < romBase
+        ? address
+        : (address - romBase) & offset4MiBMask;
+    if (m_model == Model::Macintosh512Ke) {
+        if (offset >= 0x20000U && offset < 0x20002U) return 0xff;
+        if (offset >= 0x40000U && offset < 0x40002U) return 0xaa;
+    }
+    return m_rom[static_cast<qsizetype>(offset % static_cast<std::uint32_t>(m_rom.size()))];
 }
 
 std::uint32_t MacPlusMachine::readRom32Direct(std::uint32_t offset) const

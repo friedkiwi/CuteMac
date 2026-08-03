@@ -30,6 +30,17 @@ int main()
     ok &= expect(catalog.pathForId(QStringLiteral("macplus-v1")).isEmpty(), "different revision must remain missing");
     ok &= expect(catalog.pathForId(QStringLiteral("cutemac-video")) == QStringLiteral("(embedded)"), "embedded ROM must always be available");
 
+    QTemporaryDir compactDirectory;
+    QByteArray mac128k(64 * 1024, '\0');
+    mac128k.replace(0, 4, QByteArray::fromHex("28ba61ce"));
+    QFile mac128kFile(compactDirectory.filePath(QStringLiteral("macintosh.bin")));
+    ok &= expect(mac128kFile.open(QIODevice::WriteOnly), "128K ROM fixture open");
+    ok &= expect(mac128kFile.write(mac128k) == mac128k.size(), "128K ROM fixture write");
+    mac128kFile.close();
+    cutemac::rom::RomCatalog compactCatalog(compactDirectory.path());
+    ok &= expect(!compactCatalog.pathForId(QStringLiteral("mac128k-28ba61ce")).isEmpty(),
+        "ROM manager must identify the Macintosh 128K ROM independent of filename");
+
     const auto definitions = cutemac::rom::RomCatalog::definitions();
     const auto powerMacRom = std::find_if(definitions.cbegin(), definitions.cend(), [](const auto& definition) {
         return definition.id == QStringLiteral("powermac-pdm-9feb69b3");
@@ -43,5 +54,7 @@ int main()
     configuration.machineId = QStringLiteral("mac-plus");
     ok &= expect(catalog.missingRomNames(configuration).isEmpty(), "found compatible revision must satisfy machine requirement");
     ok &= expect(catalog.warningForConfiguration(configuration).contains(QStringLiteral("older ROM revision")), "v2 must produce old-revision warning");
+    configuration.machineId = QStringLiteral("mac-128k");
+    ok &= expect(compactCatalog.missingRomNames(configuration).isEmpty(), "found 128K ROM must satisfy Macintosh 128K requirement");
     return ok ? 0 : 1;
 }

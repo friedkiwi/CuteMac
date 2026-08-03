@@ -207,13 +207,26 @@ std::uint8_t IwmController::swimAccess(std::uint8_t registerIndex, std::uint8_t 
 
 bool IwmController::loadFloppyImage(const QString& path, bool readOnly)
 {
-    (void)m_internalDrive.flushWrites();
-    return m_internalDrive.load(path, readOnly);
+    return loadFloppyImage(0, path, readOnly);
+}
+
+bool IwmController::loadFloppyImage(int drive, const QString& path, bool readOnly)
+{
+    auto* floppy = driveByIndex(drive);
+    if (floppy == nullptr) return false;
+    (void)floppy->flushWrites();
+    return floppy->load(path, readOnly);
 }
 
 void IwmController::ejectFloppyImage()
 {
-    m_internalDrive.eject();
+    ejectFloppyImage(0);
+}
+
+void IwmController::ejectFloppyImage(int drive)
+{
+    auto* floppy = driveByIndex(drive);
+    if (floppy != nullptr) floppy->eject();
 }
 
 void IwmController::setSideSelect(bool sideSelect)
@@ -227,12 +240,24 @@ void IwmController::setSideSelect(bool sideSelect)
 
 QString IwmController::floppyImagePath() const
 {
-    return m_internalDrive.path();
+    return floppyImagePath(0);
+}
+
+QString IwmController::floppyImagePath(int drive) const
+{
+    const auto* floppy = driveByIndex(drive);
+    return floppy == nullptr ? QString() : floppy->path();
 }
 
 bool IwmController::floppyInserted() const
 {
-    return m_internalDrive.inserted();
+    return floppyInserted(0);
+}
+
+bool IwmController::floppyInserted(int drive) const
+{
+    const auto* floppy = driveByIndex(drive);
+    return floppy != nullptr && floppy->inserted();
 }
 
 IwmController::DebugState IwmController::debugState() const
@@ -245,6 +270,35 @@ IwmController::DebugState IwmController::debugState() const
         m_selectedDriveRegister,
         floppy.motorOn,
         !m_lines[SelectDrive],
+        floppy.inserted,
+        floppy.doubleSided,
+        floppy.highDensity,
+        floppy.writable,
+        floppy.track,
+        floppy.side,
+        m_dataReads,
+        m_statusReads,
+        m_handshakeReads,
+        m_dataWrites,
+        floppy.imagePath,
+        floppy.imageFormat,
+        floppy.trackBytes,
+        floppy.trackCursor,
+    };
+}
+
+IwmController::DebugState IwmController::debugState(int drive) const
+{
+    const auto* selected = driveByIndex(drive);
+    if (selected == nullptr) return {};
+    const auto floppy = selected->debugState();
+    return {
+        lineMask(),
+        m_mode,
+        m_status,
+        m_selectedDriveRegister,
+        floppy.motorOn,
+        drive == 0,
         floppy.inserted,
         floppy.doubleSided,
         floppy.highDensity,
@@ -542,6 +596,20 @@ floppy::FloppyDiskImage& IwmController::selectedDrive()
 const floppy::FloppyDiskImage& IwmController::selectedDrive() const
 {
     return m_lines[SelectDrive] ? m_externalDrive : m_internalDrive;
+}
+
+floppy::FloppyDiskImage* IwmController::driveByIndex(int drive)
+{
+    if (drive == 0) return &m_internalDrive;
+    if (drive == 1) return &m_externalDrive;
+    return nullptr;
+}
+
+const floppy::FloppyDiskImage* IwmController::driveByIndex(int drive) const
+{
+    if (drive == 0) return &m_internalDrive;
+    if (drive == 1) return &m_externalDrive;
+    return nullptr;
 }
 
 void IwmController::appendTraceEvent(const QString& event)

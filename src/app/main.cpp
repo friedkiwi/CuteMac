@@ -176,7 +176,7 @@ private:
             setItem(row, 2, warning.isEmpty() ? QStringLiteral("Ready") : QStringLiteral("Needs attention"));
             m_table->item(row, 2)->setToolTip(warning);
             setItem(row, 3, compactPath(profile.configuration.diskPath));
-            setItem(row, 4, compactPath(profile.configuration.floppyPath));
+            setItem(row, 4, compactFloppyPaths(profile.configuration));
             setItem(row, 5, profile.path);
         }
         m_table->resizeColumnsToContents();
@@ -195,6 +195,16 @@ private:
     [[nodiscard]] QString compactPath(const QString& path) const
     {
         return path.isEmpty() ? QStringLiteral("(not set)") : QFileInfo(path).fileName();
+    }
+
+    [[nodiscard]] QString compactFloppyPaths(const cutemac::config::Configuration& configuration) const
+    {
+        if (configuration.iwmDevices.isEmpty()) return QStringLiteral("(not set)");
+        auto drivePath = [](const QVector<cutemac::config::IwmDeviceConfiguration>& devices, int drive) {
+            if (drive >= devices.size() || devices[drive].imagePath.isEmpty()) return QStringLiteral("-");
+            return QFileInfo(devices[drive].imagePath).fileName();
+        };
+        return QStringLiteral("I:%1 E:%2").arg(drivePath(configuration.iwmDevices, 0), drivePath(configuration.iwmDevices, 1));
     }
 
     [[nodiscard]] int selectedRow() const

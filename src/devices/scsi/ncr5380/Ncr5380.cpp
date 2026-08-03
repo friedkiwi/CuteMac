@@ -110,7 +110,11 @@ std::uint8_t Ncr5380::readRegister(std::uint8_t registerIndex, bool dack)
     case inputData:
         return m_outputData;
     case resetRegister:
-        m_request = false;
+        // Reading the NCR5380 Reset Parity/Interrupt register clears the
+        // chip's interrupt/parity latch; it does not acknowledge a target
+        // handshake or deassert the SCSI REQ line.  A/UX performs this read
+        // immediately after selection while the target is requesting the
+        // first command byte.
         return 0;
     default:
         return m_registers[registerIndex];
@@ -122,6 +126,20 @@ void Ncr5380::writeRegister(std::uint8_t registerIndex, bool dack, std::uint8_t 
     registerIndex &= 0x07;
     if (dack) {
         if (!m_request) return;
+        if (m_phase == Phase::Command) {
+            // Macintosh SCSI glue permits command bytes through the blind
+            // pseudo-DMA aperture. A/UX uses this path for the CDB itself;
+            // there is no separate ICR ACK edge for each DACK. Keep REQ
+            // asserted between bytes and execute when the CDB is complete.
+            acceptCommandByte(value);
+            if (m_commandReady) {
+                m_commandReady = false;
+                executeCommand();
+            } else {
+                m_request = true;
+            }
+            return;
+        }
         writeDataByte(value);
         if (m_phase == Phase::DataOut && m_request) {
             m_request = false;

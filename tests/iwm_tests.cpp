@@ -49,6 +49,15 @@ bool create800KImage(const QString& path)
     return file.write(QByteArray(800 * 1024, '\0')) == 800 * 1024;
 }
 
+bool create400KImage(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        return false;
+    }
+    return file.write(QByteArray(400 * 1024, '\0')) == 400 * 1024;
+}
+
 bool createPatternImage(const QString& path, qsizetype size, std::uint8_t seed)
 {
     QByteArray bytes(size, '\0');
@@ -219,7 +228,31 @@ int main()
     ok &= expect(directory.isValid() && create800KImage(imagePath), "test image creation failed");
     ok &= expect(iwm.loadFloppyImage(imagePath), "800K image must load");
 
+    QByteArray truncatedRaw800K(424895, '\0');
+    truncatedRaw800K[1024] = 0x42;
+    truncatedRaw800K[1025] = 0x44;
+    truncatedRaw800K[1042] = 0x06;
+    truncatedRaw800K[1043] = 0x3a;
+    truncatedRaw800K[1046] = 0x02;
+    truncatedRaw800K[1047] = 0x00;
+    truncatedRaw800K[1052] = 0x00;
+    truncatedRaw800K[1053] = 0x04;
+    const auto truncatedPath = directory.filePath(QStringLiteral("truncated-800k.img"));
+    QFile truncatedFile(truncatedPath);
+    ok &= expect(truncatedFile.open(QIODevice::WriteOnly)
+            && truncatedFile.write(truncatedRaw800K) == truncatedRaw800K.size(),
+        "truncated raw 800K fixture creation failed");
+    truncatedFile.close();
+    IwmController truncatedIwm;
+    truncatedIwm.reset();
+    ok &= expect(truncatedIwm.loadFloppyImage(truncatedPath, true)
+            && truncatedIwm.debugState().imageFormat == QStringLiteral("raw-800k")
+            && truncatedIwm.debugState().doubleSided,
+        "trailing-zero-truncated raw HFS floppy must load as 800K media");
+
     selectDriveRegister(iwm, 0x06); // WRTPRT
+    ok &= expect(iwm.debugState().selectedRegister == 0x06,
+        "external SEL must remain part of the Sony drive-register encoding");
     ok &= expect((readStatus(iwm) & 0x80) != 0, "writable media must deassert write protection");
 
     selectDriveRegister(iwm, 0x09); // SIDES
@@ -234,6 +267,27 @@ int main()
     (void)iwm.access(8); // IWM enable off must not undo the drive command.
     ok &= expect(iwm.debugState().motorOn, "IWM disable must not stop the latched drive motor");
     ok &= expect((readStatus(iwm) & 0x80) == 0, "running drive must report MOTORON true");
+
+    IwmController singleSided;
+    singleSided.reset();
+    const auto singleSidedPath = directory.filePath(QStringLiteral("test-400.dsk"));
+    ok &= expect(create400KImage(singleSidedPath) && singleSided.loadFloppyImage(singleSidedPath, true),
+        "400K image must load");
+    ok &= expect(singleSided.debugState().imageFormat == QStringLiteral("raw-400k"), "400K format name");
+    ok &= expect(!singleSided.debugState().doubleSided, "400K media must be single-sided");
+    selectDriveRegister(singleSided, 0x09); // SIDES
+    ok &= expect((readStatus(singleSided) & 0x80) == 0, "400K media must not report a double-sided drive");
+    ok &= expect(startIwmMotor(singleSided), "400K internal drive motor must start with default drive-select polarity");
+    (void)singleSided.access(12); // Q6 off
+    (void)singleSided.access(14); // Q7 off: data-register read mode.
+    QByteArray nibbles;
+    for (int i = 0; i < 2048; ++i) {
+        nibbles.append(static_cast<char>(singleSided.access(12)));
+    }
+    ok &= expect(nibbles.contains(QByteArray::fromHex("d5aa96")),
+        "400K read stream must expose GCR address prologues from the inserted internal drive");
+    ok &= expect(nibbles.contains(QByteArray::fromHex("d5aaad")),
+        "400K read stream must expose GCR data prologues from the inserted internal drive");
 
     IwmController swim;
     swim.reset();

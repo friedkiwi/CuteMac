@@ -55,12 +55,39 @@ bool isDiskCopyFloppy(const QFileInfo& file)
     return supportedFloppySize && static_cast<quint64>(file.size()) == 84ULL + dataSize + tagSize;
 }
 
+bool isTruncatedRaw800KFloppy(const QFileInfo& file)
+{
+    // Some Apple distribution images omit unused zero-filled sectors at the
+    // end of an otherwise raw floppy (A/UX 2 Floppy Launch is one). Validate
+    // the HFS MDB geometry rather than treating every small .img as floppy.
+    if (file.size() <= 400 * 1024 || file.size() >= 800 * 1024) return false;
+    const auto suffix = file.suffix().toLower();
+    if (suffix != QStringLiteral("img") && suffix != QStringLiteral("dsk")) return false;
+    QFile image(file.absoluteFilePath());
+    if (!image.open(QIODevice::ReadOnly) || !image.seek(1024)) return false;
+    const auto mdb = image.read(32);
+    if (mdb.size() != 32) return false;
+    const auto be16 = [&](qsizetype offset) {
+        return (static_cast<std::uint16_t>(static_cast<std::uint8_t>(mdb[offset])) << 8)
+            | static_cast<std::uint8_t>(mdb[offset + 1]);
+    };
+    if (be16(0) != 0x4244) return false;
+    const auto allocationBlocks = be16(18);
+    const auto allocationBlockSize = (static_cast<std::uint32_t>(be16(20)) << 16) | be16(22);
+    const auto firstAllocationBlock = be16(28);
+    const auto volumeBytes = (static_cast<std::uint64_t>(firstAllocationBlock) * 512)
+        + static_cast<std::uint64_t>(allocationBlocks) * allocationBlockSize;
+    return allocationBlocks != 0 && allocationBlockSize != 0
+        && volumeBytes > static_cast<std::uint64_t>(file.size()) && volumeBytes <= 800U * 1024U;
+}
+
 DiskImageType inferType(const QFileInfo& file)
 {
     const auto suffix = file.suffix().toLower();
     if (suffix == QStringLiteral("iso") || suffix == QStringLiteral("cdr")) return DiskImageType::CdRom;
     if (file.size() == 400 * 1024 || file.size() == 800 * 1024 || file.size() == 1440 * 1024) return DiskImageType::Floppy;
-    if (suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image") || isDiskCopyFloppy(file))
+    if (suffix == QStringLiteral("dc42") || suffix == QStringLiteral("image")
+        || isDiskCopyFloppy(file) || isTruncatedRaw800KFloppy(file))
         return DiskImageType::Floppy;
     QFile image(file.absoluteFilePath());
     if (image.open(QIODevice::ReadOnly) && image.seek(16LL * 2048 + 1)
@@ -221,9 +248,10 @@ bool DiskImageManager::refresh()
         const auto absolutePath = file.absoluteFilePath();
         const auto found = std::find_if(m_images.begin(), m_images.end(), [&](const auto& image) { return image.path == absolutePath; });
         if (found == m_images.end()) registerImage(absolutePath, inferType(file));
-        else if (found->type == DiskImageType::HardDisk && isDiskCopyFloppy(file)) {
-            // Migrate entries created before Disk Copy images with an .img suffix
-            // were recognized structurally.
+        else if (found->type == DiskImageType::HardDisk
+            && (isDiskCopyFloppy(file) || isTruncatedRaw800KFloppy(file))) {
+            // Migrate structurally recognized floppy entries that older
+            // catalogs classified as hard disks because of their .img suffix.
             found->type = DiskImageType::Floppy;
         }
     }

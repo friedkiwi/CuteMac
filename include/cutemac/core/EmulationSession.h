@@ -56,7 +56,9 @@ public:
     [[nodiscard]] bool insertScsiDevice(int id, config::ScsiDeviceType type, const QString& path, bool readOnly = false);
     void ejectScsiDevice(int id);
     [[nodiscard]] bool insertFloppy(const QString& path, bool readOnly = false);
+    [[nodiscard]] bool insertFloppy(int drive, const QString& path, bool readOnly = false);
     void ejectFloppy();
+    void ejectFloppy(int drive);
 
     [[nodiscard]] void* debugMachine(const QString& machineId) override;
     [[nodiscard]] IDebugCpuAccess* debugCpuAccess() override;

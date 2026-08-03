@@ -45,8 +45,8 @@ public:
     std::array<QPushButton*, 2> serialConfigure {};
     std::array<config::SerialDeviceConfiguration, 2> serialConfiguration;
     QWidget* iwmTab = nullptr;
-    QLineEdit* floppy = nullptr;
-    QCheckBox* floppyReadOnly = nullptr;
+    std::array<QLineEdit*, 2> floppy {};
+    std::array<QCheckBox*, 2> floppyReadOnly {};
     QWidget* scsiTab = nullptr;
     QTableWidget* scsi = nullptr;
     QWidget* nubusTab = nullptr;
@@ -505,17 +505,38 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
 
     m_impl->iwmTab = new QWidget;
     auto* iwmForm = new QFormLayout(m_impl->iwmTab);
-    m_impl->floppy = new QLineEdit(m_impl->original.iwmDevices.isEmpty() ? m_impl->original.floppyPath : m_impl->original.iwmDevices.first().imagePath);
-    auto* floppyBrowse = new QPushButton(QStringLiteral("Browse..."));
-    auto* floppyNew = new QPushButton(QStringLiteral("New..."));
-    auto* floppyRow = new QHBoxLayout;
-    floppyRow->addWidget(m_impl->floppy, 1);
-    floppyRow->addWidget(floppyBrowse);
-    floppyRow->addWidget(floppyNew);
-    iwmForm->addRow(QStringLiteral("Internal floppy"), floppyRow);
-    m_impl->floppyReadOnly = new QCheckBox;
-    if (!m_impl->original.iwmDevices.isEmpty()) m_impl->floppyReadOnly->setChecked(m_impl->original.iwmDevices.first().readOnly);
-    iwmForm->addRow(QStringLiteral("Read-only"), m_impl->floppyReadOnly);
+    auto configuredFloppy = [this](int drive) {
+        if (drive >= 0 && drive < m_impl->original.iwmDevices.size()) return m_impl->original.iwmDevices[drive];
+        return config::IwmDeviceConfiguration {};
+    };
+    const std::array<QString, 2> floppyLabels {
+        QStringLiteral("Internal floppy"),
+        QStringLiteral("External floppy"),
+    };
+    for (int drive = 0; drive < 2; ++drive) {
+        const auto configured = configuredFloppy(drive);
+        m_impl->floppy[drive] = new QLineEdit(drive == 0 && configured.imagePath.isEmpty()
+                ? m_impl->original.floppyPath
+                : configured.imagePath);
+        auto* floppyBrowse = new QPushButton(QStringLiteral("Browse..."));
+        auto* floppyNew = new QPushButton(QStringLiteral("New..."));
+        auto* floppyRow = new QHBoxLayout;
+        floppyRow->addWidget(m_impl->floppy[drive], 1);
+        floppyRow->addWidget(floppyBrowse);
+        floppyRow->addWidget(floppyNew);
+        iwmForm->addRow(floppyLabels[drive], floppyRow);
+        m_impl->floppyReadOnly[drive] = new QCheckBox;
+        m_impl->floppyReadOnly[drive]->setChecked(configured.readOnly);
+        iwmForm->addRow(QStringLiteral("%1 read-only").arg(floppyLabels[drive]), m_impl->floppyReadOnly[drive]);
+        connect(floppyBrowse, &QPushButton::clicked, this, [this, drive]() {
+            const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::Floppy, QStringLiteral("Select Floppy Image"), this);
+            if (!path.isEmpty()) m_impl->floppy[drive]->setText(path);
+        });
+        connect(floppyNew, &QPushButton::clicked, this, [this, drive]() {
+            const auto path = createDiskImage(storage::DiskImageType::Floppy, this);
+            if (!path.isEmpty()) m_impl->floppy[drive]->setText(path);
+        });
+    }
     m_impl->tabs->addTab(m_impl->iwmTab, QStringLiteral("IWM"));
 
     m_impl->scsiTab = new QWidget;
@@ -625,9 +646,9 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         m_impl->ram->clear();
         if (it != profiles.cend()) {
             for (const auto sizeKiB : it->supportedRamSizesKiB) {
-                const auto label = sizeKiB % 1024 == 0
-                    ? QStringLiteral("%1 MiB").arg(sizeKiB / 1024)
-                    : QStringLiteral("%1 MiB").arg(sizeKiB / 1024.0, 0, 'f', 1);
+                const auto label = sizeKiB < 1024 ? QStringLiteral("%1 KiB").arg(sizeKiB)
+                    : sizeKiB % 1024 == 0 ? QStringLiteral("%1 MiB").arg(sizeKiB / 1024)
+                                           : QStringLiteral("%1 MiB").arg(sizeKiB / 1024.0, 0, 'f', 1);
                 m_impl->ram->addItem(label, sizeKiB);
             }
         }
@@ -675,14 +696,6 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         m_impl->nvramZapped = true;
         QMessageBox::information(this, QStringLiteral("Zap NVRAM"),
             QStringLiteral("The NVRAM image was erased. Apply the configuration to reset the Macintosh."));
-    });
-    connect(floppyBrowse, &QPushButton::clicked, this, [this]() {
-        const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::Floppy, QStringLiteral("Select Floppy Image"), this);
-        if (!path.isEmpty()) m_impl->floppy->setText(path);
-    });
-    connect(floppyNew, &QPushButton::clicked, this, [this]() {
-        const auto path = createDiskImage(storage::DiskImageType::Floppy, this);
-        if (!path.isEmpty()) m_impl->floppy->setText(path);
     });
     connect(addDisk, &QPushButton::clicked, this, [this, addScsiRow, firstAvailableScsiId]() {
         const auto path = DiskImagePickerDialog::getImage(storage::DiskImageType::HardDisk, QStringLiteral("Select Hard Disk Image"), this);
@@ -834,8 +847,18 @@ config::Configuration ConfigurationDialog::configuration() const
             result.serialDevices.append(serial);
         }
     }
-    result.iwmDevices = { { m_impl->floppy->text().trimmed(), m_impl->floppyReadOnly->isChecked() } };
-    result.floppyPath = result.iwmDevices.first().imagePath;
+    const auto machineProfile = machines::MachineCatalog::find(result.machineId);
+    const auto machineDevices = machineProfile ? machineProfile->reusableDevices : QStringList {};
+    if (machineDevices.contains(QStringLiteral("device.iwm")) || machineDevices.contains(QStringLiteral("device.swim1"))) {
+        result.iwmDevices = {
+            { m_impl->floppy[0]->text().trimmed(), m_impl->floppyReadOnly[0]->isChecked() },
+            { m_impl->floppy[1]->text().trimmed(), m_impl->floppyReadOnly[1]->isChecked() },
+        };
+        result.floppyPath = result.iwmDevices.first().imagePath;
+    } else {
+        result.iwmDevices.clear();
+        result.floppyPath.clear();
+    }
     result.scsiDevices.clear();
     for (int row = 0; row < m_impl->scsi->rowCount(); ++row) {
         result.scsiDevices.append({

@@ -165,15 +165,27 @@ void MacIIcxMachine::ejectScsiDevice(int id)
 
 bool MacIIcxMachine::loadFloppyImage(const QString& path, bool readOnly)
 {
-    if (!m_swim.loadFloppyImage(path, readOnly)) return false;
-    m_floppyPath = path;
+    return loadFloppyImage(0, path, readOnly);
+}
+
+bool MacIIcxMachine::loadFloppyImage(int drive, const QString& path, bool readOnly)
+{
+    if (drive < 0 || drive >= static_cast<int>(m_floppyPaths.size())) return false;
+    if (!m_swim.loadFloppyImage(drive, path, readOnly)) return false;
+    m_floppyPaths[static_cast<std::size_t>(drive)] = path;
     return true;
 }
 
 void MacIIcxMachine::ejectFloppyImage()
 {
-    m_swim.ejectFloppyImage();
-    m_floppyPath.clear();
+    ejectFloppyImage(0);
+}
+
+void MacIIcxMachine::ejectFloppyImage(int drive)
+{
+    if (drive < 0 || drive >= static_cast<int>(m_floppyPaths.size())) return;
+    m_swim.ejectFloppyImage(drive);
+    m_floppyPaths[static_cast<std::size_t>(drive)].clear();
 }
 
 void MacIIcxMachine::reset()
@@ -561,7 +573,12 @@ std::uint8_t MacIIcxMachine::readIo8(std::uint32_t address)
     if (offset >= 0x10000 && offset < 0x12000) {
         ++m_ioStatistics.scsiReads;
         const auto reg = static_cast<std::uint8_t>(((offset - 0x10000) >> 4) & 7);
-        const auto dack = (offset & 0x130) == 0x130;
+        // MAME's 0x130 handler offset is expressed in 16-bit words.  On the
+        // 68030 byte-addressed bus the register-6 DACK alias is therefore at
+        // $50010260, not $50010130.  Keep the comparison exact: A/UX reads
+        // register 7 at $50010070 during selection and must not acknowledge
+        // the target's first command-phase REQ.
+        const auto dack = offset == 0x10260;
         return static_cast<std::uint8_t>(dack ? m_scsiBus.readPseudoDma(1) : m_scsiBus.readRegister(reg, 1));
     }
     if (offset >= 0x14000 && offset < 0x16000) return m_asc.read(static_cast<std::uint16_t>(offset & 0x0fff));
@@ -593,7 +610,11 @@ void MacIIcxMachine::writeIo8(std::uint32_t address, std::uint8_t value)
     } else if (offset >= 0x10000 && offset < 0x12000) {
         ++m_ioStatistics.scsiWrites;
         const auto reg = static_cast<std::uint8_t>(((offset - 0x10000) >> 4) & 7);
-        const auto dack = (offset & 0x130) == 0x130;
+        // The Macintosh GLUE aliases are direction-dependent: pseudo-DMA
+        // reads DACK NCR register 6 at byte offset $260, while writes DACK
+        // register 0 at byte offset $200.  MAME's corresponding $130/$100
+        // offsets are 16-bit word offsets, not physical byte addresses.
+        const auto dack = offset == 0x10200;
         if (dack) m_scsiBus.writePseudoDma(1, value);
         else m_scsiBus.writeRegister(reg, 1, value);
     } else if (offset >= 0x14000 && offset < 0x16000) {

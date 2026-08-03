@@ -42,11 +42,16 @@ public:
     [[nodiscard]] std::uint8_t access(std::uint8_t registerIndex, std::uint8_t value, bool write);
 
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly = false);
+    [[nodiscard]] bool loadFloppyImage(int drive, const QString& path, bool readOnly = false);
     void ejectFloppyImage();
+    void ejectFloppyImage(int drive);
     void setSideSelect(bool sideSelect);
     [[nodiscard]] QString floppyImagePath() const;
+    [[nodiscard]] QString floppyImagePath(int drive) const;
     [[nodiscard]] bool floppyInserted() const;
+    [[nodiscard]] bool floppyInserted(int drive) const;
     [[nodiscard]] DebugState debugState() const;
+    [[nodiscard]] DebugState debugState(int drive) const;
     [[nodiscard]] QByteArray currentTrackBytesForDebug() const;
     [[nodiscard]] QByteArray trackBytesForDebug(int track, int side) const;
     void setTraceEnabled(bool enabled);
@@ -81,6 +86,8 @@ private:
     [[nodiscard]] std::uint8_t swimAccess(std::uint8_t registerIndex, std::uint8_t value, bool write);
     [[nodiscard]] floppy::FloppyDiskImage& selectedDrive();
     [[nodiscard]] const floppy::FloppyDiskImage& selectedDrive() const;
+    [[nodiscard]] floppy::FloppyDiskImage* driveByIndex(int drive);
+    [[nodiscard]] const floppy::FloppyDiskImage* driveByIndex(int drive) const;
     void appendTraceEvent(const QString& event);
 
     std::array<bool, 8> m_lines {};

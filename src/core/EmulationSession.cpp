@@ -18,10 +18,27 @@
 
 namespace cutemac::core {
 
+namespace {
+
+void ensureFloppyDriveCount(config::Configuration& configuration)
+{
+    if (configuration.iwmDevices.isEmpty()) return;
+    while (configuration.iwmDevices.size() < 2) {
+        configuration.iwmDevices.append(config::IwmDeviceConfiguration {});
+    }
+    if (configuration.iwmDevices.size() > 2) {
+        configuration.iwmDevices.resize(2);
+    }
+    configuration.floppyPath = configuration.iwmDevices.first().imagePath;
+}
+
+} // namespace
+
 EmulationSession::EmulationSession(config::Configuration configuration)
     : m_configuration(std::move(configuration))
-    , m_machine(createMachine(m_configuration))
 {
+    ensureFloppyDriveCount(m_configuration);
+    m_machine = createMachine(m_configuration);
 }
 
 EmulationSession::~EmulationSession() = default;
@@ -32,7 +49,19 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
         return {};
     }
     std::unique_ptr<IMachine> result;
-    if (configuration.machineId == QStringLiteral("mac-plus")) {
+    if (configuration.machineId == QStringLiteral("mac-128k")) {
+        result = std::make_unique<machines::macplus::MacPlusMachine>(
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024, configuration.nvramPath,
+            machines::macplus::MacPlusMachine::Model::Macintosh128K);
+    } else if (configuration.machineId == QStringLiteral("mac-512k")) {
+        result = std::make_unique<machines::macplus::MacPlusMachine>(
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024, configuration.nvramPath,
+            machines::macplus::MacPlusMachine::Model::Macintosh512K);
+    } else if (configuration.machineId == QStringLiteral("mac-512ke")) {
+        result = std::make_unique<machines::macplus::MacPlusMachine>(
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024, configuration.nvramPath,
+            machines::macplus::MacPlusMachine::Model::Macintosh512Ke);
+    } else if (configuration.machineId == QStringLiteral("mac-plus")) {
         result = std::make_unique<machines::macplus::MacPlusMachine>(
             static_cast<std::size_t>(configuration.ramSizeKiB) * 1024, configuration.nvramPath);
     } else if (configuration.machineId == QStringLiteral("mac-iicx")) {
@@ -92,9 +121,12 @@ bool EmulationSession::initialize()
     if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
         (void)m_machine->loadDiskImage(m_configuration.diskPath);
     }
-    if (!m_configuration.floppyPath.isEmpty()) {
-        const bool readOnly = !m_configuration.iwmDevices.isEmpty() && m_configuration.iwmDevices.first().readOnly;
-        (void)m_machine->loadFloppyImage(m_configuration.floppyPath, readOnly);
+    ensureFloppyDriveCount(m_configuration);
+    for (qsizetype index = 0; index < m_configuration.iwmDevices.size(); ++index) {
+        const auto& device = m_configuration.iwmDevices[index];
+        if (!device.imagePath.isEmpty()) {
+            (void)m_machine->loadFloppyImage(static_cast<int>(index), device.imagePath, device.readOnly);
+        }
     }
     if (m_romLoaded) {
         m_machine->reset();
@@ -108,6 +140,7 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
 {
     std::lock_guard lock(m_mutex);
     m_configuration = std::move(configuration);
+    ensureFloppyDriveCount(m_configuration);
     m_machine = createMachine(m_configuration);
     m_romLoaded = false;
     m_paused = true;
@@ -125,9 +158,11 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     if (m_configuration.scsiDevices.isEmpty() && !m_configuration.diskPath.isEmpty()) {
         (void)m_machine->loadDiskImage(m_configuration.diskPath);
     }
-    if (!m_configuration.floppyPath.isEmpty()) {
-        const bool readOnly = !m_configuration.iwmDevices.isEmpty() && m_configuration.iwmDevices.first().readOnly;
-        (void)m_machine->loadFloppyImage(m_configuration.floppyPath, readOnly);
+    for (qsizetype index = 0; index < m_configuration.iwmDevices.size(); ++index) {
+        const auto& device = m_configuration.iwmDevices[index];
+        if (!device.imagePath.isEmpty()) {
+            (void)m_machine->loadFloppyImage(static_cast<int>(index), device.imagePath, device.readOnly);
+        }
     }
     if (m_romLoaded) {
         m_machine->reset();
@@ -309,24 +344,38 @@ void EmulationSession::ejectScsiDevice(int id)
 
 bool EmulationSession::insertFloppy(const QString& path, bool readOnly)
 {
+    return insertFloppy(0, path, readOnly);
+}
+
+bool EmulationSession::insertFloppy(int drive, const QString& path, bool readOnly)
+{
     std::lock_guard lock(m_mutex);
-    if (!m_machine || !m_machine->loadFloppyImage(path, readOnly)) {
+    if (drive < 0 || drive >= 2 || !m_machine || !m_machine->loadFloppyImage(drive, path, readOnly)) {
         return false;
     }
-    m_configuration.floppyPath = path;
-    if (!m_configuration.iwmDevices.isEmpty()) {
-        m_configuration.iwmDevices[0] = { path, readOnly };
-    }
+    if (m_configuration.iwmDevices.isEmpty()) return false;
+    ensureFloppyDriveCount(m_configuration);
+    m_configuration.iwmDevices[drive] = { path, readOnly };
+    if (drive == 0) m_configuration.floppyPath = path;
     return true;
 }
 
 void EmulationSession::ejectFloppy()
 {
+    ejectFloppy(0);
+}
+
+void EmulationSession::ejectFloppy(int drive)
+{
     std::lock_guard lock(m_mutex);
+    if (drive < 0 || drive >= 2) return;
     if (m_machine) {
-        m_machine->ejectFloppyImage();
+        m_machine->ejectFloppyImage(drive);
     }
-    m_configuration.floppyPath.clear();
+    if (m_configuration.iwmDevices.isEmpty()) return;
+    ensureFloppyDriveCount(m_configuration);
+    m_configuration.iwmDevices[drive].imagePath.clear();
+    if (drive == 0) m_configuration.floppyPath.clear();
 }
 
 void* EmulationSession::debugMachine(const QString& machineId)

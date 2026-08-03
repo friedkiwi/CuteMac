@@ -32,6 +32,7 @@ int main()
     configuration.cyclesPerFrame = 130560;
     configuration.runtimeSpeed = cutemac::config::RuntimeSpeed::Unlimited;
     configuration.iwmDevices.append({ QStringLiteral("/tmp/system.dsk"), true });
+    configuration.iwmDevices.append({ QStringLiteral("/tmp/external.dsk"), false });
     configuration.scsiDevices.append({ 4, cutemac::config::ScsiDeviceType::HardDisk, QStringLiteral("/tmp/disk.hda"), false });
     configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4, true, false });
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8, true, true });
@@ -63,7 +64,9 @@ int main()
         ok &= expect(loaded->nvramPath == configuration.nvramPath, "NVRAM path did not round-trip");
         ok &= expect(loaded->skipRamPatternTest, "ROM patch setting did not round-trip");
         ok &= expect(loaded->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "runtime speed did not round-trip");
-        ok &= expect(loaded->iwmDevices.size() == 1 && loaded->iwmDevices.first().readOnly, "IWM device did not round-trip");
+        ok &= expect(loaded->iwmDevices.size() == 2 && loaded->iwmDevices.first().readOnly
+                && loaded->iwmDevices[1].imagePath == QStringLiteral("/tmp/external.dsk"),
+            "IWM devices did not round-trip");
         ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
         ok &= expect(loaded->nubusDevices.size() == 3 && loaded->nubusDevices.first().width == 832
                 && !loaded->nubusDevices.first().absolutePointer
@@ -97,7 +100,9 @@ int main()
     ok &= expect(migrated.has_value(), "legacy profile must parse");
     if (migrated) {
         ok &= expect(migrated->runtimeSpeed == cutemac::config::RuntimeSpeed::Unlimited, "legacy profile must default to unlimited");
-        ok &= expect(migrated->iwmDevices.size() == 1 && migrated->iwmDevices.first().imagePath == QStringLiteral("old.dsk"), "legacy floppy was not migrated");
+        ok &= expect(migrated->iwmDevices.size() == 2 && migrated->iwmDevices.first().imagePath == QStringLiteral("old.dsk")
+                && migrated->iwmDevices[1].imagePath.isEmpty(),
+            "legacy floppy was not migrated");
         ok &= expect(migrated->scsiDevices.size() == 1 && migrated->scsiDevices.first().imagePath == QStringLiteral("old.hda"), "legacy disk was not migrated");
     }
 
@@ -124,6 +129,15 @@ int main()
     const auto fractionalPlus = manager.loadTomlFile(path);
     ok &= expect(fractionalPlus && fractionalPlus->ramSizeKiB == 2560,
         "the Macintosh Plus 2.5 MiB configuration must be supported");
+
+    QFile compactProfile(path);
+    ok &= expect(compactProfile.open(QIODevice::WriteOnly | QIODevice::Truncate), "compact profile fixture open failed");
+    compactProfile.write("name = \"Mac 128K\"\n[machine]\nid = \"mac-128k\"\n");
+    compactProfile.close();
+    const auto compact128k = manager.loadTomlFile(path);
+    ok &= expect(compact128k && compact128k->machineId == QStringLiteral("mac-128k")
+            && compact128k->ramSizeKiB == 128,
+        "Macintosh 128K profile must default to its fixed RAM size");
 
     QFile oversizedVideo(path);
     ok &= expect(oversizedVideo.open(QIODevice::WriteOnly | QIODevice::Truncate), "oversized video fixture open failed");
@@ -182,6 +196,14 @@ int main()
     };
     ok &= expect(iicx && iicx->supportedRamSizesKiB == validIIcxRamSizes,
         "IIcx RAM combo must contain only complete four-SIMM bank configurations");
+    ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-128k"), 128),
+        "catalog must accept the Macintosh 128K fixed RAM size");
+    ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-512k"), 512),
+        "catalog must accept the Macintosh 512K fixed RAM size");
+    ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-512ke"), 512),
+        "catalog must accept the Macintosh 512Ke fixed RAM size");
+    ok &= expect(!cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-512k"), 1024),
+        "catalog must reject invalid compact Macintosh RAM sizes");
 
     QFile malformed(path);
     ok &= expect(malformed.open(QIODevice::WriteOnly | QIODevice::Truncate), "malformed fixture open failed");

@@ -8,6 +8,49 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
 {
     return {
         {
+            QStringLiteral("mac-128k"),
+            QStringLiteral("Macintosh 128K"),
+            CpuFamily::M68k,
+            QStringLiteral("68000"),
+            {
+                QStringLiteral("device.via6522"),
+                QStringLiteral("device.scc.z8530"),
+                QStringLiteral("device.iwm"),
+                QStringLiteral("device.video.compact-mac"),
+                QStringLiteral("device.audio.compact-mac"),
+            },
+            { 128 },
+        },
+        {
+            QStringLiteral("mac-512k"),
+            QStringLiteral("Macintosh 512K"),
+            CpuFamily::M68k,
+            QStringLiteral("68000"),
+            {
+                QStringLiteral("device.via6522"),
+                QStringLiteral("device.scc.z8530"),
+                QStringLiteral("device.iwm"),
+                QStringLiteral("device.video.compact-mac"),
+                QStringLiteral("device.audio.compact-mac"),
+            },
+            { 512 },
+        },
+        {
+            QStringLiteral("mac-512ke"),
+            QStringLiteral("Macintosh 512Ke"),
+            CpuFamily::M68k,
+            QStringLiteral("68000"),
+            {
+                QStringLiteral("device.via6522"),
+                QStringLiteral("device.scc.z8530"),
+                QStringLiteral("device.iwm"),
+                QStringLiteral("device.video.compact-mac"),
+                QStringLiteral("device.audio.compact-mac"),
+                QStringLiteral("device.rtc.pram"),
+            },
+            { 512 },
+        },
+        {
             QStringLiteral("mac-plus"),
             QStringLiteral("Macintosh Plus"),
             CpuFamily::M68k,

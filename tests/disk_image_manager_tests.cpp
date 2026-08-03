@@ -96,6 +96,19 @@ int main()
     writeImage(diskCopyImgPath, diskCopyImg);
     require(DiskImageManager::detectType(diskCopyImgPath) == DiskImageType::Floppy,
         "Disk Copy 4.2 floppies with an .img suffix must be recognized structurally");
+    QByteArray truncatedRaw800K(424895, '\0');
+    truncatedRaw800K[1024] = 0x42;
+    truncatedRaw800K[1025] = 0x44;
+    truncatedRaw800K[1042] = 0x06; // 1594 allocation blocks
+    truncatedRaw800K[1043] = 0x3a;
+    truncatedRaw800K[1046] = 0x02; // 512-byte allocation blocks
+    truncatedRaw800K[1047] = 0x00;
+    truncatedRaw800K[1052] = 0x00; // allocation area begins at block 4
+    truncatedRaw800K[1053] = 0x04;
+    const auto truncatedRawPath = temporary.filePath(QStringLiteral("floppy-launch.img"));
+    writeImage(truncatedRawPath, truncatedRaw800K);
+    require(DiskImageManager::detectType(truncatedRawPath) == DiskImageType::Floppy,
+        "trailing-zero-truncated raw HFS floppies must be recognized structurally");
     const auto migrationLibrary = temporary.filePath(QStringLiteral("migration-library"));
     require(QDir().mkpath(migrationLibrary), "migration library should be created");
     DiskImageManager migrationManager(migrationLibrary);

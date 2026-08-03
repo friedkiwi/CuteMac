@@ -193,6 +193,10 @@ ScsiCommandResult ScsiCdRomDevice::read(std::uint32_t lba, std::uint32_t blocks)
 
 ScsiCommandResult ScsiCdRomDevice::modeSelect(bool tenByte, const QByteArray& parameters)
 {
+    // A zero parameter-list length is a valid no-op. A/UX uses this while
+    // handing the installer CD from its Macintosh bootstrap to the UNIX
+    // kernel; rejecting it causes the kernel to discard the root candidate.
+    if (parameters.isEmpty()) return good();
     const int headerSize = tenByte ? 8 : 4;
     if (parameters.size() < headerSize) return checkCondition(senseIllegalRequest, 0x26);
     const auto descriptorLength = tenByte

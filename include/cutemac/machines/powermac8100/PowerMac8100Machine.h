@@ -52,7 +52,9 @@ public:
     void ejectScsiDevice(int id) override;
     void ejectScsiCdRom(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString&, bool) override { return false; }
+    [[nodiscard]] bool loadFloppyImage(int, const QString&, bool) override { return false; }
     void ejectFloppyImage() override {}
+    void ejectFloppyImage(int) override {}
     void reset() override;
     void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     [[nodiscard]] int runCycles(int cycles) override;

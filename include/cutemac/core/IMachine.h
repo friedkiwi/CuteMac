@@ -30,7 +30,9 @@ public:
     virtual void ejectScsiCdRom(int id) = 0;
     virtual void ejectScsiDevice(int id) = 0;
     [[nodiscard]] virtual bool loadFloppyImage(const QString& path, bool readOnly = false) = 0;
+    [[nodiscard]] virtual bool loadFloppyImage(int drive, const QString& path, bool readOnly = false) = 0;
     virtual void ejectFloppyImage() = 0;
+    virtual void ejectFloppyImage(int drive) = 0;
     virtual void reset() = 0;
     [[nodiscard]] virtual bool triggerProgrammersInterrupt() { return false; }
     [[nodiscard]] virtual int runCycles(int cycles) = 0;

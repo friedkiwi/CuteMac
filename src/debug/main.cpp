@@ -871,7 +871,17 @@ private:
         m_debugSerialChannel = -1;
         m_session = std::make_unique<cutemac::core::EmulationSession>(m_configuration);
         m_cpuDebug = m_session->debugCpuAccess();
-        m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(m_session->debugMachine(QStringLiteral("mac-plus")));
+        m_machine = nullptr;
+        static const QSet<QString> compactMacIds {
+            QStringLiteral("mac-128k"),
+            QStringLiteral("mac-512k"),
+            QStringLiteral("mac-512ke"),
+            QStringLiteral("mac-plus"),
+        };
+        if (compactMacIds.contains(m_configuration.machineId)) {
+            m_machine = static_cast<cutemac::machines::macplus::MacPlusMachine*>(
+                m_session->debugMachine(m_configuration.machineId));
+        }
         m_iicxMachine = static_cast<cutemac::machines::maciicx::MacIIcxMachine*>(m_session->debugMachine(QStringLiteral("mac-iicx")));
         if (m_iicxMachine != nullptr) m_iicxMachine->setAdbTraceEnabled(true);
         m_powerMac8100Machine = static_cast<cutemac::machines::powermac8100::PowerMac8100Machine*>(
@@ -1850,8 +1860,7 @@ private:
             }
             m_debugMouseX = static_cast<std::int16_t>(*x);
             m_debugMouseY = static_cast<std::int16_t>(*y);
-            if (m_machine) m_machine->setMousePosition(m_debugMouseX, m_debugMouseY);
-            else m_session->queueMousePosition(m_debugMouseX, m_debugMouseY);
+            m_session->queueMousePosition(m_debugMouseX, m_debugMouseY);
             handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
             return;
         }
@@ -1860,15 +1869,13 @@ private:
             const auto dy = parts[3].toInt();
             m_debugMouseX = static_cast<std::int16_t>(m_debugMouseX + dx);
             m_debugMouseY = static_cast<std::int16_t>(m_debugMouseY + dy);
-            if (m_machine) m_machine->moveMouse(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
-            else m_session->queueMouseDelta(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
+            m_session->queueMouseDelta(static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy));
             handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
             return;
         }
         if (parts.size() >= 2 && (parts[1] == QStringLiteral("down") || parts[1] == QStringLiteral("up"))) {
             m_debugMouseButton = parts[1] == QStringLiteral("down");
-            if (m_machine) m_machine->setMouseButton(m_debugMouseButton);
-            else m_session->queueMouseButton(m_debugMouseButton);
+            m_session->queueMouseButton(m_debugMouseButton);
             handleMouse({ QStringLiteral("mouse"), QStringLiteral("status") });
             return;
         }

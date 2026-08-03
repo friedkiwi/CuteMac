@@ -179,6 +179,8 @@ int main()
     const auto select512 = cdRom.executeCommand(QByteArray::fromHex("151000000c00"),
         QByteArray::fromHex("000000080000000000000200"));
     ok &= expect(select512.status == 0, "CD-ROM MODE SELECT(6) 512-byte negotiation failed");
+    ok &= expect(cdRom.executeCommand(QByteArray::fromHex("150000000000"), {}).status == 0,
+        "zero-length CD-ROM MODE SELECT(6) must be accepted as a no-op");
     ok &= expect(cdRom.loadImage(isoPath), "runtime CD reload after block-size negotiation failed");
     cdRom.acknowledgeMediaChange();
     const auto capacity512 = cdRom.executeCommand(QByteArray::fromHex("25000000000000000000"), {});
@@ -259,6 +261,11 @@ int main()
     controller.writeRegister(0, false, 0x01);
     controller.writeRegister(1, false, 0x04);
     controller.writeRegister(1, false, 0x00);
+    ok &= expect(controller.debugState().request,
+        "selection must enter command phase with REQ asserted");
+    (void)controller.readRegister(7, false);
+    ok &= expect(controller.debugState().request,
+        "Reset Parity/Interrupt reads must not acknowledge target REQ");
     for (const auto byte : QByteArray::fromHex("041000000000")) sendByte(controller, static_cast<std::uint8_t>(byte), false);
     ok &= expect(controller.debugState().phase == QStringLiteral("data-out"), "FORMAT UNIT did not enter DATA OUT");
     for (const auto byte : QByteArray::fromHex("00000002")) sendByte(controller, static_cast<std::uint8_t>(byte), true);
@@ -267,6 +274,18 @@ int main()
     for (const auto byte : QByteArray::fromHex("1234")) sendByte(controller, static_cast<std::uint8_t>(byte), true);
     ok &= expect(controller.debugState().phase == QStringLiteral("status"), "FORMAT UNIT did not finish after its defect list");
     ok &= expect(target->lastDataOut == QByteArray::fromHex("000000021234"), "FORMAT UNIT parameter data was not delivered");
+
+    // A/UX transfers CDB bytes through the Macintosh pseudo-DMA aperture.
+    // No programmed-I/O ACK edge accompanies these DACK writes.
+    controller.reset();
+    controller.writeRegister(0, false, 0x01);
+    controller.writeRegister(1, false, 0x04);
+    controller.writeRegister(1, false, 0x00);
+    for (const auto byte : QByteArray::fromHex("000000000000"))
+        controller.writeRegister(0, true, static_cast<std::uint8_t>(byte));
+    ok &= expect(target->lastCdb == QByteArray::fromHex("000000000000")
+            && controller.debugState().phase == QStringLiteral("status"),
+        "pseudo-DMA command writes must assemble and execute the CDB");
 
     // A pseudo-DMA send has a final-byte pipeline: the host's last DACK
     // loads the byte, but the target cannot change phase until ACK is

@@ -45,7 +45,9 @@ public:
     void ejectScsiCdRom(int id) override;
     void ejectScsiDevice(int id) override;
     [[nodiscard]] bool loadFloppyImage(const QString& path, bool readOnly) override;
+    [[nodiscard]] bool loadFloppyImage(int drive, const QString& path, bool readOnly) override;
     void ejectFloppyImage() override;
+    void ejectFloppyImage(int drive) override;
     void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) override;
     void reset() override;
     [[nodiscard]] bool triggerProgrammersInterrupt() override;
@@ -130,7 +132,7 @@ private:
     core::MachineScheduler m_scheduler;
     core::PhysicalMemoryMap m_physicalMemoryMap;
     QString m_romPath;
-    QString m_floppyPath;
+    std::array<QString, 2> m_floppyPaths;
     bool m_romLoaded = false;
     bool m_overlay = true;
     bool m_adbIrqPending = false;
