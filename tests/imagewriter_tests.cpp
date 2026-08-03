@@ -25,7 +25,22 @@ int main()
     cutemac::devices::scc::Z8530Scc scc;
     using Channel = cutemac::devices::scc::Z8530Scc::Channel;
     scc.attachEndpoint(Channel::B, printer);
+    const auto setMode = [&](Channel channel, std::uint8_t wr4) {
+        scc.writeControl(channel, 4);
+        scc.writeControl(channel, wr4);
+    };
+    setMode(Channel::B, 0x20); // LocalTalk SDLC mode.
     const auto send = [&](std::uint8_t byte) { scc.writeData(Channel::B, byte); scc.tick(16); };
+
+    // SDLC packet bytes share the physical printer port but do not pass
+    // through a real ImageWriter's asynchronous serial receiver.
+    send('A'); send('p'); send('p'); send('l'); send('e'); send(0x0c);
+    if (pages != 0 || printer->pageDirty()) {
+        std::cerr << "LocalTalk traffic leaked into the ImageWriter byte stream\n";
+        return 1;
+    }
+
+    setMode(Channel::B, 0x44); // x16 clock, one stop bit: asynchronous serial.
     send(0x1b); send('G');
     for (const auto byte : QByteArray("0002")) send(static_cast<std::uint8_t>(byte));
     send(0x81); send(0x42); send(0x0c);
@@ -38,6 +53,7 @@ int main()
     }
     auto loopback = std::make_shared<LoopbackEndpoint>();
     scc.attachEndpoint(Channel::A, loopback);
+    setMode(Channel::A, 0x44);
     send(0); // still addresses channel B
     scc.writeData(Channel::A, 0x40); scc.tick(16);
     if ((scc.readControl(Channel::A) & 1U) == 0 || scc.readData(Channel::A) != 0x41) {

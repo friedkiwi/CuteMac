@@ -114,7 +114,14 @@ void Z8530Scc::tick(int cycles)
             channel->transmitCycles = std::max(0, channel->transmitCycles - cycles);
             if (channel->transmitCycles == 0) {
                 channel->transmitInterruptPending = true;
-                (channel == &m_channelA ? m_busA : m_busB).transmit(channel->transmitData);
+                // SerialEndpoint represents an asynchronous byte-stream
+                // peripheral. In synchronous modes (notably LocalTalk's
+                // WR4=0x20 SDLC mode), the same SCC data register feeds the
+                // synchronous encoder and must not leak packet bytes into an
+                // attached serial printer. A future LocalTalk attachment will
+                // use a framed synchronous boundary instead.
+                if ((channel->writeRegisters[4] & 0x0cU) != 0)
+                    (channel == &m_channelA ? m_busA : m_busB).transmit(channel->transmitData);
             }
         }
         if (channel->baudRateCycles > 0) {
