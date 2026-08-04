@@ -15,12 +15,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets)
-find_package(tomlplusplus REQUIRED CONFIG)
 find_package(Readline)
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(CUTEMAC_LIBSLIRP QUIET IMPORTED_TARGET slirp)
 endif()
+
+set(tomlplusplus_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/tomlplusplus EXCLUDE_FROM_ALL)
 
 qt_standard_project_setup()
 
