@@ -44,6 +44,7 @@ void Via6522::reset()
     m_timer1Latch = 0;
     m_timer1FreeCounter = 0xffff;
     m_timer1Running = false;
+    m_timer1Pb7 = false;
     m_timer2Counter = 0;
     m_timer2FreeCounter = 0xffff;
     m_timer2Running = false;
@@ -144,6 +145,10 @@ void Via6522::writeRegister(std::uint8_t index, std::uint8_t value)
         m_timer1Latch = (static_cast<int>(value) << 8) | (m_timer1Latch & 0x00ff);
         m_timer1Counter = m_timer1Latch == 0 ? 0x10000 : m_timer1Latch;
         m_timer1Running = true;
+        if ((m_registers[auxiliaryControl] & 0x80U) != 0) {
+            m_timer1Pb7 = false;
+            if (m_portBChanged) m_portBChanged(portB(), m_registers[dataDirectionB]);
+        }
         m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer1InterruptBit);
         return;
     }
@@ -214,12 +219,22 @@ void Via6522::tick(int cycles)
             m_registers[interruptFlag] |= timer1InterruptBit;
             if ((m_registers[auxiliaryControl] & 0x40) != 0) {
                 const auto reload = m_timer1Latch == 0 ? 0x10000 : m_timer1Latch;
+                int expirations = 0;
                 while (m_timer1Counter <= 0) {
                     m_timer1Counter += reload;
+                    ++expirations;
+                }
+                if ((m_registers[auxiliaryControl] & 0x80U) != 0 && (expirations & 1) != 0) {
+                    m_timer1Pb7 = !m_timer1Pb7;
+                    if (m_portBChanged) m_portBChanged(portB(), m_registers[dataDirectionB]);
                 }
             } else {
                 m_timer1Counter = 0;
                 m_timer1Running = false;
+                if ((m_registers[auxiliaryControl] & 0x80U) != 0) {
+                    m_timer1Pb7 = true;
+                    if (m_portBChanged) m_portBChanged(portB(), m_registers[dataDirectionB]);
+                }
             }
         }
         const auto counter = static_cast<std::uint16_t>(std::max(0, m_timer1Counter));
@@ -347,7 +362,11 @@ void Via6522::setPortAInputBit(std::uint8_t bit, bool high)
 
 std::uint8_t Via6522::portB() const
 {
-    const auto outputs = static_cast<std::uint8_t>(m_registers[registerB] & m_registers[dataDirectionB]);
+    auto outputs = static_cast<std::uint8_t>(m_registers[registerB] & m_registers[dataDirectionB]);
+    if ((m_registers[auxiliaryControl] & 0x80U) != 0) {
+        if (m_timer1Pb7) outputs |= 0x80U;
+        else outputs &= static_cast<std::uint8_t>(~0x80U);
+    }
     const auto inputs = static_cast<std::uint8_t>(m_portBInputs & ~m_registers[dataDirectionB]);
     return static_cast<std::uint8_t>(outputs | inputs);
 }

@@ -79,6 +79,20 @@ int main()
     ok &= expect((via.readRegister(13) & 0x40) == 0, "reading T1C-L must acknowledge Timer 1");
     ok &= expect(!via.interruptActive(), "acknowledging Timer 1 must release IRQ");
 
+    bool pb7 = false;
+    via.setPortBChangedCallback([&](std::uint8_t value, std::uint8_t) { pb7 = (value & 0x80U) != 0; });
+    via.writeRegister(2, 0x80);
+    via.writeRegister(11, 0xc0); // Timer 1 free run with PB7 output enabled.
+    via.writeRegister(4, 0x02);
+    via.writeRegister(5, 0x00);
+    ok &= expect(!pb7, "loading Timer 1 must drive PB7 low");
+    via.tick(2);
+    ok &= expect(pb7, "Timer 1 free-run expiry must toggle PB7");
+    via.tick(2);
+    ok &= expect(!pb7, "each Timer 1 period must toggle PB7 again");
+    (void)via.readRegister(4);
+    via.writeRegister(14, 0x40); // Disable Timer 1 before checking Timer 2 IRQ release.
+
     via.writeRegister(14, 0xa0); // Enable Timer 2 interrupts.
     via.writeRegister(8, 0x02);
     via.writeRegister(9, 0x00);

@@ -76,6 +76,7 @@ private:
     int m_timer1Latch = 0;
     int m_timer1FreeCounter = 0xffff;
     bool m_timer1Running = false;
+    bool m_timer1Pb7 = false;
     int m_timer2Counter = 0;
     int m_timer2FreeCounter = 0xffff;
     bool m_timer2Running = false;
