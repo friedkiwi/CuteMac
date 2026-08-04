@@ -35,10 +35,14 @@ jobs:
 
       - name: Verify IPv6 connectivity
         shell: pwsh
+        continue-on-error: true
         run: |
-          $ipv6Available = $false
-          $ipv6Addresses = @()
+          Write-Output "=== IPv6 Connectivity Diagnostics ==="
+          $ipv6LocalAvailable = $false
+          $ipv6DnsWorks = $false
+          $ipv6ExternalWorks = $false
 
+          # Check local IPv6 interfaces
           try {
             $ipv6Addresses = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
               ForEach-Object {
@@ -47,49 +51,49 @@ jobs:
               }
 
             if ($ipv6Addresses.Count -gt 0) {
-              $ipv6Available = $true
-              Write-Output "IPv6 is available with $(($ipv6Addresses | Measure-Object).Count) address(es)"
-              $ipv6Addresses | ForEach-Object { Write-Output "  - $($_.Address)" }
+              $ipv6LocalAvailable = $true
+              Write-Output "[✓] IPv6 local interfaces: $(($ipv6Addresses | Measure-Object).Count) address(es)"
+              $ipv6Addresses | ForEach-Object { Write-Output "    - $($_.Address)" }
             } else {
-              Write-Output "No IPv6 addresses found on network interfaces"
+              Write-Output "[✗] No IPv6 addresses found on network interfaces"
             }
           } catch {
-            Write-Output "Error checking IPv6 availability: $_"
+            Write-Output "[✗] Error checking IPv6 interfaces: $_"
           }
 
           # Try to resolve an IPv6 address
           try {
             $result = Resolve-DnsName -Name "ipv6.google.com" -Type AAAA -ErrorAction SilentlyContinue
             if ($result) {
-              Write-Output "IPv6 DNS resolution works: $($result.IPAddress)"
-              $ipv6Available = $true
+              $ipv6DnsWorks = $true
+              Write-Output "[✓] IPv6 DNS resolution works: $($result.IPAddress)"
             } else {
-              Write-Output "IPv6 DNS resolution failed or not available"
+              Write-Output "[✗] IPv6 DNS resolution failed or not available"
             }
           } catch {
-            Write-Output "IPv6 DNS check exception: $_"
+            Write-Output "[✗] IPv6 DNS check exception: $_"
           }
 
           # Test external IPv6 connectivity with curl
           try {
-            Write-Output "`nTesting external IPv6 connectivity..."
-            $curlResult = curl.exe -6 -s -m 5 "https://ifconfig.me"
-            if ($LASTEXITCODE -eq 0) {
-              Write-Output "External IPv6 connectivity verified"
-              Write-Output "Discovered IPv6 address: $curlResult"
-              $ipv6Available = $true
+            Write-Output "`n[*] Testing external IPv6 connectivity via ifconfig.me..."
+            $curlResult = curl.exe -6 -s -m 5 "https://ifconfig.me" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $curlResult) {
+              $ipv6ExternalWorks = $true
+              Write-Output "[✓] External IPv6 works. Public IPv6 address: $curlResult"
             } else {
-              Write-Output "curl to ifconfig.me failed (exit code: $LASTEXITCODE)"
+              Write-Output "[✗] curl to ifconfig.me failed (exit code: $LASTEXITCODE)"
             }
           } catch {
-            Write-Output "Exception during IPv6 connectivity test: $_"
+            Write-Output "[✗] Exception during IPv6 connectivity test: $_"
           }
 
-          if ($ipv6Available) {
-            Write-Output "`nIPv6 connectivity verified"
-          } else {
-            Write-Output "`nWarning: IPv6 connectivity could not be verified"
-          }
+          # Summary
+          Write-Output "`n=== Summary ==="
+          Write-Output "Local IPv6 interfaces: $(if ($ipv6LocalAvailable) { '✓' } else { '✗' })"
+          Write-Output "IPv6 DNS resolution: $(if ($ipv6DnsWorks) { '✓' } else { '✗' })"
+          Write-Output "External IPv6 connectivity: $(if ($ipv6ExternalWorks) { '✓' } else { '✗' })"
+          Write-Output "This is diagnostic information only and will not affect the build."
 
       - name: Create short build path
         shell: pwsh
