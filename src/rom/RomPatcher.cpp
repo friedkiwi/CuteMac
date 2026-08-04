@@ -31,16 +31,6 @@ QVector<RomPatchDefinition> allDefinitions()
                 { 0x00003714, QByteArray::fromHex("2448"), QByteArray::fromHex("4ed6") },
             },
         },
-        {
-            QStringLiteral("quadra700.skip_ram_pattern_test"),
-            QStringLiteral("Skip the destructive full-RAM pattern passes while preserving RAM sizing"),
-            QStringLiteral("quadra-700"),
-            QByteArray::fromHex("c2093476e9c9a7d76973910a91fbfba23ca71163b84eb2623adf8608a6b03ed2"),
-            {
-                { 0x00000000, QByteArray::fromHex("420dbff3"), QByteArray::fromHex("420d3d90") },
-                { 0x00047280, QByteArray::fromHex("4cfa003f"), QByteArray::fromHex("7c004ed6") },
-            },
-        },
     };
 }
 

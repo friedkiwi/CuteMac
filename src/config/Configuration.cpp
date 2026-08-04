@@ -244,8 +244,6 @@ QStringList Configuration::enabledRomPatches() const
         patches.append(QStringLiteral("maciicx.skip_ram_pattern_test"));
     } else if (skipRamPatternTest && machineId == QStringLiteral("mac-plus")) {
         patches.append(QStringLiteral("macplus.skip_ram_pattern_test"));
-    } else if (skipRamPatternTest && machineId == QStringLiteral("quadra-700")) {
-        patches.append(QStringLiteral("quadra700.skip_ram_pattern_test"));
     }
     return patches;
 }

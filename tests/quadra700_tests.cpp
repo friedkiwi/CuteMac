@@ -1,10 +1,6 @@
 #include "cutemac/machines/quadra700/Quadra700Machine.h"
-#include "cutemac/rom/RomPatcher.h"
-
 #include <cstdint>
 #include <iostream>
-
-#include <QByteArray>
 
 namespace {
 
@@ -36,25 +32,9 @@ bool testVia1TimerCalibrationSequence()
     return ok;
 }
 
-bool testRamPatternPatchIsChecksumGated()
-{
-    const auto definitions = cutemac::rom::RomPatcher::definitionsForMachine(QStringLiteral("quadra-700"));
-    bool ok = expect(definitions.size() == 1, "Q700 must expose one RAM-test patch");
-    if (!ok) return false;
-
-    const auto& patch = definitions.front();
-    ok &= expect(patch.requiredSha256 == QByteArray::fromHex("c2093476e9c9a7d76973910a91fbfba23ca71163b84eb2623adf8608a6b03ed2"),
-        "Q700 RAM-test patch must be tied to the supported ROM");
-    ok &= expect(patch.edits.size() == 2 && patch.edits[1].offset == 0x47280
-            && patch.edits[1].expectedBytes == QByteArray::fromHex("4cfa003f")
-            && patch.edits[1].replacementBytes == QByteArray::fromHex("7c004ed6"),
-        "Q700 RAM-test patch must return a successful result from the destructive routine entry");
-    return ok;
-}
-
 } // namespace
 
 int main()
 {
-    return testVia1TimerCalibrationSequence() && testRamPatternPatchIsChecksumGated() ? 0 : 1;
+    return testVia1TimerCalibrationSequence() ? 0 : 1;
 }
