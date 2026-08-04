@@ -24,10 +24,7 @@ int main(int argc, char** argv)
     const auto ramKiB = qEnvironmentVariable("CUTEMAC_Q700_RAM_KIB").toULongLong(&ramKiBOk, 0);
     const auto configuredRamBytes = static_cast<std::uint32_t>((ramKiBOk ? ramKiB : 8U * 1024U) * 1024ULL);
     cutemac::machines::quadra700::Quadra700Machine machine(configuredRamBytes);
-    const auto patches = qEnvironmentVariableIsSet("CUTEMAC_Q700_SKIP_RAM_TEST")
-        ? QStringList { QStringLiteral("quadra700.skip_ram_pattern_test") }
-        : QStringList {};
-    if (!machine.loadRomFile(QString::fromLocal8Bit(argv[1]), patches)) {
+    if (!machine.loadRomFile(QString::fromLocal8Bit(argv[1]), {})) {
         std::cerr << "failed to load Quadra 700 ROM\n";
         return 1;
     }
@@ -77,7 +74,9 @@ int main(int argc, char** argv)
     const auto stopOnBadSp = qEnvironmentVariableIsSet("CUTEMAC_Q700_STOP_ON_BAD_SP");
     bool stopPcOk = false;
     const auto stopPc = qEnvironmentVariable("CUTEMAC_Q700_STOP_PC").toUInt(&stopPcOk, 0);
+    std::uint32_t lastExecutedPc = machine.programCounter();
     for (std::int64_t used = 0; used < cycleBudget;) {
+        lastExecutedPc = machine.programCounter();
         used += machine.stepInstruction();
         ++instructions;
         const auto pc = machine.programCounter();
@@ -108,6 +107,7 @@ int main(int argc, char** argv)
               << std::dec
               << " cycles=" << machine.cycleCount()
               << " instructions=" << instructions
+              << " last-executed-pc=0x" << std::hex << std::setw(8) << lastExecutedPc << std::dec
               << " overlay=" << (machine.overlayEnabled() ? "on" : "off")
               << " video=" << frame.width << 'x' << frame.height << 'x' << frame.bitsPerPixel
               << " valid=" << frame.valid()

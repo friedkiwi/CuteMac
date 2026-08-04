@@ -32,9 +32,27 @@ bool testVia1TimerCalibrationSequence()
     return ok;
 }
 
+bool testRamDoesNotAliasOutsideConfiguredRange()
+{
+    using cutemac::machines::quadra700::Quadra700Machine;
+
+    constexpr std::uint32_t ramSize = 4U * 1024U * 1024U;
+    Quadra700Machine machine(ramSize);
+    machine.reset();
+    machine.debugWrite32(0, 0x12345678U);
+    machine.debugWrite32(0x01000000U, 0xa5a5a5a5U);
+
+    bool ok = true;
+    ok &= expect(machine.debugRead32(0) == 0x12345678U,
+        "Q700 RAM must not alias at the 16 MiB boundary");
+    ok &= expect(machine.debugRead32(ramSize) == 0,
+        "Q700 reads beyond configured RAM must be unmapped");
+    return ok;
+}
+
 } // namespace
 
 int main()
 {
-    return testVia1TimerCalibrationSequence() ? 0 : 1;
+    return testVia1TimerCalibrationSequence() && testRamDoesNotAliasOutsideConfiguredRange() ? 0 : 1;
 }

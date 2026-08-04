@@ -82,6 +82,6 @@ changing code in that subsystem.
 
 ### Quadra 700
 
-- The 68040 reset vectors live in low RAM but point to the high ROM at `$40800000`; retain the 1 GiB low-RAM aperture and dirty-24-bit RAM aliases used by the ROM's memory manager and sizing code.
+- The 68040 reset vectors live in low RAM but point to the high ROM at `$40800000`. After overlay release, map only the configured contiguous RAM range; the Q700 ROM performs its own memory sizing probes, so do not introduce low-memory aliases.
 - Q700 VBL is VIA2 Timer 1 PB7 chained into VIA1 CA1. Model PB7 output in the shared VIA when ACR enables it; do not synthesize a separate Q700-only VBL timer.
 - The Q700 ROM's VIA1 Timer 2 calibration needs the same exact-write-sequence compatibility workaround as QEMU. Keep it in Q700 chipset glue, not the reusable VIA implementation, and write the calibrated `TimeDBRA`/`TimeSCCDB` values only after the ROM sequence.

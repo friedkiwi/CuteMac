@@ -21,7 +21,6 @@ constexpr std::uint32_t dafbVramSize = 2U * 1024U * 1024U;
 constexpr std::uint32_t dafbRegisterBase = 0xf9800000U;
 constexpr std::uint32_t romSize = 1024U * 1024U;
 constexpr int cpuToViaRatio = 32;
-constexpr std::uint32_t ramMapSearchEnd = 192U * 1024U * 1024U;
 
 std::uint8_t highByte(std::uint16_t value) { return static_cast<std::uint8_t>(value >> 8); }
 std::uint8_t lowByte(std::uint16_t value) { return static_cast<std::uint8_t>(value); }
@@ -421,10 +420,6 @@ void Quadra700Machine::write32(std::uint32_t address, std::uint32_t value)
 std::optional<std::size_t> Quadra700Machine::ramIndex(std::uint32_t address) const
 {
     if (address < static_cast<std::uint32_t>(m_ram.size())) return address;
-    if (address >= 0x01000000U && address < 0x40000000U) {
-        const auto aliased = address & 0x00ffffffU;
-        if (aliased < static_cast<std::uint32_t>(m_ram.size())) return aliased;
-    }
     return std::nullopt;
 }
 
@@ -432,7 +427,7 @@ void Quadra700Machine::rebuildPhysicalMemoryMap()
 {
     m_physicalMemoryMap.clear();
     if (!m_overlay) {
-        for (std::uint32_t address = 0; address < ramMapSearchEnd;
+        for (std::uint32_t address = 0; address < static_cast<std::uint32_t>(m_ram.size());
              address += core::PhysicalMemoryMap::pageSize) {
             const auto index = ramIndex(address);
             if (index && *index + core::PhysicalMemoryMap::pageSize <= static_cast<std::size_t>(m_ram.size()))
