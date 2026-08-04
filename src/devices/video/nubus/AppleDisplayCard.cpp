@@ -59,6 +59,42 @@ std::size_t monitorIndex(AppleDisplayCard::Monitor monitor)
     return static_cast<std::uint8_t>(monitor) & 0x0fU;
 }
 
+std::uint32_t grayscaleColor(std::uint32_t color)
+{
+    const auto red = (color >> 16) & 0xffU;
+    const auto green = (color >> 8) & 0xffU;
+    const auto blue = color & 0xffU;
+    const auto level = (red * 299U + green * 587U + blue * 114U + 500U) / 1000U;
+    return (color & 0xff000000U) | (level << 16) | (level << 8) | level;
+}
+
+QVector<std::uint32_t> scanoutPalette(const QVector<std::uint32_t>& palette, AppleDisplayCard::Monitor monitor)
+{
+    if (!monitors[monitorIndex(monitor)].mono) return palette;
+
+    auto result = palette;
+    for (auto& color : result) color = grayscaleColor(color);
+    return result;
+}
+
+QByteArray scanoutDirectPixels(const QByteArray& pixels, AppleDisplayCard::Monitor monitor)
+{
+    if (!monitors[monitorIndex(monitor)].mono) return pixels;
+
+    auto result = pixels;
+    for (qsizetype index = 0; index + 2 < result.size(); index += 3) {
+        const auto color = 0xff000000U
+            | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(result[index])) << 16)
+            | (static_cast<std::uint32_t>(static_cast<std::uint8_t>(result[index + 1])) << 8)
+            | static_cast<std::uint8_t>(result[index + 2]);
+        const auto gray = static_cast<char>(grayscaleColor(color) & 0xffU);
+        result[index] = gray;
+        result[index + 1] = gray;
+        result[index + 2] = gray;
+    }
+    return result;
+}
+
 } // namespace
 
 AppleDisplayCard::AppleDisplayCard(Variant variant, int vramKiB, Monitor monitor)
@@ -244,6 +280,7 @@ VideoFrame AppleDisplayCard::videoFrame() const
     if (directRgbActive() && m_ramdacMode == 0x0d) {
         const auto stride = static_cast<int>(m_stride << 3);
         const auto bytes = std::min<qsizetype>(m_vram.size() - offset, static_cast<qsizetype>(stride * m_height));
+        const auto pixels = bytes > 0 ? m_vram.mid(offset, bytes) : QByteArray {};
         return {
             m_width,
             m_height,
@@ -252,7 +289,7 @@ VideoFrame AppleDisplayCard::videoFrame() const
             24,
             ByteOrder::BigEndian,
             BitOrder::MostSignificantFirst,
-            bytes > 0 ? m_vram.mid(offset, bytes) : QByteArray {},
+            scanoutDirectPixels(pixels, m_monitor),
             {},
             {},
             { 0xff0000, 0x00ff00, 0x0000ff, 0 },
@@ -274,7 +311,7 @@ VideoFrame AppleDisplayCard::videoFrame() const
         ByteOrder::BigEndian,
         BitOrder::MostSignificantFirst,
         bytes > 0 ? m_vram.mid(offset, bytes) : QByteArray {},
-        m_palette,
+        scanoutPalette(m_palette, m_monitor),
         mapping,
         {},
         true,

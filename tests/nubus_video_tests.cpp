@@ -417,6 +417,15 @@ int main()
             && displayCard.videoFrame().colorTable[0x2a] == 0xff123456U
             && static_cast<std::uint8_t>(displayCard.videoFrame().pixels[0]) == 0x2a,
         "8-24 RAMDAC must select eight-bit indexed scanout with guest-programmed CLUT");
+    AppleDisplayCard displayCardPortraitMono(AppleDisplayCard::Variant::MacintoshDisplayCard824, 1024,
+        AppleDisplayCard::Monitor::PortraitMono15Inch);
+    displayCardPortraitMono.write32(0x00200200, 0x0000002a);
+    displayCardPortraitMono.write32(0x00200204, 0x00000000);
+    displayCardPortraitMono.write32(0x00200204, 0x00000000);
+    displayCardPortraitMono.write32(0x00200204, 0x000000ff);
+    displayCardPortraitMono.write32(0x00200208, 0x00000018);
+    ok &= expect(displayCardPortraitMono.videoFrame().colorTable[0x2a] == 0xff1d1d1dU,
+        "8-24 monochrome portrait monitor must scan out luminance instead of chroma");
     displayCard.write32(0x0020000c, 0x00000130);
     displayCard.write32(0x0020010c, 0x0000067e);
     displayCard.write32(0x00200124, 0x000004e0);
