@@ -70,10 +70,19 @@ std::uint32_t grayscaleColor(std::uint32_t color)
 
 QVector<std::uint32_t> scanoutPalette(const QVector<std::uint32_t>& palette, AppleDisplayCard::Monitor monitor)
 {
-    if (!monitors[monitorIndex(monitor)].mono) return palette;
-
     auto result = palette;
-    for (auto& color : result) color = grayscaleColor(color);
+    if (monitors[monitorIndex(monitor)].mono) {
+        for (auto& color : result) color = grayscaleColor(color);
+    }
+    return result;
+}
+
+QVector<std::uint32_t> scanoutPalette(const QVector<std::uint32_t>& palette, AppleDisplayCard::Monitor monitor, int depth)
+{
+    auto result = scanoutPalette(palette, monitor);
+    if (!result.isEmpty()) result[0] = 0xffffffffU;
+    const auto blackIndex = (1 << depth) - 1;
+    if (blackIndex < result.size()) result[blackIndex] = 0xff000000U;
     return result;
 }
 
@@ -311,7 +320,7 @@ VideoFrame AppleDisplayCard::videoFrame() const
         ByteOrder::BigEndian,
         BitOrder::MostSignificantFirst,
         bytes > 0 ? m_vram.mid(offset, bytes) : QByteArray {},
-        scanoutPalette(m_palette, m_monitor),
+        scanoutPalette(m_palette, m_monitor, depth),
         mapping,
         {},
         true,

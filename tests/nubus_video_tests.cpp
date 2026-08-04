@@ -308,6 +308,17 @@ int main()
     ok &= expect(authenticCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 128 }
             && authenticCard.videoFrame().colorTable[128] == 0xff000000U,
         "authentic one-bit boot mode must use TFB's high-bit CLUT mapping");
+    authenticCard.write8(0x00090004, 0xff);
+    authenticCard.write8(0x00090008, 0xff);
+    authenticCard.write8(0x00090008, 0xff);
+    authenticCard.write8(0x00090008, 0xff);
+    authenticCard.write8(0x00090004, 0x7f);
+    authenticCard.write8(0x00090008, 0xee);
+    authenticCard.write8(0x00090008, 0xee);
+    authenticCard.write8(0x00090008, 0xee);
+    ok &= expect(authenticCard.videoFrame().colorTable[0] == 0xffffffffU
+            && authenticCard.videoFrame().colorTable[128] == 0xff000000U,
+        "authentic one-bit scanout must preserve logical white and black endpoints");
     ok &= expect(authenticCard.videoFrame().grabbable,
         "authentic video cards must allow host mouse grabbing for relative ADB movement");
     authenticCard.write8(0x20, 0xaa);
@@ -385,6 +396,17 @@ int main()
             && displayCard.videoFrame().width == 640
             && displayCard.videoFrame().height == 480,
         "8-24 card must reset to a usable one-bit 640x480 frame");
+    displayCard.write32(0x00200200, 0x00000000);
+    displayCard.write32(0x00200204, 0x00000000);
+    displayCard.write32(0x00200204, 0x00000000);
+    displayCard.write32(0x00200204, 0x00000000);
+    displayCard.write32(0x00200200, 0x00000001);
+    displayCard.write32(0x00200204, 0x00000022);
+    displayCard.write32(0x00200204, 0x00000022);
+    displayCard.write32(0x00200204, 0x00000022);
+    ok &= expect(displayCard.videoFrame().colorTable[0] == 0xffffffffU
+            && displayCard.videoFrame().colorTable[1] == 0xff000000U,
+        "8-24 one-bit scanout must preserve logical white and black endpoints");
     ok &= expect((readCard32(displayCard, 0x002001c0) & 0x04U) == 0,
         "8-24 CRTC status must expose active-low sync instead of a stuck-high poll bit");
     displayCard.write32(0x00200000, 0x00000c40);

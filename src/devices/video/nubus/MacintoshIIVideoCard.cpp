@@ -21,6 +21,20 @@ int strideForMode(int mode)
     return 128 << (mode & 3);
 }
 
+std::uint16_t tfbColorIndex(int depth, int pixelValue)
+{
+    return static_cast<std::uint16_t>(pixelValue << (8 - depth));
+}
+
+QVector<std::uint32_t> scanoutPalette(const QVector<std::uint32_t>& palette, int depth)
+{
+    auto result = palette;
+    if (!result.isEmpty()) result[tfbColorIndex(depth, 0)] = 0xffffffffU;
+    const auto blackIndex = tfbColorIndex(depth, (1 << depth) - 1);
+    if (blackIndex < result.size()) result[blackIndex] = 0xff000000U;
+    return result;
+}
+
 } // namespace
 
 MacintoshIIVideoCard::MacintoshIIVideoCard()
@@ -188,7 +202,7 @@ VideoFrame MacintoshIIVideoCard::videoFrame() const
     const auto depth = 1 << (m_mode & 3);
     const auto bytes = std::min(m_vram.size() - 0x20, static_cast<qsizetype>(stride * m_height));
     QVector<std::uint16_t> mapping(1 << depth);
-    for (int value = 0; value < mapping.size(); ++value) mapping[value] = static_cast<std::uint16_t>(value << (8 - depth));
+    for (int value = 0; value < mapping.size(); ++value) mapping[value] = tfbColorIndex(depth, value);
     return {
         m_width,
         m_height,
@@ -198,7 +212,7 @@ VideoFrame MacintoshIIVideoCard::videoFrame() const
         ByteOrder::BigEndian,
         BitOrder::MostSignificantFirst,
         m_vram.mid(0x20, bytes),
-        m_palette,
+        scanoutPalette(m_palette, depth),
         mapping,
         {},
         true,
