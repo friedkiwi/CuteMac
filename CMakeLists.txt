@@ -225,7 +225,6 @@ endif()
 add_library(CuteMacWidgets
     src/ui/ConfigurationDialog.cpp
     src/ui/DiskImageWidgets.cpp
-    src/ui/FileDialogs.cpp
     src/ui/RomManagerDialog.cpp
 )
 

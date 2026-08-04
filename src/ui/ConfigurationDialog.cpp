@@ -3,8 +3,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QDir>
-#include <QFileInfo>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QInputMethodEvent>
@@ -27,7 +26,6 @@
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/rom/RomCatalog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
-#include "cutemac/ui/FileDialogs.h"
 
 namespace cutemac::ui {
 
@@ -108,43 +106,6 @@ QString serialDeviceName(config::SerialDeviceType type)
     default:
         return QStringLiteral("ImageWriter II");
     }
-}
-
-QString nvramDialogDirectory(const QString& currentPath)
-{
-    const QFileInfo current(currentPath.trimmed());
-    if (!current.filePath().isEmpty()) {
-        const auto directory = current.isDir() ? current.absoluteFilePath() : current.absolutePath();
-        if (QFileInfo::exists(directory)) return directory;
-    }
-
-    const auto directory = config::ConfigurationManager::diskImageDirectoryPath();
-    if (QDir().mkpath(directory)) return directory;
-    return QDir::homePath();
-}
-
-QString runNvramOpenDialog(QWidget* parent, const QString& currentPath)
-{
-    const QFileInfo current(currentPath.trimmed());
-    return openFile(parent, {
-        QStringLiteral("Select NVRAM Image"),
-        nvramDialogDirectory(currentPath),
-        current.fileName(),
-        { QStringLiteral("NVRAM images (*.nvram *.pram)"), QStringLiteral("All files (*)") },
-        {},
-    });
-}
-
-QString runNvramSaveDialog(QWidget* parent, const QString& currentPath)
-{
-    const QFileInfo current(currentPath.trimmed());
-    return saveFile(parent, {
-        QStringLiteral("Create NVRAM Image"),
-        nvramDialogDirectory(currentPath),
-        current.fileName(),
-        { QStringLiteral("NVRAM image (*.nvram)"), QStringLiteral("All files (*)") },
-        QStringLiteral("nvram"),
-    });
 }
 
 bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
@@ -245,13 +206,8 @@ bool editImageWriterII(QString& outputDirectory, QWidget* parent)
     row->addWidget(browse);
     form->addRow(QStringLiteral("PNG output folder"), row);
     QObject::connect(browse, &QPushButton::clicked, &dialog, [&dialog, output]() {
-        const auto path = selectDirectory(&dialog, {
-            QStringLiteral("Select Print Output Folder"),
-            output->text(),
-            {},
-            {},
-            {},
-        });
+        const auto path = QFileDialog::getExistingDirectory(&dialog,
+            QStringLiteral("Select Print Output Folder"), output->text());
         if (!path.isEmpty()) output->setText(path);
     });
     auto* note = new QLabel(QStringLiteral("Pages are written at 144 DPI using sequential filenames."));
@@ -707,11 +663,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
 
     connect(m_impl->machine, &QComboBox::currentIndexChanged, this, updateCapabilities);
     connect(nvramBrowse, &QPushButton::clicked, this, [this]() {
-        const auto path = runNvramOpenDialog(this, m_impl->nvram->text());
+        const auto path = QFileDialog::getOpenFileName(this, QStringLiteral("Select NVRAM Image"),
+            config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("NVRAM images (*.nvram *.pram);;All files (*)"));
         if (!path.isEmpty()) m_impl->nvram->setText(path);
     });
     connect(nvramNew, &QPushButton::clicked, this, [this]() {
-        const auto path = runNvramSaveDialog(this, m_impl->nvram->text());
+        const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Create NVRAM Image"),
+            config::ConfigurationManager::diskImageDirectoryPath(), QStringLiteral("NVRAM image (*.nvram)"));
         if (!path.isEmpty()) m_impl->nvram->setText(path);
     });
     connect(nvramZap, &QPushButton::clicked, this, [this]() {

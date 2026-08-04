@@ -4,7 +4,7 @@
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDoubleValidator>
-#include <QDir>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHeaderView>
@@ -22,8 +22,6 @@
 #include <array>
 #include <utility>
 
-#include "cutemac/ui/FileDialogs.h"
-
 namespace cutemac::ui {
 namespace {
 
@@ -39,16 +37,18 @@ constexpr int CollectionRole = Qt::UserRole + 1;
 
 bool importWithDialog(storage::DiskImageManager& manager, const QString& collection, QWidget* parent)
 {
-    const auto sources = openFiles(parent, {
-        QStringLiteral("Import Disk Images"),
-        QDir::homePath(),
-        {},
-        {
-            QStringLiteral("Disk images (*.dsk *.img *.image *.dc42 *.hda *.iso *.cdr)"),
-            QStringLiteral("All files (*)"),
-        },
-        {},
+    QFileDialog dialog(parent, QStringLiteral("Import Disk Images"), QDir::homePath());
+    dialog.setFileMode(QFileDialog::ExistingFiles);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setNameFilters({
+        QStringLiteral("Disk images (*.dsk *.img *.image *.dc42 *.hda *.iso *.cdr)"),
+        QStringLiteral("All files (*)"),
     });
+#if defined(Q_OS_MACOS)
+    dialog.setOption(QFileDialog::DontUseNativeDialog);
+#endif
+    if (dialog.exec() != QDialog::Accepted) return false;
+    const auto sources = dialog.selectedFiles();
     if (sources.isEmpty()) return false;
     QStringList importedPaths;
     const bool success = manager.importImages(sources, &importedPaths, collection);
@@ -183,13 +183,7 @@ public:
         connect(m_preset, &QComboBox::currentIndexChanged, this, updateCustom);
         connect(browse, &QPushButton::clicked, this, [this]() {
             const auto filter = m_type == storage::DiskImageType::Floppy ? QStringLiteral("Raw floppy (*.dsk)") : QStringLiteral("Raw hard disk (*.hda *.img)");
-            const auto path = saveFile(this, {
-                windowTitle(),
-                m_manager.libraryPath(),
-                {},
-                { filter },
-                m_type == storage::DiskImageType::Floppy ? QStringLiteral("dsk") : QStringLiteral("hda"),
-            });
+            const auto path = QFileDialog::getSaveFileName(this, windowTitle(), m_manager.libraryPath(), filter);
             if (!path.isEmpty()) m_path->setText(path);
         });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -289,13 +283,7 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
         const auto* item = m_impl->tree->currentItem();
         const auto source = item == nullptr ? QString() : item->data(0, ImagePathRole).toString();
         if (source.isEmpty()) return;
-        const auto destination = saveFile(this, {
-            QStringLiteral("Export Disk Image"),
-            QDir::currentPath(),
-            QFileInfo(source).fileName(),
-            {},
-            {},
-        });
+        const auto destination = QFileDialog::getSaveFileName(this, QStringLiteral("Export Disk Image"), QFileInfo(source).fileName());
         if (!destination.isEmpty() && !m_impl->manager.exportImage(source, destination)) QMessageBox::critical(this, windowTitle(), QStringLiteral("Could not export the disk image."));
     });
     connect(createFloppy, &QPushButton::clicked, this, [this, reload]() { if (!createDiskImage(storage::DiskImageType::Floppy, this).isEmpty()) reload(); });
