@@ -162,6 +162,9 @@ public:
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
         setAttribute(Qt::WA_OpaquePaintEvent, true);
+        m_captureKeepAliveTimer.setTimerType(Qt::PreciseTimer);
+        m_captureKeepAliveTimer.setInterval(8);
+        connect(&m_captureKeepAliveTimer, &QTimer::timeout, this, [this]() { keepMouseCaptureActive(); });
     }
 
     void setRunning(bool running)
@@ -228,11 +231,13 @@ public:
         }
         const bool wasCaptured = m_mouseCaptured;
         m_mouseCaptured = false;
+        m_captureKeepAliveTimer.stop();
         if (m_relativeCapture) {
             m_relativeCapture = false;
             m_warpPending = false;
             if (mouseGrabber() == this) releaseMouse();
         }
+        clearGlobalBlankCursor();
         releasePointerInput();
         if (wasCaptured) notifyCaptureStateChanged();
         update();
@@ -383,10 +388,12 @@ private:
         }
         m_mouseCaptured = true;
         m_relativeCapture = true;
+        setGlobalBlankCursor();
         if (!recenterMouse()) {
             releaseMouseCapture();
             return false;
         }
+        m_captureKeepAliveTimer.start();
         notifyCaptureStateChanged();
         update();
         return true;
@@ -408,6 +415,39 @@ private:
         m_warpPending = true;
         QCursor::setPos(m_mouseGlobalCenter);
         return nearPoint(QCursor::pos(), m_mouseGlobalCenter, kRecenterTolerancePx);
+    }
+
+    void keepMouseCaptureActive()
+    {
+        if (!m_mouseCaptured || !m_relativeCapture) {
+            m_captureKeepAliveTimer.stop();
+            return;
+        }
+        if (mouseGrabber() != this) {
+            releaseMouseCapture();
+            return;
+        }
+        setGlobalBlankCursor();
+        m_mouseCenter = displayRect().center();
+        m_mouseGlobalCenter = mapToGlobal(m_mouseCenter);
+        if (!m_warpPending && !nearPoint(QCursor::pos(), m_mouseGlobalCenter, kRecenterTolerancePx)) {
+            m_warpPending = true;
+            QCursor::setPos(m_mouseGlobalCenter);
+        }
+    }
+
+    void setGlobalBlankCursor()
+    {
+        if (m_globalBlankCursorSet) return;
+        QApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
+        m_globalBlankCursorSet = true;
+    }
+
+    void clearGlobalBlankCursor()
+    {
+        if (!m_globalBlankCursorSet) return;
+        QApplication::restoreOverrideCursor();
+        m_globalBlankCursorSet = false;
     }
 
     [[nodiscard]] static bool nearPoint(const QPoint& point, const QPoint& target, int tolerance)
@@ -584,10 +624,12 @@ private:
     bool m_warpPending = false;
     bool m_pointerInsideDisplay = false;
     bool m_leftButtonPressed = false;
+    bool m_globalBlankCursorSet = false;
     QPoint m_mouseCenter;
     QPoint m_mouseGlobalCenter;
     QPoint m_lastGuestPoint;
     QImage m_image;
+    QTimer m_captureKeepAliveTimer;
     std::function<void(int, int, bool)> m_mouseCallback;
     std::function<void(int, bool)> m_keyCallback;
     std::function<void(bool)> m_captureStateCallback;
