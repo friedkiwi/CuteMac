@@ -109,6 +109,19 @@ int main()
     writeImage(truncatedRawPath, truncatedRaw800K);
     require(DiskImageManager::detectType(truncatedRawPath) == DiskImageType::Floppy,
         "trailing-zero-truncated raw HFS floppies must be recognized structurally");
+    QByteArray truncatedRaw1440K(1143296, '\0');
+    truncatedRaw1440K[1024] = 0x42;
+    truncatedRaw1440K[1025] = 0x44;
+    truncatedRaw1440K[1042] = 0x0b; // 2874 allocation blocks
+    truncatedRaw1440K[1043] = 0x3a;
+    truncatedRaw1440K[1046] = 0x02; // 512-byte allocation blocks
+    truncatedRaw1440K[1047] = 0x00;
+    truncatedRaw1440K[1052] = 0x00; // allocation area begins at block 8
+    truncatedRaw1440K[1053] = 0x08;
+    const auto truncatedRaw1440KPath = temporary.filePath(QStringLiteral("open-transport-install-1.img"));
+    writeImage(truncatedRaw1440KPath, truncatedRaw1440K);
+    require(DiskImageManager::detectType(truncatedRaw1440KPath) == DiskImageType::Floppy,
+        "trailing-zero-truncated raw HFS 1.44 MB floppies must be recognized structurally");
     const auto migrationLibrary = temporary.filePath(QStringLiteral("migration-library"));
     require(QDir().mkpath(migrationLibrary), "migration library should be created");
     DiskImageManager migrationManager(migrationLibrary);

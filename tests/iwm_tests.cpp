@@ -209,6 +209,21 @@ bool create1440KImage(const QString& path)
     return file.write(bytes) == bytes.size();
 }
 
+bool createTruncatedRaw1440KHfsImage(const QString& path)
+{
+    QByteArray bytes(1143296, '\0');
+    bytes[1024] = 0x42;
+    bytes[1025] = 0x44;
+    bytes[1042] = 0x0b;
+    bytes[1043] = 0x3a;
+    bytes[1046] = 0x02;
+    bytes[1047] = 0x00;
+    bytes[1052] = 0x00;
+    bytes[1053] = 0x08;
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+}
+
 } // namespace
 
 int main()
@@ -295,6 +310,14 @@ int main()
     ok &= expect(create1440KImage(hdImagePath) && swim.loadFloppyImage(hdImagePath, true), "1.44 MB image must load");
     ok &= expect(swim.debugState().highDensity, "1.44 MB media must report high density");
     ok &= expect(swim.debugState().imageFormat == QStringLiteral("raw-1440k"), "1.44 MB format name");
+    IwmController truncatedHd;
+    truncatedHd.reset();
+    const auto truncatedHdImagePath = directory.filePath(QStringLiteral("truncated-1440.img"));
+    ok &= expect(createTruncatedRaw1440KHfsImage(truncatedHdImagePath)
+            && truncatedHd.loadFloppyImage(truncatedHdImagePath, true)
+            && truncatedHd.debugState().highDensity
+            && truncatedHd.debugState().imageFormat == QStringLiteral("raw-1440k"),
+        "trailing-zero-truncated raw HFS 1.44 MB floppy must load as high-density media");
     const auto mfmTrack = swim.trackBytesForDebug(0, 0);
     ok &= expect(mfmTrack.size() == 12500, "1.44 MB MFM track must span one 300 RPM revolution");
     ok &= expect(mfmTrack.mid(92, 4) == QByteArray::fromHex("c2c2c2fc"),

@@ -18,6 +18,7 @@ constexpr int tracksPerSide = 80;
 constexpr int raw400KBytes = 400 * 1024;
 constexpr int raw800KBytes = 800 * 1024;
 constexpr int raw1440KBytes = 1440 * 1024;
+constexpr int hfsGeometrySlackBytes = 4 * 1024;
 constexpr qsizetype maxTraceEvents = 4096;
 constexpr qsizetype maxLastNibbles = 4096;
 
@@ -67,6 +68,30 @@ void writeBe32(QByteArray& bytes, qsizetype offset, std::uint32_t value)
         checksum = (checksum >> 1) | (checksum << 31);
     }
     return checksum;
+}
+
+[[nodiscard]] FloppyDiskImage::Kind truncatedRawHfsKind(const QByteArray& bytes)
+{
+    if (bytes.size() <= raw400KBytes || bytes.size() >= raw1440KBytes || bytes.size() < 1056) {
+        return FloppyDiskImage::Kind::Empty;
+    }
+    const auto targetBytes = bytes.size() < raw800KBytes ? raw800KBytes : raw1440KBytes;
+    const auto mdb = bytes.mid(1024, 32);
+    const auto be16 = [&](qsizetype offset) {
+        return (static_cast<std::uint16_t>(static_cast<std::uint8_t>(mdb[offset])) << 8)
+            | static_cast<std::uint8_t>(mdb[offset + 1]);
+    };
+    const auto allocationBlocks = be16(18);
+    const auto allocationBlockSize = (static_cast<std::uint32_t>(be16(20)) << 16) | be16(22);
+    const auto firstAllocationBlock = be16(28);
+    const auto volumeBytes = (static_cast<std::uint64_t>(firstAllocationBlock) * bytesPerSector)
+        + static_cast<std::uint64_t>(allocationBlocks) * allocationBlockSize;
+    if (be16(0) != 0x4244 || allocationBlocks == 0 || allocationBlockSize == 0
+        || volumeBytes <= static_cast<std::uint64_t>(bytes.size())
+        || volumeBytes > static_cast<std::uint64_t>(targetBytes + hfsGeometrySlackBytes)) {
+        return FloppyDiskImage::Kind::Empty;
+    }
+    return targetBytes == raw800KBytes ? FloppyDiskImage::Kind::Raw800K : FloppyDiskImage::Kind::Raw1440K;
 }
 
 [[nodiscard]] bool decodeGcrPayload(const QByteArray& encoded, QByteArray& payload)
@@ -279,23 +304,11 @@ bool FloppyDiskImage::load(const QString& path, bool readOnly)
     if (bytes.size() == raw1440KBytes) {
         return loadRaw(path, bytes, Kind::Raw1440K);
     }
-    if (bytes.size() > raw400KBytes && bytes.size() < raw800KBytes && bytes.size() >= 1056) {
-        const auto mdb = bytes.mid(1024, 32);
-        const auto be16 = [&](qsizetype offset) {
-            return (static_cast<std::uint16_t>(static_cast<std::uint8_t>(mdb[offset])) << 8)
-                | static_cast<std::uint8_t>(mdb[offset + 1]);
-        };
-        const auto allocationBlocks = be16(18);
-        const auto allocationBlockSize = (static_cast<std::uint32_t>(be16(20)) << 16) | be16(22);
-        const auto firstAllocationBlock = be16(28);
-        const auto volumeBytes = (static_cast<std::uint64_t>(firstAllocationBlock) * bytesPerSector)
-            + static_cast<std::uint64_t>(allocationBlocks) * allocationBlockSize;
-        if (be16(0) == 0x4244 && allocationBlocks != 0 && allocationBlockSize != 0
-            && volumeBytes > static_cast<std::uint64_t>(bytes.size()) && volumeBytes <= raw800KBytes) {
-            auto padded = bytes;
-            padded.resize(raw800KBytes);
-            return loadRaw(path, padded, Kind::Raw800K);
-        }
+    const auto truncatedKind = truncatedRawHfsKind(bytes);
+    if (truncatedKind == Kind::Raw800K || truncatedKind == Kind::Raw1440K) {
+        auto padded = bytes;
+        padded.resize(truncatedKind == Kind::Raw800K ? raw800KBytes : raw1440KBytes);
+        return loadRaw(path, padded, truncatedKind);
     }
     if (bytes.size() >= 84) {
         return loadDiskCopy42(path, bytes);

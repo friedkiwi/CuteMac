@@ -90,6 +90,17 @@ QString floppyDriveName(int drive)
     return drive == 0 ? QStringLiteral("Internal Floppy") : QStringLiteral("External Floppy");
 }
 
+QString toolbarMediaName(const QString& path, const QString& emptyText)
+{
+    if (path.isEmpty()) return emptyText;
+    auto name = QFileInfo(path).fileName();
+    constexpr qsizetype maximumNameLength = 28;
+    if (name.size() > maximumNameLength) {
+        name = name.left(maximumNameLength - 1) + QStringLiteral("...");
+    }
+    return name;
+}
+
 QFrame* makeStatusSeparator(QWidget* parent)
 {
     auto* separator = new QFrame(parent);
@@ -942,11 +953,9 @@ void EmulatorWindow::buildToolbar()
                 rememberRecentImage(cutemac::storage::DiskImageType::Floppy, m_configuration.iwmDevices[drive].imagePath);
             auto* floppy = new QToolButton(m_toolbar);
             floppy->setIcon(style()->standardIcon(QStyle::SP_DriveFDIcon));
-            const auto imageName = m_configuration.iwmDevices[drive].imagePath.isEmpty()
-                ? QStringLiteral("empty")
-                : QFileInfo(m_configuration.iwmDevices[drive].imagePath).fileName();
+            const auto imageName = toolbarMediaName(m_configuration.iwmDevices[drive].imagePath, QStringLiteral("empty"));
             floppy->setToolTip(QStringLiteral("%1: %2").arg(floppyDriveName(drive), imageName));
-            floppy->setText(drive == 0 ? QStringLiteral("FD1") : QStringLiteral("FD2"));
+            floppy->setText(QStringLiteral("%1: %2").arg(drive == 0 ? QStringLiteral("FD1") : QStringLiteral("FD2"), imageName));
             floppy->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             floppy->setPopupMode(QToolButton::InstantPopup);
             auto* menu = new QMenu(floppy);
@@ -983,9 +992,9 @@ void EmulatorWindow::buildToolbar()
         disk->setToolTip(QStringLiteral("SCSI ID %1 %2").arg(device.id).arg(cdRom ? QStringLiteral("CD-ROM") : QStringLiteral("hard disk")));
         disk->setPopupMode(QToolButton::InstantPopup);
         auto* menu = new QMenu(disk);
-        menu->addAction(device.imagePath.isEmpty() ? QStringLiteral("Insert...") : QStringLiteral("Change Image..."), this,
-            [this, id = device.id, type = device.type]() { insertScsiFromToolbar(id, type); });
         if (cdRom) {
+            menu->addAction(device.imagePath.isEmpty() ? QStringLiteral("Insert...") : QStringLiteral("Change Image..."), this,
+                [this, id = device.id, type = device.type]() { insertScsiFromToolbar(id, type); });
             const auto recentCds = recentImages(cutemac::storage::DiskImageType::CdRom);
             if (!recentCds.isEmpty()) {
                 auto* recent = menu->addMenu(QStringLiteral("Recent Images"));
@@ -993,21 +1002,10 @@ void EmulatorWindow::buildToolbar()
                     recent->addAction(QFileInfo(path).fileName(), this,
                         [this, id = device.id, type = device.type, path]() { insertScsiPath(id, type, path); });
             }
-        }
-        if (cdRom) {
             auto* eject = menu->addAction(QStringLiteral("Eject"), this, [this, id = device.id]() { ejectScsiFromToolbar(id); });
             eject->setEnabled(!device.imagePath.isEmpty());
-        }
-        if (!cdRom) {
-            menu->addAction(QStringLiteral("New Hard Disk Image..."), this,
-                [this, id = device.id]() { createHardDiskFromToolbar(id); });
             menu->addSeparator();
-            auto* readOnly = menu->addAction(QStringLiteral("Read-only"));
-            readOnly->setCheckable(true);
-            readOnly->setChecked(device.readOnly);
-            connect(readOnly, &QAction::toggled, this, [this, id = device.id](bool enabled) { setScsiReadOnly(id, enabled); });
         }
-        menu->addSeparator();
         menu->addAction(QStringLiteral("Details..."), this, [this, id = device.id]() { showScsiDetails(id); });
         disk->setMenu(menu);
         m_toolbar->addWidget(disk);
