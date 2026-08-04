@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Before project(): the toolchain file has to be in place for the first
+# compiler check, and vcpkg installs the manifest during that step.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(VcpkgBootstrap)
+
 project(CuteMac
     VERSION 0.1.0
     DESCRIPTION "Modular classic Macintosh emulator"
@@ -12,7 +17,6 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Every third-party dependency is declared in vcpkg.json and resolved through
 # the vendored vcpkg in third_party/. Do not vendor individual libraries or fall

@@ -17,20 +17,20 @@
     {
       "name": "qttools",
       "platform": "osx",
-      "comment": "Source of macdeployqt; qtbase only builds the deploy tool on Windows."
+      "$comment": "Source of macdeployqt; qtbase only builds the deploy tool on Windows."
     },
     "qtmultimedia",
     "tomlplusplus",
     {
       "name": "libslirp",
       "platform": "!emscripten",
-      "comment": "SLIP/PPP guest networking. Browsers have no raw sockets, so wasm builds omit it."
+      "$comment": "SLIP/PPP guest networking. Browsers have no raw sockets, so wasm builds omit it."
     },
     {
       "name": "pkgconf",
       "host": true,
       "platform": "!emscripten",
-      "comment": "libslirp ships only pkg-config metadata and the vcpkg toolchain does not provide pkg-config."
+      "$comment": "libslirp ships only pkg-config metadata and the vcpkg toolchain does not provide pkg-config."
     }
   ]
 }
