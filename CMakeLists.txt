@@ -11,6 +11,10 @@ project(CuteMac
     LANGUAGES C CXX
 )
 
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 include(CTest)
 include(GNUInstallDirs)
 
@@ -243,6 +247,7 @@ target_include_directories(CuteMacWidgets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc
 add_library(CuteMacFrontend
     src/session/EmulatorWindow.cpp
     src/session/SessionWindowManager.cpp
+    src/session/HostRelativeMouseCapture.cpp
     src/session/FramebufferRenderer.cpp
     src/session/AudioOutput.cpp
     src/session/HostInputMapper.cpp
@@ -252,6 +257,7 @@ add_library(CuteMacFrontend
 target_sources(CuteMacFrontend
     PRIVATE
         "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/session/SessionControlServer.cpp>"
+        "$<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/src/session/MacRelativeMouseCapture.mm>"
 )
 
 target_link_libraries(CuteMacFrontend
@@ -262,6 +268,10 @@ target_link_libraries(CuteMacFrontend
         "$<$<CONFIG:Debug>:Qt6::Network>"
         Qt6::Widgets
 )
+
+if(APPLE)
+    target_link_libraries(CuteMacFrontend PRIVATE "-framework Cocoa" "-framework CoreGraphics")
+endif()
 
 target_compile_definitions(CuteMacFrontend
     PUBLIC
