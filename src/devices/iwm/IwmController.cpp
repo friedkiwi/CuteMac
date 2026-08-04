@@ -260,6 +260,11 @@ bool IwmController::floppyInserted(int drive) const
     return floppy != nullptr && floppy->inserted();
 }
 
+std::uint64_t IwmController::activityCounter() const
+{
+    return m_dataReads + m_dataWrites;
+}
+
 IwmController::DebugState IwmController::debugState() const
 {
     const auto floppy = selectedDrive().debugState();

@@ -347,6 +347,7 @@ int main()
 
     ok &= expect(replacement.loadFloppyImage(hdImagePath, true), "1.44 MB replacement image must load");
     ok &= expect(replacement.debugState().highDensity, "replacement media must report high density immediately");
+    const auto activityBeforeRead = replacement.activityCounter();
     (void)replacement.access(4, 0xfc, true); // Select disk-change latch.
     ok &= expect((replacement.access(15) & 0x0c) == 0x0c, "media replacement must assert the SWIM disk-change latch");
     (void)replacement.access(4, 0xf4, true); // Drop the phase strobe before issuing the clear command.
@@ -360,6 +361,7 @@ int main()
     (void)replacement.access(7, 0x08, true); // read ACTION
     ok &= expect((replacement.access(15) & 0x80) != 0, "replacement MFM disk must make data available");
     ok &= expect(replacement.access(9) == 0xc2, "replacement disk must expose MFM index bytes, not stale 800K GCR data");
+    ok &= expect(replacement.activityCounter() > activityBeforeRead, "floppy data reads must contribute to disk activity");
 
     ok &= expect(exerciseGcrWrite(directory.filePath(QStringLiteral("source-400.dsk")),
                      directory.filePath(QStringLiteral("written-400.dsk")), 400 * 1024),

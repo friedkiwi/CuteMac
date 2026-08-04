@@ -260,6 +260,7 @@ std::uint64_t MacIIcxMachine::diskActivityCounter() const
     for (const auto& cdRom : m_scsiCdRoms) {
         if (cdRom) activity += cdRom->activityCounter();
     }
+    activity += m_swim.activityCounter();
     return activity;
 }
 bool MacIIcxMachine::overlayEnabled() const { return m_overlay; }

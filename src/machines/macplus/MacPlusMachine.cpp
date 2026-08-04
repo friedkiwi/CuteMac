@@ -465,6 +465,7 @@ std::uint64_t MacPlusMachine::diskActivityCounter() const
     for (const auto& cdRom : m_scsiCdRoms) {
         if (cdRom) activity += cdRom->activityCounter();
     }
+    activity += m_iwm.activityCounter();
     return activity;
 }
 

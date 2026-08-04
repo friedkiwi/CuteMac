@@ -50,6 +50,7 @@ public:
     [[nodiscard]] QString floppyImagePath(int drive) const;
     [[nodiscard]] bool floppyInserted() const;
     [[nodiscard]] bool floppyInserted(int drive) const;
+    [[nodiscard]] std::uint64_t activityCounter() const;
     [[nodiscard]] DebugState debugState() const;
     [[nodiscard]] DebugState debugState(int drive) const;
     [[nodiscard]] QByteArray currentTrackBytesForDebug() const;
