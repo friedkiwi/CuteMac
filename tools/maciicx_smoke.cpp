@@ -10,6 +10,7 @@
 #include <QFile>
 
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/devices/video/nubus/AppleDisplayCard.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
@@ -25,12 +26,24 @@ int main(int argc, char** argv)
     const auto cycles = argc >= 3 ? std::max(1, std::atoi(argv[2])) : 10'000'000;
     cutemac::machines::maciicx::MacIIcxMachine machine(8 * 1024 * 1024);
     std::shared_ptr<cutemac::devices::video::nubus::MacintoshIIVideoCard> authenticVideo;
+    std::shared_ptr<cutemac::devices::video::nubus::AppleDisplayCard> displayCard824;
     std::shared_ptr<cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard> acceleratedVideo;
     if (qEnvironmentVariableIsSet("CUTEMAC_IICX_AUTHENTIC_VIDEO")) {
         authenticVideo = std::make_shared<cutemac::devices::video::nubus::MacintoshIIVideoCard>();
         const auto path = qEnvironmentVariable("CUTEMAC_IICX_VIDEO_ROM", QStringLiteral("work/roms/342-0008-a.bin"));
         if (!authenticVideo->loadDeclarationRom(path) || !machine.installNuBusCard(9, authenticVideo)) {
             std::cerr << "failed to load authentic Macintosh II video card ROM\n";
+            return 1;
+        }
+    } else if (qEnvironmentVariableIsSet("CUTEMAC_IICX_APPLE_824_VIDEO")) {
+        bool vramOk = false;
+        const auto configuredVramKiB = qEnvironmentVariableIntValue("CUTEMAC_IICX_APPLE_824_VRAM_KIB", &vramOk);
+        displayCard824 = std::make_shared<cutemac::devices::video::nubus::AppleDisplayCard>(
+            cutemac::devices::video::nubus::AppleDisplayCard::Variant::MacintoshDisplayCard824,
+            vramOk ? configuredVramKiB : 1024);
+        const auto path = qEnvironmentVariable("CUTEMAC_IICX_VIDEO_ROM", QStringLiteral("work/3410868.bin"));
+        if (!displayCard824->loadDeclarationRom(path) || !machine.installNuBusCard(9, displayCard824)) {
+            std::cerr << "failed to load Apple Macintosh Display Card 8-24 ROM\n";
             return 1;
         }
     } else if (qEnvironmentVariableIsSet("CUTEMAC_IICX_ACCELERATED_VIDEO")) {

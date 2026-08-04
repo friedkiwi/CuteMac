@@ -8,7 +8,8 @@ namespace cutemac::devices::video::nubus {
 
 namespace {
 
-constexpr std::uint32_t declarationRomBase = 0x00fe0000;
+constexpr std::uint32_t standardDeclarationRomBase = 0x000e0000;
+constexpr std::uint32_t superDeclarationRomBase = 0x00fe0000;
 constexpr std::uint32_t vramWindowLimit = 0x00200000;
 constexpr std::uint32_t jmfbBase = 0x00200000;
 constexpr std::uint32_t crtcBase = 0x00200100;
@@ -121,6 +122,7 @@ void AppleDisplayCard::reset()
     m_pixelClockDivider = 1;
     m_vblDisabled = true;
     m_vblCycles = cyclesPerVbl;
+    m_frameCyclePosition = 0;
     m_width = 640;
     m_height = 480;
     m_visibleTop = 0;
@@ -131,6 +133,7 @@ void AppleDisplayCard::reset()
 
 void AppleDisplayCard::tick(std::uint64_t cycles)
 {
+    m_frameCyclePosition = (m_frameCyclePosition + cycles) % cyclesPerVbl;
     if (cycles >= m_vblCycles) {
         const auto remainder = cycles - m_vblCycles;
         m_vblCycles = cyclesPerVbl - (remainder % cyclesPerVbl);
@@ -142,8 +145,13 @@ void AppleDisplayCard::tick(std::uint64_t cycles)
 
 std::uint8_t AppleDisplayCard::read8(std::uint32_t offset)
 {
-    if (offset >= declarationRomBase && declarationRomLoaded()) {
-        return static_cast<std::uint8_t>(m_declarationRom[static_cast<qsizetype>(offset - declarationRomBase)]);
+    if (declarationRomLoaded()) {
+        if (offset >= superDeclarationRomBase && offset < superDeclarationRomBase + mappedDeclarationRomBytes) {
+            return static_cast<std::uint8_t>(m_declarationRom[static_cast<qsizetype>(offset - superDeclarationRomBase)]);
+        }
+        if (offset >= standardDeclarationRomBase && offset < standardDeclarationRomBase + mappedDeclarationRomBytes) {
+            return static_cast<std::uint8_t>(m_declarationRom[static_cast<qsizetype>(offset - standardDeclarationRomBase)]);
+        }
     }
 
     const auto local = offset & 0x00ffffffU;
@@ -360,7 +368,43 @@ std::uint32_t AppleDisplayCard::readCrtc(std::uint32_t offset) const
     case 0x28: return m_vbporch;
     case 0x2c: return m_vsync;
     case 0x30: return m_vfporch;
-    case 0xc0: return 0x0f;
+    case 0xc0: {
+        const int vtotal = m_vactive + m_vbporch + m_vsync + m_vfporch;
+        if (vtotal == 0 || m_vactive == 0) return 0x0f;
+        const bool interlace = (vtotal % 2) != 0;
+        const bool convolution = (m_control & 0x0020U) != 0;
+        const int divider = 256 - m_preload;
+        if (divider <= 0) return 0x0f;
+
+        int scale = 2;
+        switch (m_ramdacMode) {
+        case 0x00: scale = 5; break;
+        case 0x04: scale = 4; break;
+        case 0x08: scale = 3; break;
+        case 0x0c: scale = 2; break;
+        case 0x0d: scale = 0; break;
+        default: break;
+        }
+
+        const int htotal = m_hactive + m_hbporch + m_hsync + m_hfporch + 8;
+        int hpixels = ((htotal << scale) >> (convolution ? 2 : 0)) / divider;
+        if (hpixels <= 0) hpixels = 1;
+        const int vlines = std::max(1, vtotal >> (interlace ? 0 : 1));
+        const auto framePixels = static_cast<std::uint64_t>(hpixels) * static_cast<std::uint64_t>(vlines);
+        const auto beamPixel = (m_frameCyclePosition * framePixels) / cyclesPerVbl;
+        const int vpos = static_cast<int>(beamPixel / static_cast<std::uint64_t>(hpixels));
+        const int hpos = static_cast<int>(beamPixel % static_cast<std::uint64_t>(hpixels));
+        const int hsplit = m_visibleLeft + m_halflinePixels;
+        const int halfline = interlace ? vpos : ((vpos << 1) | (hpos >= hsplit ? 1 : 0));
+        std::uint32_t result = 0x0f;
+
+        if (hpos < m_visibleLeft || hpos >= m_visibleLeft + m_width) result |= 0x20;
+        if (halfline < m_vsync) result &= ~0x04U;
+        else if (halfline < m_vsync + m_vbporch) result &= ~0x02U;
+        else if (halfline < m_vsync + m_vbporch + m_vactive) result &= ~0x01U;
+        else result &= ~0x08U;
+        return result;
+    }
     case 0xcc: return 0;
     default: return 0;
     }

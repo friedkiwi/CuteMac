@@ -98,6 +98,7 @@ private:
     std::uint8_t m_pixelClockDivider = 0;
     bool m_vblDisabled = true;
     std::uint64_t m_vblCycles = 0;
+    std::uint64_t m_frameCyclePosition = 0;
     int m_width = 640;
     int m_height = 480;
     int m_visibleTop = 0;

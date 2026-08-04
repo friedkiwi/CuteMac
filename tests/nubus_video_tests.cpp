@@ -373,6 +373,10 @@ int main()
             && displayCard.read8(0x00fe0000) == 0xff
             && displayCard.read8(0x00ffffff) == 0x78,
         "8-24 declaration ROM must expand onto NuBus byte lane 3");
+    ok &= expect(displayCard.read8(0x000e0003) == 0x12
+            && displayCard.read8(0x000e0000) == 0xff
+            && displayCard.read8(0x000fffff) == 0x78,
+        "8-24 declaration ROM must also be visible in the IIcx 24-bit standard-slot window");
     ok &= expect(displayCard.vramBytes() == AppleDisplayCard::vram1MiB, "8-24 card must default to 1 MiB VRAM");
     ok &= expect(displayCard.videoFrame().grabbable,
         "8-24 card must allow host mouse grabbing for relative ADB movement");
@@ -381,6 +385,8 @@ int main()
             && displayCard.videoFrame().width == 640
             && displayCard.videoFrame().height == 480,
         "8-24 card must reset to a usable one-bit 640x480 frame");
+    ok &= expect((readCard32(displayCard, 0x002001c0) & 0x04U) == 0,
+        "8-24 CRTC status must expose active-low sync instead of a stuck-high poll bit");
     displayCard.write32(0x00200000, 0x00000c40);
     ok &= expect(displayCard.control() == 0x0c40
             && readCard32(displayCard, 0x00200000) == 0x00000040,
