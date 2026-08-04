@@ -1,0 +1,100 @@
+#pragma once
+
+#include <QMainWindow>
+#include <QPointer>
+#include <QSet>
+#include <QString>
+#include <QStringList>
+#include <QTimer>
+
+#include "cutemac/config/Configuration.h"
+#include "cutemac/core/EmulationSession.h"
+#include "cutemac/core/SessionRunner.h"
+#include "cutemac/session/AudioOutput.h"
+#include "cutemac/session/SessionControlServer.h"
+#include "cutemac/storage/DiskImageManager.h"
+
+class QAction;
+class QActionGroup;
+class QLabel;
+class QMenu;
+class QToolBar;
+
+namespace cutemac::session {
+
+class DisplayWidget;
+
+// A single emulated machine and its window. Multiple instances can coexist in
+// one process; each owns its own runner thread, audio sink, and control socket.
+class EmulatorWindow final : public QMainWindow {
+public:
+    EmulatorWindow(config::Configuration configuration, QString profilePath, QWidget* profileManagerWindow = nullptr);
+    ~EmulatorWindow() override;
+
+    // Canonical path of the backing profile file, or an empty string for a
+    // session started from a configuration that was never saved.
+    [[nodiscard]] QString profilePath() const { return m_profilePath; }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
+private:
+    [[nodiscard]] double preferredInitialZoom() const;
+    void updateInteractiveInputState(bool preserveDoubleClickWindow = false);
+    void buildMenus();
+    QAction* addZoomAction(QMenu* menu, QActionGroup* group, const QString& text, double factor);
+    void setZoom(double factor);
+    void setCustomZoom();
+    void buildToolbar();
+    void insertScsiFromToolbar(int id, config::ScsiDeviceType type);
+    void insertScsiPath(int id, config::ScsiDeviceType type, const QString& path);
+    void ejectScsiFromToolbar(int id);
+    void createHardDiskFromToolbar(int id);
+    void setScsiReadOnly(int id, bool enabled);
+    void showScsiDetails(int id);
+    void insertFloppyFromToolbar(int drive);
+    void insertFloppyPath(int drive, const QString& path);
+    [[nodiscard]] QStringList recentImages(storage::DiskImageType type) const;
+    void rememberRecentImage(storage::DiskImageType type, const QString& path);
+    void ejectFloppy(int drive);
+    void createFloppyFromToolbar(int drive, qint64 sizeBytes);
+    void buildStatusBar();
+    void loadAndReset();
+    void setRuntimeSpeed(config::RuntimeSpeed speed);
+    void updateSpeedActions();
+    void configureMachine();
+    void saveConfiguration();
+    void setPaused(bool paused);
+    void runFrame();
+    void updateStatus();
+    void showProfileManager();
+
+    config::Configuration m_configuration;
+    QString m_profilePath;
+    QPointer<QWidget> m_profileManagerWindow;
+    core::EmulationSession m_session;
+    core::SessionRunner m_runner;
+    SessionControlServer m_controlServer;
+    AudioOutput m_audioOutput;
+    int m_audioPacingFrames = 0;
+    DisplayWidget* m_display = nullptr;
+    QLabel* m_status = nullptr;
+    QAction* m_realtimeSpeedAction = nullptr;
+    QAction* m_unlimitedSpeedAction = nullptr;
+    QAction* m_zoom1xAction = nullptr;
+    QAction* m_zoom15xAction = nullptr;
+    QAction* m_zoom2xAction = nullptr;
+    QAction* m_zoomCustomAction = nullptr;
+    QSet<int> m_pressedInputKeys;
+    bool m_mouseInputPressed = false;
+    QTimer m_mousePacingReleaseTimer;
+    QTimer m_frameTimer;
+    QToolBar* m_toolbar = nullptr;
+    QAction* m_pauseAction = nullptr;
+    bool m_romLoaded = false;
+    bool m_paused = true;
+    bool m_zoomResizePending = false;
+    quint64 m_frames = 0;
+};
+
+} // namespace cutemac::session

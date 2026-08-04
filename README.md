@@ -17,33 +17,58 @@ The M68k CPU core starts from Musashi-derived source maintained directly in the 
 
 ## Build
 
-Ubuntu/WSL2 prerequisites:
+Every third-party dependency, Qt included, comes from the [vcpkg](https://vcpkg.io) manifest in `vcpkg.json`, resolved through the vcpkg vendored at `third_party/vcpkg`. There are no system Qt or library packages to install.
 
 ```sh
-sudo apt-get install build-essential cmake ninja-build qt6-base-dev qt6-tools-dev qt6-multimedia-dev
-sudo apt-get install libreadline-dev libtomlplusplus-dev libslirp-dev
+git clone --recurse-submodules https://github.com/friedkiwi/CuteMac.git
+cd CuteMac
+./third_party/vcpkg/bootstrap-vcpkg.sh    # bootstrap-vcpkg.bat on Windows
+```
+
+Ubuntu/WSL2 still needs a host toolchain and the X11/audio development headers Qt builds against:
+
+```sh
+sudo apt-get install build-essential cmake ninja-build curl zip unzip tar pkg-config python3 bison
+sudo apt-get install libgl1-mesa-dev libx11-dev libxkbcommon-x11-dev libxcb1-dev libfontconfig1-dev
+sudo apt-get install libreadline-dev
 ```
 
 The build also requires a Retro68 toolchain for the project-owned CuteMac Video declaration ROM. Put `m68k-apple-macos-as` and `m68k-apple-macos-objcopy` on `PATH`, install Retro68 at `/opt/Retro68/toolchain/bin`, or pass `-DCUTEMAC_RETRO68_TOOLCHAIN_BIN=/path/to/toolchain/bin` when configuring.
 
+Configure through the presets so the toolchain file, triplet, and shared binary cache stay consistent:
+
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build
+cmake --preset debug          # or release, macos-release, linux-release
+cmake --build --preset debug
+ctest --preset debug
 ```
 
-The build produces `CuteMac` for profile management, `CuteMacSession` for emulator windows, `CuteMacDebugSession` for a readline debug console, and headless Mac Plus/IIcx smoke tools.
+On Windows, run the presets from a Visual Studio developer command prompt so `cl.exe` and `ninja` are on `PATH`:
+
+```
+cmake --preset windows-msvc-debug
+cmake --build --preset windows-msvc-debug
+```
+
+The presets point `VCPKG_BINARY_SOURCES` at the shared binary cache at `http://buildcache.cyber.gent/ac/{sha}`. With a warm cache, dependencies are downloaded rather than compiled; without it, the first configure builds Qt from source and takes a long time.
+
+The build produces `CuteMac`, the emulator application, plus `CuteMacDebugSession` for a readline debug console and headless Mac Plus/IIcx smoke tools.
 
 The Windows Win64 workflow is temporarily manual while Retro68 installation is added to CI. Its `CuteMac-win64` artifact is a portable folder containing the release executables and their Qt 6 runtime dependencies.
 
-`CuteMacSession` and `CuteMacDebugSession` share the machine-neutral `EmulationSession` facade. Desktop sessions run emulation off the Qt event thread; WebAssembly uses a single-threaded frame runner. Debug-only concrete machine access is kept behind an optional debug interface.
+`CuteMac` and `CuteMacDebugSession` share the machine-neutral `EmulationSession` facade. Desktop sessions run emulation off the Qt event thread; WebAssembly uses a single-threaded frame runner. Debug-only concrete machine access is kept behind an optional debug interface.
 
 ## Run
 
 ```sh
-./build/CuteMac
+./build/CuteMac                      # session manager
+./build/CuteMac "Mac Plus"           # start a profile by name
+./build/CuteMac path/to/profile.toml # start a profile file directly
 ```
 
-`CuteMac` opens the profile manager. It stores TOML profiles in Qt's per-user app config location and uses Qt's per-user app data location for default ROM and disk-image folders. Starting a profile launches `CuteMacSession`, the individual emulator window.
+Run without arguments, `CuteMac` opens the session manager. Given a profile name or a path to a profile TOML file, it starts that machine directly in an emulator window. It stores TOML profiles in Qt's per-user app config location and uses Qt's per-user app data location for default ROM and disk-image folders.
+
+Starting a profile from the session manager opens the emulator window in the same process, and the manager stays open so several machines can run side by side. One profile can only back one session at a time; starting a profile that is already running raises its existing window.
 
 Optional, ROM-version-verified patches can be enabled per profile. For example, the supported Mac Plus v3 ROM can skip its destructive RAM pattern passes while retaining ROM verification and RAM sizing:
 

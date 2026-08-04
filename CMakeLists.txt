@@ -14,15 +14,58 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Every third-party dependency is declared in vcpkg.json and resolved through
+# the vendored vcpkg in third_party/. Do not vendor individual libraries or fall
+# back to system packages; that is what made the Windows libslirp gap invisible.
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets)
+find_package(tomlplusplus CONFIG REQUIRED)
 find_package(Readline)
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(CUTEMAC_LIBSLIRP QUIET IMPORTED_TARGET slirp)
+
+option(CUTEMAC_ENABLE_SLIRP "Build SLIP/PPP guest networking through libslirp" ON)
+
+if(EMSCRIPTEN AND CUTEMAC_ENABLE_SLIRP)
+    message(STATUS "CuteMac: libslirp networking disabled; browsers have no raw sockets")
+    set(CUTEMAC_ENABLE_SLIRP OFF CACHE BOOL "" FORCE)
 endif()
 
-set(tomlplusplus_INSTALL OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/tomlplusplus EXCLUDE_FROM_ALL)
+if(CUTEMAC_ENABLE_SLIRP)
+    # libslirp installs pkg-config metadata rather than a CMake package config,
+    # and the vcpkg toolchain does not put pkg-config on PATH. The manifest
+    # therefore provides pkgconf as a host tool; prefer it over any system copy.
+    if(DEFINED VCPKG_INSTALLED_DIR)
+        find_program(PKG_CONFIG_EXECUTABLE
+            NAMES pkgconf pkg-config
+            HINTS
+                "${VCPKG_INSTALLED_DIR}/${VCPKG_HOST_TRIPLET}/tools/pkgconf"
+                "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/pkgconf"
+        )
+
+        set(CUTEMAC_PKGCONFIG_ROOT "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+        set(CUTEMAC_PKGCONFIG_PATHS
+            "${CUTEMAC_PKGCONFIG_ROOT}/lib/pkgconfig"
+            "${CUTEMAC_PKGCONFIG_ROOT}/share/pkgconfig"
+            "${CUTEMAC_PKGCONFIG_ROOT}/debug/lib/pkgconfig"
+        )
+        if(CMAKE_HOST_WIN32)
+            list(JOIN CUTEMAC_PKGCONFIG_PATHS ";" CUTEMAC_PKGCONFIG_PATH)
+        else()
+            list(JOIN CUTEMAC_PKGCONFIG_PATHS ":" CUTEMAC_PKGCONFIG_PATH)
+        endif()
+        set(ENV{PKG_CONFIG_PATH} "${CUTEMAC_PKGCONFIG_PATH}")
+    endif()
+
+    set(PKG_CONFIG_USE_CMAKE_PREFIX_PATH ON)
+    if(VCPKG_TARGET_TRIPLET MATCHES "static")
+        # Static triplets need the transitive glib link line, not just -lslirp.
+        set(PKG_CONFIG_ARGN --static)
+    endif()
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(CUTEMAC_LIBSLIRP REQUIRED IMPORTED_TARGET slirp)
+    message(STATUS "CuteMac: SLIP/PPP networking enabled (libslirp ${CUTEMAC_LIBSLIRP_VERSION})")
+else()
+    message(STATUS "CuteMac: SLIP/PPP networking disabled; modem SLIP and PPP targets report NO CARRIER")
+endif()
 
 qt_standard_project_setup()
 
@@ -93,6 +136,7 @@ add_library(CuteMacCore
     "${CUTEMAC_VIDEO_DRIVER_HEADER}"
     "${CUTEMAC_ACCEL_VIDEO_HEADER}"
     src/config/Configuration.cpp
+    src/config/ProfileResolver.cpp
     src/core/EmulationSession.cpp
     src/core/MachineScheduler.cpp
     src/core/SessionRunner.cpp
@@ -165,7 +209,7 @@ if(UNIX AND NOT APPLE)
     )
 endif()
 
-if(CUTEMAC_LIBSLIRP_FOUND)
+if(CUTEMAC_ENABLE_SLIRP)
     target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_LIBSLIRP=1)
     target_link_libraries(CuteMacCore PRIVATE PkgConfig::CUTEMAC_LIBSLIRP)
 else()
@@ -186,44 +230,104 @@ target_link_libraries(CuteMacWidgets
 
 target_include_directories(CuteMacWidgets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# The application's own windows. CuteMacWidgets holds dialogs any frontend can
+# reuse; this library holds the session manager and emulator windows that make
+# up the CuteMac application itself.
+add_library(CuteMacFrontend
+    src/session/EmulatorWindow.cpp
+    src/session/SessionWindowManager.cpp
+    src/session/SessionControlServer.cpp
+    src/session/FramebufferRenderer.cpp
+    src/session/AudioOutput.cpp
+    src/session/HostInputMapper.cpp
+    src/ui/ProfileManagerWindow.cpp
+)
+
+target_link_libraries(CuteMacFrontend
+    PUBLIC
+        CuteMacCore
+        CuteMacWidgets
+        Qt6::Multimedia
+        Qt6::Network
+        Qt6::Widgets
+)
+
+target_include_directories(CuteMacFrontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# One binary serves both roles: no argument opens the session manager, a profile
+# name or profile file path starts that machine directly.
 add_executable(CuteMac
     src/app/main.cpp
 )
 
 target_link_libraries(CuteMac
     PRIVATE
-        CuteMacCore
-        CuteMacWidgets
-        Qt6::Widgets
+        CuteMacFrontend
 )
+
+target_compile_definitions(CuteMac PRIVATE CUTEMAC_VERSION="${PROJECT_VERSION}")
 
 set_target_properties(CuteMac PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE
 )
 
-add_executable(CuteMacSession
-    src/session/main.cpp
-    src/session/SessionApplication.cpp
-    src/session/SessionControlServer.cpp
-    src/session/FramebufferRenderer.cpp
-    src/session/AudioOutput.cpp
-    src/session/HostInputMapper.cpp
-)
+# Windows and macOS ship self-contained artifacts, so the Qt runtime has to be
+# copied next to the binary (Windows) or into the bundle (macOS). Linux packages
+# declare their dependencies instead and need no deployment step.
+if(WIN32 OR APPLE)
+    option(CUTEMAC_DEPLOY_QT "Deploy the Qt runtime alongside the built application" ON)
+endif()
 
-target_link_libraries(CuteMacSession
-    PRIVATE
-        CuteMacCore
-        CuteMacWidgets
-        Qt6::Network
-        Qt6::Multimedia
-        Qt6::Widgets
-)
+if((WIN32 OR APPLE) AND CUTEMAC_DEPLOY_QT)
+    get_target_property(CUTEMAC_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(CUTEMAC_QT_TOOL_DIR "${CUTEMAC_QMAKE_EXECUTABLE}" DIRECTORY)
+endif()
 
-set_target_properties(CuteMacSession PROPERTIES
-    WIN32_EXECUTABLE TRUE
-    MACOSX_BUNDLE TRUE
-)
+if(WIN32 AND CUTEMAC_DEPLOY_QT)
+    # Every target lands in one output directory, so deploying once against
+    # CuteMac also covers the tests, smoke tools, and debug session.
+    find_program(CUTEMAC_WINDEPLOYQT NAMES windeployqt HINTS "${CUTEMAC_QT_TOOL_DIR}")
+
+    if(CUTEMAC_WINDEPLOYQT)
+        # Let windeployqt classify the binary itself. Passing --release
+        # explicitly makes it fail to match the platform plugin on llvm-mingw Qt
+        # kits, where its debug/release detection misfires.
+        add_custom_command(TARGET CuteMac POST_BUILD
+            COMMAND "${CUTEMAC_WINDEPLOYQT}"
+                --no-translations
+                --compiler-runtime
+                --dir "$<TARGET_FILE_DIR:CuteMac>"
+                "$<TARGET_FILE:CuteMac>"
+            COMMENT "Deploying the Qt runtime into the build tree"
+            VERBATIM
+        )
+    else()
+        message(WARNING
+            "windeployqt was not found; build-tree executables will not start unless Qt is on PATH")
+    endif()
+endif()
+
+if(APPLE AND CUTEMAC_DEPLOY_QT)
+    # macdeployqt copies the Qt frameworks and the resolvable non-Qt dylibs
+    # (libslirp, glib and its dependencies) into CuteMac.app and rewrites their
+    # install names, so the bundle does not reference Homebrew paths that only
+    # exist on a developer machine.
+    find_program(CUTEMAC_MACDEPLOYQT NAMES macdeployqt HINTS "${CUTEMAC_QT_TOOL_DIR}")
+
+    if(CUTEMAC_MACDEPLOYQT)
+        add_custom_command(TARGET CuteMac POST_BUILD
+            COMMAND "${CUTEMAC_MACDEPLOYQT}"
+                "$<TARGET_BUNDLE_DIR:CuteMac>"
+                -always-overwrite
+            COMMENT "Deploying the Qt runtime into CuteMac.app"
+            VERBATIM
+        )
+    else()
+        message(WARNING
+            "macdeployqt was not found; CuteMac.app will not be self-contained")
+    endif()
+endif()
 
 # Keep the distributable product explicit. Development utilities, smoke tools,
 # and tests intentionally have no install rules, so CPack-based ZIP, DEB,
@@ -234,7 +338,7 @@ else()
     set(CUTEMAC_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
 
-install(TARGETS CuteMac CuteMacSession
+install(TARGETS CuteMac
     RUNTIME DESTINATION "${CUTEMAC_RUNTIME_DESTINATION}"
         COMPONENT Runtime
     BUNDLE DESTINATION "."
@@ -350,6 +454,10 @@ if(BUILD_TESTING)
 
     add_test(NAME configuration-toml COMMAND CuteMacConfigurationTests)
 
+    add_executable(CuteMacProfileResolverTests tests/profile_resolver_tests.cpp)
+    target_link_libraries(CuteMacProfileResolverTests PRIVATE CuteMacCore)
+    add_test(NAME profile-resolver COMMAND CuteMacProfileResolverTests)
+
     add_executable(CuteMacSchedulerTests tests/scheduler_tests.cpp)
     target_link_libraries(CuteMacSchedulerTests PRIVATE CuteMacCore)
     add_test(NAME machine-scheduler COMMAND CuteMacSchedulerTests)
@@ -423,7 +531,7 @@ if(BUILD_TESTING)
 
     add_executable(CuteMacModemTests tests/modem_tests.cpp)
     target_link_libraries(CuteMacModemTests PRIVATE CuteMacCore Qt6::Network)
-    if(CUTEMAC_LIBSLIRP_FOUND)
+    if(CUTEMAC_ENABLE_SLIRP)
         target_compile_definitions(CuteMacModemTests PRIVATE CUTEMAC_HAS_LIBSLIRP=1)
     else()
         target_compile_definitions(CuteMacModemTests PRIVATE CUTEMAC_HAS_LIBSLIRP=0)

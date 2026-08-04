@@ -3,6 +3,9 @@ cmake-build-*/
 .cache/
 .qt/
 
+# vcpkg manifest-mode install tree, when configured outside a build directory.
+vcpkg_installed/
+
 # Local scratch space for experiments, notes, downloaded manuals, and research.
 work/
 
