@@ -105,7 +105,7 @@ bool sameNuBusDevices(const QVector<cutemac::config::NuBusDeviceConfiguration>& 
         const auto& b = right[index];
         if (a.slot != b.slot || a.type != b.type || a.declarationRomPath != b.declarationRomPath
             || a.width != b.width || a.height != b.height || a.depth != b.depth
-            || a.vramMiB != b.vramMiB || a.acceleration != b.acceleration) return false;
+            || a.vramKiB != b.vramKiB || a.acceleration != b.acceleration) return false;
     }
     return true;
 }

@@ -141,9 +141,10 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         depth->setCurrentIndex(qMax(0, depth->findData(device.depth)));
         form->addRow(QStringLiteral("Color depth"), depth);
         vram = new QSpinBox;
-        vram->setRange(1, 14);
-        vram->setSuffix(QStringLiteral(" MiB"));
-        vram->setValue(device.vramMiB);
+        vram->setRange(1024, 14 * 1024);
+        vram->setSingleStep(1024);
+        vram->setSuffix(QStringLiteral(" KiB"));
+        vram->setValue(device.vramKiB);
         form->addRow(QStringLiteral("VRAM"), vram);
         acceleration = new QCheckBox;
         acceleration->setChecked(device.acceleration);
@@ -163,7 +164,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
             candidate.width = width->value();
             candidate.height = height->value();
             candidate.depth = depth->currentData().toInt();
-            candidate.vramMiB = vram->value();
+            candidate.vramKiB = vram->value();
         }
         const auto validation = nubusValidationMessage(candidate);
         if (!validation.isEmpty()) {
@@ -181,7 +182,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         device.width = width->value();
         device.height = height->value();
         device.depth = depth->currentData().toInt();
-        device.vramMiB = vram->value();
+        device.vramKiB = vram->value();
         device.acceleration = acceleration->isChecked();
         device.absolutePointer = absolutePointer->isChecked();
         device.declarationRomPath.clear();
@@ -731,7 +732,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         addScsiRow({ id, config::ScsiDeviceType::HardDisk, path, false });
     });
     connect(addCuteMacVideo, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4, true};
+        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4096, true};
         if (editNuBusCard(device, this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
@@ -739,14 +740,14 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     });
     connect(addCuteMacAcceleratedVideo, &QAction::triggered, this, [this, refreshNuBus]() {
         config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3),
-            config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 640, 480, 8, 4, true};
+            config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 640, 480, 8, 4096, true};
         if (editNuBusCard(device, this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
         }
     });
     connect(addAppleVideo, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 1, false};
+        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false};
         if (editNuBusCard(device, this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();

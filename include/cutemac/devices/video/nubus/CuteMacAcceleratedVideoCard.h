@@ -74,7 +74,7 @@ public:
         guestTraceCounterCount = 24,
     };
 
-    CuteMacAcceleratedVideoCard(int width, int height, int depth, int vramMiB,
+    CuteMacAcceleratedVideoCard(int width, int height, int depth, int vramKiB,
         bool acceleration = true, bool absolutePointer = true);
 
     [[nodiscard]] QString id() const override;

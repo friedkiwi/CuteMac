@@ -91,7 +91,8 @@ bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
     if (device.width < 320 || device.height < 200) return false;
     if (device.depth != 1 && device.depth != 2 && device.depth != 4
         && device.depth != 8 && device.depth != 16 && device.depth != 32) return false;
-    if (device.vramMiB < 1 || device.vramMiB > 14) return false;
+    if (device.vramKiB < 1024 || device.vramKiB > 14 * 1024) return false;
+    if ((device.vramKiB % 1024) != 0) return false;
     const auto stride = framebufferStrideBytes(device.width, device.depth);
     return stride > 0 && stride * device.height <= cuteMacVideoFramebufferLimitBytes();
 }
@@ -288,6 +289,8 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                     const auto nubusType = type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo
                         : type == QStringLiteral("cutemac_video_accelerated") ? NuBusDeviceType::CuteMacVideoAccelerated
                                                                              : NuBusDeviceType::CuteMacVideo;
+                    const auto vramKiB = (*device)["vram_kib"].value_or<std::int64_t>(
+                        (*device)["vram_mib"].value_or<std::int64_t>(4) * 1024);
                     configuration.nubusDevices.append({
                         static_cast<int>((*device)["slot"].value_or<std::int64_t>(9)),
                         nubusType,
@@ -295,7 +298,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                         static_cast<int>((*device)["width"].value_or<std::int64_t>(640)),
                         static_cast<int>((*device)["height"].value_or<std::int64_t>(480)),
                         static_cast<int>((*device)["depth"].value_or<std::int64_t>(8)),
-                        static_cast<int>((*device)["vram_mib"].value_or<std::int64_t>(4)),
+                        static_cast<int>(vramKiB),
                         (*device)["acceleration"].value_or(true),
                         (*device)["absolute_pointer"].value_or(true),
                     });
@@ -411,7 +414,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             { "width", device.width },
             { "height", device.height },
             { "depth", device.depth },
-            { "vram_mib", device.vramMiB },
+            { "vram_kib", device.vramKiB },
             { "acceleration", device.acceleration },
             { "absolute_pointer", device.absolutePointer },
         });

@@ -34,9 +34,9 @@ int main()
     configuration.iwmDevices.append({ QStringLiteral("/tmp/system.dsk"), true });
     configuration.iwmDevices.append({ QStringLiteral("/tmp/external.dsk"), false });
     configuration.scsiDevices.append({ 4, cutemac::config::ScsiDeviceType::HardDisk, QStringLiteral("/tmp/disk.hda"), false });
-    configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4, true, false });
-    configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8, true, true });
-    configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 1, false });
+    configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4096, true, false });
+    configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8192, true, true });
+    configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     cutemac::config::SerialDeviceConfiguration modem;
     modem.channel = 0;
@@ -69,8 +69,10 @@ int main()
             "IWM devices did not round-trip");
         ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
         ok &= expect(loaded->nubusDevices.size() == 3 && loaded->nubusDevices.first().width == 832
+                && loaded->nubusDevices.first().vramKiB == 4096
                 && !loaded->nubusDevices.first().absolutePointer
                 && loaded->nubusDevices[1].type == cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated
+                && loaded->nubusDevices[1].vramKiB == 8192
                 && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
             "NuBus devices did not round-trip");
         ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
@@ -145,14 +147,17 @@ int main()
                          "[[nubus.devices]]\nslot = 9\ntype = \"cutemac_video\"\nwidth = 1152\nheight = 870\ndepth = 8\nvram_mib = 4\n");
     oversizedVideo.close();
     ok &= expect(!manager.loadTomlFile(path).has_value(),
-        "CuteMac Video profiles must reject framebuffers that overlap MMIO");
+        "CuteMac Video profiles must reject framebuffers that overlap MMIO while migrating legacy vram_mib");
 
     ok &= expect(cutemac::config::isValidNuBusDeviceConfiguration(
-                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 1024, 768, 8, 4, true, true }),
+                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 1024, 768, 8, 4096, true, true }),
         "CuteMac Video must accept the largest current 1024x768 eight-bit profile");
     ok &= expect(!cutemac::config::isValidNuBusDeviceConfiguration(
-                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 1024, 768, 16, 4, true, true }),
+                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 1024, 768, 16, 4096, true, true }),
         "CuteMac Video must reject profiles whose maximum depth exceeds the safe standard-slot aperture");
+    ok &= expect(!cutemac::config::isValidNuBusDeviceConfiguration(
+                     { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 512, true, true }),
+        "CuteMac Video must reject sub-MiB VRAM even though authentic Apple cards may use it");
 
     auto invalidConfiguration = configuration;
     invalidConfiguration.ramSizeKiB = 3072;

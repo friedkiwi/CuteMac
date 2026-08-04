@@ -43,10 +43,10 @@ int addAcceleratedVideoParameters(AcceleratedSlotRomBuilder& rom, int width, int
 } // namespace
 
 CuteMacAcceleratedVideoCard::CuteMacAcceleratedVideoCard(int width, int height, int depth,
-    int vramMiB, bool acceleration, bool absolutePointer)
+    int vramKiB, bool acceleration, bool absolutePointer)
     : m_acceleration(acceleration)
-    , m_vramBytes(static_cast<std::uint32_t>(std::clamp(vramMiB, 1, 14)) * 1024U * 1024U)
-    , m_compatibleCard(width, height, depth, vramMiB, false, absolutePointer)
+    , m_vramBytes(static_cast<std::uint32_t>(std::clamp(vramKiB, 1024, 14 * 1024)) * 1024U)
+    , m_compatibleCard(width, height, depth, vramKiB, false, absolutePointer)
     , m_declarationRom(buildDeclarationRom(width, height, static_cast<int>(m_vramBytes), depth))
 {
     m_compatibleCard.setIrqCallback([this](bool asserted) { setIrq(asserted); });

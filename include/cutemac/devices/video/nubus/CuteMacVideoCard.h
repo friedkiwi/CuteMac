@@ -15,7 +15,7 @@ public:
     static constexpr std::uint32_t guestServicesCommand = guestServicesBase + 0x10;
     static constexpr std::uint32_t guestPointerBase = guestServicesBase + 0x18;
 
-    CuteMacVideoCard(int width, int height, int depth, int vramMiB, bool acceleration, bool absolutePointer = true);
+    CuteMacVideoCard(int width, int height, int depth, int vramKiB, bool acceleration, bool absolutePointer = true);
 
     [[nodiscard]] QString id() const override;
     void reset() override;

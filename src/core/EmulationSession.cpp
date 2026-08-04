@@ -77,10 +77,10 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
             } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
                 (void)machine->installNuBusCard(device.slot,
                     std::make_shared<devices::video::nubus::CuteMacAcceleratedVideoCard>(device.width,
-                        device.height, device.depth, device.vramMiB, device.acceleration, device.absolutePointer));
+                        device.height, device.depth, device.vramKiB, device.acceleration, device.absolutePointer));
             } else {
                 (void)machine->installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
-                    device.width, device.height, device.depth, device.vramMiB, device.acceleration, device.absolutePointer));
+                    device.width, device.height, device.depth, device.vramKiB, device.acceleration, device.absolutePointer));
             }
         }
         result = std::move(machine);

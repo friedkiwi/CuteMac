@@ -43,7 +43,7 @@ struct NuBusDeviceConfiguration {
     int width = 640;
     int height = 480;
     int depth = 8;
-    int vramMiB = 4;
+    int vramKiB = 4096;
     bool acceleration = true;
     bool absolutePointer = true;
 };

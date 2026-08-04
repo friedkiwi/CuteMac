@@ -92,14 +92,14 @@ int addVideoParameters(SlotRomBuilder& rom, int width, int height, int depth)
 
 } // namespace
 
-CuteMacVideoCard::CuteMacVideoCard(int width, int height, int depth, int vramMiB, bool acceleration, bool absolutePointer)
+CuteMacVideoCard::CuteMacVideoCard(int width, int height, int depth, int vramKiB, bool acceleration, bool absolutePointer)
     : m_width(std::clamp(width, 320, 4096))
     , m_height(std::clamp(height, 200, 2160))
     , m_depth((depth == 1 || depth == 2 || depth == 4 || depth == 8 || depth == 16 || depth == 32) ? depth : 8)
     , m_maximumDepth(m_depth)
     , m_acceleration(acceleration)
     , m_absolutePointer(absolutePointer)
-    , m_vram(std::clamp(vramMiB, 1, 14) * 1024 * 1024, 0)
+    , m_vram(std::clamp(vramKiB, 1024, 14 * 1024) * 1024, 0)
     , m_declarationRom(buildDeclarationRom(m_width, m_height, m_vram.size(), m_maximumDepth))
 {
     initializePalette();
