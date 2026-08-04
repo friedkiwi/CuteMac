@@ -57,6 +57,7 @@ int main()
     ok &= expect(disk.loadImage(path), "disk image load failed");
     const auto inquiry = disk.executeCommand(QByteArray::fromHex("120000002400"), {});
     ok &= expect(inquiry.status == 0, "INQUIRY failed");
+    ok &= expect(disk.activityCounter() == 0, "non-media SCSI commands must not report disk LED activity");
     ok &= expect(inquiry.data.size() == 36, "INQUIRY length is wrong");
     ok &= expect(inquiry.data.mid(8, 8) == QByteArrayLiteral("CONNER  "), "20 MiB vendor identity is wrong");
     ok &= expect(inquiry.data.mid(16, 16) == QByteArrayLiteral("CP2025-20mb     "), "20 MiB product identity is wrong");
@@ -128,8 +129,10 @@ int main()
     const QByteArray marker(512, static_cast<char>(0x5a));
     const auto write = disk.executeCommand(QByteArray::fromHex("0a0000000100"), marker);
     ok &= expect(write.status == 0, "WRITE(6) failed");
+    ok &= expect(disk.activityCounter() == 1, "WRITE(6) must report one block of disk activity");
     const auto read10 = disk.executeCommand(QByteArray::fromHex("28000000000000000100"), {});
     ok &= expect(read10.status == 0 && read10.data == marker, "READ(10) failed");
+    ok &= expect(disk.activityCounter() == 2, "READ(10) must report one block of disk activity");
     const QByteArray marker10(512, static_cast<char>(0xa5));
     const auto write10 = disk.executeCommand(QByteArray::fromHex("2a000000000100000100"), marker10);
     ok &= expect(write10.status == 0, "WRITE(10) failed");
@@ -176,6 +179,7 @@ int main()
     ok &= expect(capacity.data == QByteArray::fromHex("0000000300000800"), "CD-ROM capacity must use 2048-byte blocks");
     const auto cdRead = cdRom.executeCommand(QByteArray::fromHex("28000000000200000100"), {});
     ok &= expect(cdRead.status == 0 && cdRead.data == QByteArray(2048, static_cast<char>(0x5a)), "READ(10) CD sector failed");
+    ok &= expect(cdRom.activityCounter() == 1, "CD-ROM READ(10) must report one block of disk activity");
     const auto select512 = cdRom.executeCommand(QByteArray::fromHex("151000000c00"),
         QByteArray::fromHex("000000080000000000000200"));
     ok &= expect(select512.status == 0, "CD-ROM MODE SELECT(6) 512-byte negotiation failed");

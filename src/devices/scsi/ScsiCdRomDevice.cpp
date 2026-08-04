@@ -62,6 +62,7 @@ bool ScsiCdRomDevice::loadImage(const QString& path)
     m_senseKey = senseUnitAttention;
     m_additionalSenseCode = ascMediumChanged;
     m_unitAttention = true;
+    m_activityCounter = 0;
     return true;
 }
 
@@ -72,6 +73,7 @@ void ScsiCdRomDevice::eject()
     m_senseKey = senseUnitAttention;
     m_additionalSenseCode = ascMediumChanged;
     m_unitAttention = true;
+    m_activityCounter = 0;
 }
 
 void ScsiCdRomDevice::acknowledgeMediaChange()
@@ -161,6 +163,7 @@ ScsiCommandResult ScsiCdRomDevice::executeCommand(const QByteArray& cdb, const Q
 ScsiCommandResult ScsiCdRomDevice::readAppleRaw(std::uint32_t lba, std::uint32_t blocks)
 {
     if (lba > blockCount() || blocks > blockCount() - lba) return checkCondition(senseIllegalRequest, 0x21);
+    m_activityCounter += blocks;
     QByteArray raw;
     raw.reserve(static_cast<qsizetype>(blocks) * 2352);
     for (std::uint32_t block = 0; block < blocks; ++block) {
@@ -187,6 +190,7 @@ ScsiCommandResult ScsiCdRomDevice::read(std::uint32_t lba, std::uint32_t blocks)
     if (lba > logicalBlocks || blocks > logicalBlocks - lba) return checkCondition(senseIllegalRequest, 0x21);
     m_senseKey = senseNoSense;
     m_additionalSenseCode = 0;
+    m_activityCounter += blocks;
     return good(m_image.mid(static_cast<qsizetype>(lba) * m_logicalBlockSize,
         static_cast<qsizetype>(blocks) * m_logicalBlockSize));
 }

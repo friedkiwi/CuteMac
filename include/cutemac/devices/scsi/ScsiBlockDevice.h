@@ -22,6 +22,7 @@ public:
 
     [[nodiscard]] bool ready() const override;
     [[nodiscard]] QString imagePath() const;
+    [[nodiscard]] std::uint64_t activityCounter() const { return m_activityCounter; }
     [[nodiscard]] ScsiCommandResult executeCommand(const QByteArray& cdb, const QByteArray& dataOut) override;
 
 private:
@@ -40,6 +41,7 @@ private:
     QString m_imagePath;
     bool m_readOnly = false;
     std::uint8_t m_senseKey = 0;
+    std::uint64_t m_activityCounter = 0;
 };
 
 } // namespace cutemac::devices::scsi

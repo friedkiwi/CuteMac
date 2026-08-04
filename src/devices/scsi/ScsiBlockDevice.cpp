@@ -82,6 +82,7 @@ bool ScsiBlockDevice::loadImage(const QString& path, bool readOnly)
     m_imagePath = path;
     m_readOnly = readOnly;
     m_senseKey = senseNoSense;
+    m_activityCounter = 0;
     return true;
 }
 
@@ -90,6 +91,7 @@ void ScsiBlockDevice::eject()
     m_image.clear();
     m_imagePath.clear();
     m_senseKey = senseNotReady;
+    m_activityCounter = 0;
 }
 
 bool ScsiBlockDevice::ready() const
@@ -229,6 +231,7 @@ QByteArray ScsiBlockDevice::readBlocks(std::uint32_t lba, std::uint32_t blocks)
     }
 
     m_senseKey = senseNoSense;
+    m_activityCounter += blocks;
     return m_image.mid(offset, length);
 }
 
@@ -247,6 +250,7 @@ bool ScsiBlockDevice::writeBlocks(std::uint32_t lba, const QByteArray& bytes)
     }
     std::copy(bytes.begin(), bytes.end(), m_image.begin() + offset);
     m_senseKey = senseNoSense;
+    m_activityCounter += static_cast<std::uint64_t>(bytes.size() / blockSize);
     return true;
 }
 

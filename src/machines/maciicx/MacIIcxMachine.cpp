@@ -253,8 +253,14 @@ std::uint64_t MacIIcxMachine::cycleCount() const { return m_scheduler.now(); }
 std::uint32_t MacIIcxMachine::programCounter() const { return m_cpu.programCounter(); }
 std::uint64_t MacIIcxMachine::diskActivityCounter() const
 {
-    return m_ioStatistics.scsiReads + m_ioStatistics.scsiWrites
-        + m_ioStatistics.swimReads + m_ioStatistics.swimWrites;
+    std::uint64_t activity = 0;
+    for (const auto& disk : m_scsiDisks) {
+        if (disk) activity += disk->activityCounter();
+    }
+    for (const auto& cdRom : m_scsiCdRoms) {
+        if (cdRom) activity += cdRom->activityCounter();
+    }
+    return activity;
 }
 bool MacIIcxMachine::overlayEnabled() const { return m_overlay; }
 

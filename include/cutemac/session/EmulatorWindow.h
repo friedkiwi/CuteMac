@@ -103,6 +103,7 @@ private:
     QAction* m_pauseAction = nullptr;
     std::uint64_t m_lastDiskActivityCounter = 0;
     int m_diskActivityFlashFrames = 0;
+    bool m_diskActivityLit = false;
     bool m_romLoaded = false;
     bool m_paused = true;
     bool m_inputCaptured = false;

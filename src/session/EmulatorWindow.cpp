@@ -303,10 +303,14 @@ protected:
     void mousePressEvent(QMouseEvent* event) override
     {
         setFocus(Qt::MouseFocusReason);
+        bool capturedByThisPress = false;
         if (!m_mouseCaptured && m_captureEligible && displayRect().contains(event->pos())) {
             if (captureMouse()) {
-                event->accept();
-                return;
+                if (!m_nativeRelativeCapture) {
+                    event->accept();
+                    return;
+                }
+                capturedByThisPress = true;
             }
         }
         if (!m_mouseCaptured) {
@@ -318,7 +322,13 @@ protected:
         }
         if (event->button() == Qt::LeftButton) {
             m_leftButtonPressed = true;
+            if (m_mouseCaptured && m_relativeCapture && m_nativeRelativeCapture) {
+                sendRelativeMouseState();
+                event->accept();
+                return;
+            }
         }
+        if (capturedByThisPress) event->accept();
         sendMouseEvent(event);
     }
 
@@ -329,6 +339,11 @@ protected:
         }
         if (event->button() == Qt::LeftButton) {
             m_leftButtonPressed = false;
+            if (m_mouseCaptured && m_relativeCapture && m_nativeRelativeCapture) {
+                sendRelativeMouseState();
+                event->accept();
+                return;
+            }
         }
         if (m_mouseCaptured || m_pointerInsideDisplay) sendMouseEvent(event);
     }
@@ -343,6 +358,11 @@ protected:
         }
         if ((m_mouseCaptured || m_pointerInsideDisplay) && event->button() == Qt::LeftButton) {
             m_leftButtonPressed = true;
+            if (m_mouseCaptured && m_relativeCapture && m_nativeRelativeCapture) {
+                sendRelativeMouseState();
+                event->accept();
+                return;
+            }
         }
         if (m_mouseCaptured || m_pointerInsideDisplay) sendMouseEvent(event);
     }
@@ -562,6 +582,11 @@ private:
     void sendRelativeMouseDelta(int dx, int dy)
     {
         if (m_mouseCallback) m_mouseCallback(dx, dy, m_leftButtonPressed);
+    }
+
+    void sendRelativeMouseState()
+    {
+        sendRelativeMouseDelta(0, 0);
     }
 
     void notifyCaptureStateChanged()
@@ -1184,6 +1209,7 @@ void EmulatorWindow::loadAndReset()
     }
     m_diskActivityCounterInitialized = false;
     m_diskActivityFlashFrames = 0;
+    m_diskActivityLit = false;
     setPaused(!m_romLoaded);
     updateStatus();
 }
@@ -1315,15 +1341,18 @@ void EmulatorWindow::updateStatus()
         m_diskActivityCounterInitialized = true;
     } else if (state.diskActivityCounter != m_lastDiskActivityCounter) {
         m_lastDiskActivityCounter = state.diskActivityCounter;
-        m_diskActivityFlashFrames = 3;
+        m_diskActivityLit = !m_diskActivityLit;
+        m_diskActivityFlashFrames = 2;
     } else if (m_diskActivityFlashFrames > 0) {
         --m_diskActivityFlashFrames;
+    } else {
+        m_diskActivityLit = false;
     }
 
     const auto runText = !m_romLoaded
         ? QStringLiteral("No ROM")
         : (m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"));
-    const bool diskActive = m_romLoaded && m_diskActivityFlashFrames > 0;
+    const bool diskActive = m_romLoaded && m_diskActivityLit;
 
     m_profileStatus->setText(QStringLiteral("Profile: %1").arg(m_configuration.profileName));
     m_runStatus->setText(runText);

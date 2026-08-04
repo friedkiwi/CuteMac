@@ -458,8 +458,14 @@ std::uint32_t MacPlusMachine::programCounter() const
 
 std::uint64_t MacPlusMachine::diskActivityCounter() const
 {
-    return m_accessSummary.scsiReads + m_accessSummary.scsiWrites
-        + m_accessSummary.iwmReads + m_accessSummary.iwmWrites;
+    std::uint64_t activity = 0;
+    for (const auto& disk : m_scsiDisks) {
+        if (disk) activity += disk->activityCounter();
+    }
+    for (const auto& cdRom : m_scsiCdRoms) {
+        if (cdRom) activity += cdRom->activityCounter();
+    }
+    return activity;
 }
 
 cpu::m68k::M68kCpuCore::RegisterSnapshot MacPlusMachine::cpuRegisters() const

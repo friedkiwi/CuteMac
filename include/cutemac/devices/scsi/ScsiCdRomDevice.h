@@ -18,6 +18,7 @@ public:
     [[nodiscard]] bool ready() const override;
     [[nodiscard]] bool selectable() const override { return true; }
     [[nodiscard]] QString imagePath() const { return m_imagePath; }
+    [[nodiscard]] std::uint64_t activityCounter() const { return m_activityCounter; }
     [[nodiscard]] ScsiCommandResult executeCommand(const QByteArray& cdb, const QByteArray& dataOut) override;
 
 private:
@@ -40,6 +41,7 @@ private:
     std::uint8_t m_additionalSenseCode = 0;
     bool m_unitAttention = false;
     std::uint32_t m_logicalBlockSize = 2048;
+    std::uint64_t m_activityCounter = 0;
 };
 
 } // namespace cutemac::devices::scsi
