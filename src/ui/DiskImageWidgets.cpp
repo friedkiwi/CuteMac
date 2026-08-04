@@ -37,8 +37,18 @@ constexpr int CollectionRole = Qt::UserRole + 1;
 
 bool importWithDialog(storage::DiskImageManager& manager, const QString& collection, QWidget* parent)
 {
-    const auto sources = QFileDialog::getOpenFileNames(parent, QStringLiteral("Import Disk Images"), QDir::homePath(),
-        QStringLiteral("Disk images (*.dsk *.img *.image *.dc42 *.hda *.iso *.cdr);;All files (*)"));
+    QFileDialog dialog(parent, QStringLiteral("Import Disk Images"), QDir::homePath());
+    dialog.setFileMode(QFileDialog::ExistingFiles);
+    dialog.setAcceptMode(QFileDialog::AcceptOpen);
+    dialog.setNameFilters({
+        QStringLiteral("Disk images (*.dsk *.img *.image *.dc42 *.hda *.iso *.cdr)"),
+        QStringLiteral("All files (*)"),
+    });
+#if defined(Q_OS_MACOS)
+    dialog.setOption(QFileDialog::DontUseNativeDialog);
+#endif
+    if (dialog.exec() != QDialog::Accepted) return false;
+    const auto sources = dialog.selectedFiles();
     if (sources.isEmpty()) return false;
     QStringList importedPaths;
     const bool success = manager.importImages(sources, &importedPaths, collection);
