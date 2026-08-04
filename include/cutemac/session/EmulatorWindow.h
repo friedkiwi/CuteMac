@@ -11,7 +11,9 @@
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/SessionRunner.h"
 #include "cutemac/session/AudioOutput.h"
+#if defined(CUTEMAC_ENABLE_SESSION_CONTROL)
 #include "cutemac/session/SessionControlServer.h"
+#endif
 #include "cutemac/storage/DiskImageManager.h"
 
 class QAction;
@@ -25,7 +27,7 @@ namespace cutemac::session {
 class DisplayWidget;
 
 // A single emulated machine and its window. Multiple instances can coexist in
-// one process; each owns its own runner thread, audio sink, and control socket.
+// one process; each owns its own runner thread and audio sink.
 class EmulatorWindow final : public QMainWindow {
 public:
     EmulatorWindow(config::Configuration configuration, QString profilePath, QWidget* profileManagerWindow = nullptr);
@@ -75,7 +77,9 @@ private:
     QPointer<QWidget> m_profileManagerWindow;
     core::EmulationSession m_session;
     core::SessionRunner m_runner;
+#if defined(CUTEMAC_ENABLE_SESSION_CONTROL)
     SessionControlServer m_controlServer;
+#endif
     AudioOutput m_audioOutput;
     int m_audioPacingFrames = 0;
     DisplayWidget* m_display = nullptr;

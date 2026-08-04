@@ -243,11 +243,15 @@ target_include_directories(CuteMacWidgets PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inc
 add_library(CuteMacFrontend
     src/session/EmulatorWindow.cpp
     src/session/SessionWindowManager.cpp
-    src/session/SessionControlServer.cpp
     src/session/FramebufferRenderer.cpp
     src/session/AudioOutput.cpp
     src/session/HostInputMapper.cpp
     src/ui/ProfileManagerWindow.cpp
+)
+
+target_sources(CuteMacFrontend
+    PRIVATE
+        "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/session/SessionControlServer.cpp>"
 )
 
 target_link_libraries(CuteMacFrontend
@@ -255,8 +259,13 @@ target_link_libraries(CuteMacFrontend
         CuteMacCore
         CuteMacWidgets
         Qt6::Multimedia
-        Qt6::Network
+        "$<$<CONFIG:Debug>:Qt6::Network>"
         Qt6::Widgets
+)
+
+target_compile_definitions(CuteMacFrontend
+    PUBLIC
+        "$<$<CONFIG:Debug>:CUTEMAC_ENABLE_SESSION_CONTROL>"
 )
 
 target_include_directories(CuteMacFrontend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

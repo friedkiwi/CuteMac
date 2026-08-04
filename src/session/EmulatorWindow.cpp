@@ -41,10 +41,12 @@
 #include "cutemac/config/Configuration.h"
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/SessionRunner.h"
-#include "cutemac/session/SessionControlServer.h"
 #include "cutemac/session/AudioOutput.h"
 #include "cutemac/session/FramebufferRenderer.h"
 #include "cutemac/session/HostInputMapper.h"
+#if defined(CUTEMAC_ENABLE_SESSION_CONTROL)
+#include "cutemac/session/SessionControlServer.h"
+#endif
 #include "cutemac/ui/ConfigurationDialog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
 
@@ -642,7 +644,9 @@ EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QSt
     , m_profileManagerWindow(profileManagerWindow)
     , m_session(m_configuration)
     , m_runner(m_session, m_configuration.cyclesPerFrame, m_configuration.runtimeSpeed)
+#if defined(CUTEMAC_ENABLE_SESSION_CONTROL)
     , m_controlServer(m_session, m_runner, this)
+#endif
     , m_audioOutput(this)
 {
     ensureFloppyDriveCount(m_configuration);
@@ -695,12 +699,14 @@ EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QSt
     setZoom(1.0);
     QTimer::singleShot(0, this, [this]() { setZoom(preferredInitialZoom()); });
     m_runner.start();
+#if defined(CUTEMAC_ENABLE_SESSION_CONTROL)
     if (m_controlServer.listen()) {
         // Several sessions can share one process, so name the profile the port
         // belongs to instead of logging a bare port number.
         qInfo("CuteMac session control for \"%s\" listening on 127.0.0.1:%u",
             qUtf8Printable(m_configuration.profileName), m_controlServer.port());
     }
+#endif
     setPaused(false);
 }
 
