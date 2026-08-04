@@ -33,9 +33,19 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Create short build path
+        shell: pwsh
+        run: |
+          # Map a short drive letter to the workspace to avoid long Windows paths
+          subst V: $env:GITHUB_WORKSPACE
+          # Export a shorter GITHUB_WORKSPACE for subsequent steps
+          echo "GITHUB_WORKSPACE=V:\\" >> $env:GITHUB_ENV
+
       - name: Bootstrap vendored vcpkg
         shell: pwsh
-        run: ./third_party/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          ./third_party/vcpkg/bootstrap-vcpkg.bat -disableMetrics
 
       # Installing the manifest as its own step keeps the multi-hour cold-cache
       # dependency build off the configure step, where CMake buffers vcpkg's
@@ -44,6 +54,7 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
+          Set-Location $env:GITHUB_WORKSPACE
           ./third_party/vcpkg/vcpkg.exe install `
             --triplet $env:VCPKG_TRIPLET `
             --host-triplet $env:VCPKG_TRIPLET `
@@ -52,11 +63,14 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: cmake --preset windows-msvc-ci
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          cmake --preset windows-msvc-ci
 
       - name: Build
         shell: pwsh
         run: |
+          Set-Location $env:GITHUB_WORKSPACE
           & cmake --build build --config Release 2>&1 | Tee-Object -FilePath build-output.log
           $buildExitCode = $LASTEXITCODE
           if ($buildExitCode -ne 0) {
@@ -72,11 +86,15 @@ jobs:
           }
 
       - name: Test
-        run: ctest --test-dir build --build-config Release --output-on-failure
+        shell: pwsh
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          ctest --test-dir build --build-config Release --output-on-failure
 
       - name: Assemble portable folder
         shell: pwsh
         run: |
+          Set-Location $env:GITHUB_WORKSPACE
           $package = Join-Path $env:GITHUB_WORKSPACE "package/CuteMac-win64"
           cmake --install build --config Release --prefix $package --component Runtime
 
@@ -112,6 +130,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Remove fuzzing artifacts to avoid EPERM during cleanup
+      - name: Remove fuzzing artifacts to avoid EPERM during cleanup
+        if: failure()
+        shell: pwsh
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          Get-ChildItem third_party/vcpkg/buildtrees -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\fuzzing($|\\)' } |
+            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+
       # A dependency that fails to build reports only a path to a log inside
       # buildtrees, which is discarded with the runner. Collect them so a
       # failed run is diagnosable without reproducing a multi-hour build.
@@ -125,3 +153,9 @@ jobs:
             third_party/vcpkg/buildtrees/**/*.log
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Remove subst mapping
+        if: always()
+        shell: pwsh
+        run: |
+          subst V: /D || echo "V: not mapped"
