@@ -21,8 +21,14 @@ enum class ScsiDeviceType {
 enum class NuBusDeviceType {
     MacintoshIIVideo,
     AppleDisplayCard824,
+    AppleNuBusEthernet,
     CuteMacVideo,
     CuteMacVideoAccelerated,
+};
+
+enum class NetworkBackendType {
+    None,
+    Slirp,
 };
 
 enum class MacMonitorType {
@@ -67,9 +73,12 @@ struct NuBusDeviceConfiguration {
     bool acceleration = true;
     bool absolutePointer = true;
     MacMonitorType monitor = MacMonitorType::HiResRgb;
+    NetworkBackendType networkBackend = NetworkBackendType::None;
+    QString macAddress;
 };
 
 [[nodiscard]] bool isCuteMacVideoDevice(NuBusDeviceType type);
+[[nodiscard]] bool slirpNetworkingAvailable();
 [[nodiscard]] int cuteMacVideoFramebufferLimitBytes();
 [[nodiscard]] int framebufferStrideBytes(int width, int depth);
 [[nodiscard]] bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device);

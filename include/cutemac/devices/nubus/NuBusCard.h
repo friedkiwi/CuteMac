@@ -20,6 +20,14 @@ public:
     virtual void reset() = 0;
     virtual void tick(std::uint64_t cycles) = 0;
     [[nodiscard]] virtual std::uint8_t read8(std::uint32_t offset) = 0;
+    [[nodiscard]] virtual std::uint16_t read16(std::uint32_t offset)
+    {
+        return static_cast<std::uint16_t>((read8(offset) << 8) | read8(offset + 1));
+    }
+    [[nodiscard]] virtual std::uint32_t read32(std::uint32_t offset)
+    {
+        return (static_cast<std::uint32_t>(read16(offset)) << 16) | read16(offset + 2);
+    }
     virtual void write8(std::uint32_t offset, std::uint8_t value) = 0;
     virtual void write16(std::uint32_t offset, std::uint16_t value)
     {

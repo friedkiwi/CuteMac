@@ -71,6 +71,21 @@ MacMonitorType monitorFromName(const QString& name)
     return MacMonitorType::HiResRgb;
 }
 
+QString networkBackendName(NetworkBackendType backend)
+{
+    switch (backend) {
+    case NetworkBackendType::Slirp: return QStringLiteral("slirp");
+    case NetworkBackendType::None:
+    default:
+        return QStringLiteral("none");
+    }
+}
+
+NetworkBackendType networkBackendFromName(const QString& name)
+{
+    return name == QStringLiteral("slirp") ? NetworkBackendType::Slirp : NetworkBackendType::None;
+}
+
 bool isAppleDisplayCard824Monitor(MacMonitorType monitor)
 {
     switch (monitor) {
@@ -132,6 +147,11 @@ bool isCuteMacVideoDevice(NuBusDeviceType type)
     return type == NuBusDeviceType::CuteMacVideo || type == NuBusDeviceType::CuteMacVideoAccelerated;
 }
 
+bool slirpNetworkingAvailable()
+{
+    return CUTEMAC_HAS_LIBSLIRP != 0;
+}
+
 int cuteMacVideoFramebufferLimitBytes()
 {
     return 0x000e0000;
@@ -149,6 +169,10 @@ bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
     if (device.type == NuBusDeviceType::AppleDisplayCard824) {
         return (device.vramKiB == 512 || device.vramKiB == 1024)
             && isAppleDisplayCard824Monitor(device.monitor);
+    }
+    if (device.type == NuBusDeviceType::AppleNuBusEthernet) {
+        return device.networkBackend == NetworkBackendType::None
+            || (device.networkBackend == NetworkBackendType::Slirp && slirpNetworkingAvailable());
     }
     if (!isCuteMacVideoDevice(device.type)) return false;
     if (device.width < 320 || device.height < 200) return false;
@@ -351,6 +375,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                     const auto type = fromTomlString((*device)["type"].value_or<std::string>("cutemac_video"));
                     const auto nubusType = type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo
                         : type == QStringLiteral("apple_display_card_824") ? NuBusDeviceType::AppleDisplayCard824
+                        : type == QStringLiteral("apple_nubus_ethernet")   ? NuBusDeviceType::AppleNuBusEthernet
                         : type == QStringLiteral("cutemac_video_accelerated") ? NuBusDeviceType::CuteMacVideoAccelerated
                                                                              : NuBusDeviceType::CuteMacVideo;
                     const auto vramKiB = (*device)["vram_kib"].value_or<std::int64_t>(
@@ -366,6 +391,8 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                         (*device)["acceleration"].value_or(true),
                         (*device)["absolute_pointer"].value_or(true),
                         monitorFromName(fromTomlString((*device)["monitor"].value_or<std::string>("hi_res_rgb"))),
+                        networkBackendFromName(fromTomlString((*device)["network_backend"].value_or<std::string>("none"))),
+                        fromTomlString((*device)["mac_address"].value_or<std::string>("")),
                     });
                 }
             }
@@ -475,6 +502,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             { "slot", device.slot },
             { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video"
                     : device.type == NuBusDeviceType::AppleDisplayCard824 ? "apple_display_card_824"
+                    : device.type == NuBusDeviceType::AppleNuBusEthernet ? "apple_nubus_ethernet"
                     : device.type == NuBusDeviceType::CuteMacVideoAccelerated ? "cutemac_video_accelerated"
                                                                              : "cutemac_video" },
             { "width", device.width },
@@ -486,6 +514,11 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
         };
         if (device.type == NuBusDeviceType::AppleDisplayCard824) {
             nubusDevice.insert("monitor", toTomlString(monitorName(device.monitor)));
+        } else if (device.type == NuBusDeviceType::AppleNuBusEthernet) {
+            nubusDevice.insert("network_backend", toTomlString(networkBackendName(device.networkBackend)));
+            if (!device.macAddress.trimmed().isEmpty()) {
+                nubusDevice.insert("mac_address", toTomlString(device.macAddress.trimmed()));
+            }
         }
         nubusDevices.push_back(std::move(nubusDevice));
     }

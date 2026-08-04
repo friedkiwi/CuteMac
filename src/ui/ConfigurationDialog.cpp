@@ -78,6 +78,8 @@ QString nubusCardName(config::NuBusDeviceType type)
         return QStringLiteral("Apple Macintosh II Video Card");
     case config::NuBusDeviceType::AppleDisplayCard824:
         return QStringLiteral("Apple Macintosh Display Card 8•24");
+    case config::NuBusDeviceType::AppleNuBusEthernet:
+        return QStringLiteral("Apple NuBus Ethernet Card");
     }
     return QStringLiteral("Unknown card");
 }
@@ -129,6 +131,17 @@ constexpr std::array<config::MacMonitorType, 6> apple824SelectableMonitors {
     config::MacMonitorType::HiResRgb,
     config::MacMonitorType::Rgb16Inch,
 };
+
+QString networkBackendName(config::NetworkBackendType backend)
+{
+    switch (backend) {
+    case config::NetworkBackendType::Slirp:
+        return QStringLiteral("SLIRP");
+    case config::NetworkBackendType::None:
+    default:
+        return QStringLiteral("None");
+    }
+}
 
 QString nubusValidationMessage(const config::NuBusDeviceConfiguration& device)
 {
@@ -215,6 +228,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     QCheckBox* acceleration = nullptr;
     QCheckBox* absolutePointer = nullptr;
     QComboBox* monitor = nullptr;
+    QComboBox* networkBackend = nullptr;
 
     if (device.type == config::NuBusDeviceType::CuteMacVideo
         || device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
@@ -256,6 +270,16 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         }
         monitor->setCurrentIndex(qMax(0, monitor->findData(static_cast<int>(device.monitor))));
         form->addRow(QStringLiteral("Attached monitor"), monitor);
+    } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
+        networkBackend = new QComboBox;
+        networkBackend->addItem(networkBackendName(config::NetworkBackendType::None),
+            static_cast<int>(config::NetworkBackendType::None));
+        if (config::slirpNetworkingAvailable() || device.networkBackend == config::NetworkBackendType::Slirp) {
+            networkBackend->addItem(networkBackendName(config::NetworkBackendType::Slirp),
+                static_cast<int>(config::NetworkBackendType::Slirp));
+        }
+        networkBackend->setCurrentIndex(qMax(0, networkBackend->findData(static_cast<int>(device.networkBackend))));
+        form->addRow(QStringLiteral("Network backend"), networkBackend);
     }
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -272,6 +296,8 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         } else if (candidate.type == config::NuBusDeviceType::AppleDisplayCard824) {
             candidate.vramKiB = vram->value();
             candidate.monitor = static_cast<config::MacMonitorType>(monitor->currentData().toInt());
+        } else if (candidate.type == config::NuBusDeviceType::AppleNuBusEthernet) {
+            candidate.networkBackend = static_cast<config::NetworkBackendType>(networkBackend->currentData().toInt());
         }
         const auto validation = nubusValidationMessage(candidate);
         if (!validation.isEmpty()) {
@@ -296,6 +322,9 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
         device.vramKiB = vram->value();
         device.monitor = static_cast<config::MacMonitorType>(monitor->currentData().toInt());
+        device.declarationRomPath.clear();
+    } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
+        device.networkBackend = static_cast<config::NetworkBackendType>(networkBackend->currentData().toInt());
         device.declarationRomPath.clear();
     }
     return true;
@@ -694,6 +723,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     auto* addCuteMacAcceleratedVideo = addNuBusMenu->addAction(QStringLiteral("CuteMac Video Accelerated"));
     auto* addAppleVideo = addNuBusMenu->addAction(QStringLiteral("Apple Macintosh II Video Card"));
     auto* addApple824 = addNuBusMenu->addAction(QStringLiteral("Apple Macintosh Display Card 8•24"));
+    auto* addAppleEthernet = addNuBusMenu->addAction(QStringLiteral("Apple NuBus Ethernet Card"));
     addNuBus->setMenu(addNuBusMenu);
     auto* removeNuBus = new QPushButton(QStringLiteral("Remove"));
     nubusButtons->addWidget(addNuBus);
@@ -870,6 +900,14 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     });
     connect(addApple824, &QAction::triggered, this, [this, refreshNuBus]() {
         config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false};
+        if (editNuBusCard(device, this)) {
+            m_impl->nubusDevices.append(device);
+            refreshNuBus();
+        }
+    });
+    connect(addAppleEthernet, &QAction::triggered, this, [this, refreshNuBus]() {
+        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3),
+            config::NuBusDeviceType::AppleNuBusEthernet};
         if (editNuBusCard(device, this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();

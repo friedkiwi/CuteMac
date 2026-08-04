@@ -163,6 +163,7 @@ add_library(CuteMacCore
     src/devices/iwm/IwmController.cpp
     src/devices/modem/HayesModem.cpp
     src/devices/modem/NullModem.cpp
+    src/devices/network/nubus/AppleNuBusEthernetCard.cpp
     src/devices/network/SlirpEthernetBackend.cpp
     src/devices/printer/ImageWriterII.cpp
     src/devices/nubus/NuBusBus.cpp
@@ -516,6 +517,10 @@ if(BUILD_TESTING)
     add_executable(CuteMacNuBusVideoTests tests/nubus_video_tests.cpp)
     target_link_libraries(CuteMacNuBusVideoTests PRIVATE CuteMacCore)
     add_test(NAME nubus-video-cards COMMAND CuteMacNuBusVideoTests)
+
+    add_executable(CuteMacNuBusEthernetTests tests/nubus_ethernet_tests.cpp)
+    target_link_libraries(CuteMacNuBusEthernetTests PRIVATE CuteMacCore)
+    add_test(NAME nubus-ethernet-cards COMMAND CuteMacNuBusEthernetTests)
 
     add_executable(CuteMacFramebufferRendererTests
         tests/framebuffer_renderer_tests.cpp

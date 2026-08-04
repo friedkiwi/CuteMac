@@ -38,6 +38,10 @@ int main()
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8192, true, true });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false });
     configuration.nubusDevices.append({ 12, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb16Inch });
+    const auto ethernetBackend = cutemac::config::slirpNetworkingAvailable()
+        ? cutemac::config::NetworkBackendType::Slirp
+        : cutemac::config::NetworkBackendType::None;
+    configuration.nubusDevices.append({ 13, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, ethernetBackend, QStringLiteral("02:00:1b:00:00:0d") });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     cutemac::config::SerialDeviceConfiguration modem;
     modem.channel = 0;
@@ -69,15 +73,18 @@ int main()
                 && loaded->iwmDevices[1].imagePath == QStringLiteral("/tmp/external.dsk"),
             "IWM devices did not round-trip");
         ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
-        ok &= expect(loaded->nubusDevices.size() == 4 && loaded->nubusDevices.first().width == 832
+        ok &= expect(loaded->nubusDevices.size() == 5 && loaded->nubusDevices.first().width == 832
                 && loaded->nubusDevices.first().vramKiB == 4096
                 && !loaded->nubusDevices.first().absolutePointer
                 && loaded->nubusDevices[1].type == cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated
                 && loaded->nubusDevices[1].vramKiB == 8192
                 && loaded->nubusDevices[2].type == cutemac::config::NuBusDeviceType::MacintoshIIVideo
-                && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::AppleDisplayCard824
-                && loaded->nubusDevices.last().vramKiB == 1024
-                && loaded->nubusDevices.last().monitor == cutemac::config::MacMonitorType::Rgb16Inch,
+                && loaded->nubusDevices[3].type == cutemac::config::NuBusDeviceType::AppleDisplayCard824
+                && loaded->nubusDevices[3].vramKiB == 1024
+                && loaded->nubusDevices[3].monitor == cutemac::config::MacMonitorType::Rgb16Inch
+                && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::AppleNuBusEthernet
+                && loaded->nubusDevices.last().networkBackend == ethernetBackend
+                && loaded->nubusDevices.last().macAddress == QStringLiteral("02:00:1b:00:00:0d"),
             "NuBus devices did not round-trip");
         ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
                 && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
@@ -171,6 +178,12 @@ int main()
             && !cutemac::config::isValidNuBusDeviceConfiguration(
                 { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::NtscMonitor }),
         "Apple Display Card 8-24 must accept only authentic 512 KiB and 1 MiB VRAM sizes");
+    ok &= expect(cutemac::config::isValidNuBusDeviceConfiguration(
+                     { 9, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, cutemac::config::NetworkBackendType::None })
+            && cutemac::config::isValidNuBusDeviceConfiguration(
+                { 9, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, cutemac::config::NetworkBackendType::Slirp })
+                == cutemac::config::slirpNetworkingAvailable(),
+        "Apple NuBus Ethernet backend choices must be gated by compiled networking support");
 
     auto invalidConfiguration = configuration;
     invalidConfiguration.ramSizeKiB = 3072;

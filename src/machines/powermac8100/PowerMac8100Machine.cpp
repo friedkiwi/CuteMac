@@ -738,6 +738,8 @@ std::uint16_t PowerMac8100Machine::read16(std::uint32_t address)
         const auto index = (address - romBase) & (romSize - 1U);
         value = m_romLoaded ? static_cast<std::uint16_t>((static_cast<std::uint8_t>(m_rom.at(index)) << 8)
             | static_cast<std::uint8_t>(m_rom.at(index + 1))) : 0xffffU;
+    } else if (region == BusRegion::NuBus) {
+        value = m_nubus.read16(address);
     } else {
         value = static_cast<std::uint16_t>((readMapped8(address) << 8) | readMapped8(address + 1));
     }
@@ -767,6 +769,8 @@ std::uint32_t PowerMac8100Machine::read32(std::uint32_t address)
         const auto* bytes = reinterpret_cast<const std::uint8_t*>(m_rom.constData()) + index;
         value = (static_cast<std::uint32_t>(bytes[0]) << 24) | (static_cast<std::uint32_t>(bytes[1]) << 16)
             | (static_cast<std::uint32_t>(bytes[2]) << 8) | bytes[3];
+    } else if (region == BusRegion::NuBus) {
+        value = m_nubus.read32(address);
     } else {
         value = (static_cast<std::uint32_t>(readMapped8(address)) << 24)
             | (static_cast<std::uint32_t>(readMapped8(address + 1)) << 16)

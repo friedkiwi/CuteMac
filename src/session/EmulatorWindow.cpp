@@ -119,7 +119,8 @@ bool sameNuBusDevices(const QVector<cutemac::config::NuBusDeviceConfiguration>& 
         if (a.slot != b.slot || a.type != b.type || a.declarationRomPath != b.declarationRomPath
             || a.width != b.width || a.height != b.height || a.depth != b.depth
             || a.vramKiB != b.vramKiB || a.acceleration != b.acceleration
-            || a.absolutePointer != b.absolutePointer || a.monitor != b.monitor) return false;
+            || a.absolutePointer != b.absolutePointer || a.monitor != b.monitor
+            || a.networkBackend != b.networkBackend || a.macAddress != b.macAddress) return false;
     }
     return true;
 }

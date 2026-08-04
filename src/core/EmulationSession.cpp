@@ -1,12 +1,15 @@
 #include "cutemac/core/EmulationSession.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
+#include "cutemac/devices/network/nubus/AppleNuBusEthernetCard.h"
+#include "cutemac/devices/network/SlirpEthernetBackend.h"
 #include "cutemac/devices/video/nubus/AppleDisplayCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
@@ -57,6 +60,21 @@ devices::video::nubus::AppleDisplayCard::Monitor appleDisplayCardMonitor(config:
     return AppleMonitor::HiResRgb;
 }
 
+QString ethernetMacAddress(const config::NuBusDeviceConfiguration& device)
+{
+    if (!device.macAddress.trimmed().isEmpty()) return device.macAddress.trimmed();
+    return QStringLiteral("02:00:1b:00:00:%1").arg(device.slot & 0xff, 2, 16, QLatin1Char('0'));
+}
+
+std::unique_ptr<devices::network::PacketNetworkBackend> makeNetworkBackend(
+    const config::NuBusDeviceConfiguration& device)
+{
+    if (device.networkBackend != config::NetworkBackendType::Slirp || !config::slirpNetworkingAvailable()) return {};
+    devices::network::SlirpEthernetConfiguration slirp;
+    slirp.dhcpEnabled = true;
+    return std::make_unique<devices::network::SlirpEthernetBackend>(std::move(slirp));
+}
+
 } // namespace
 
 EmulationSession::EmulationSession(config::Configuration configuration)
@@ -105,6 +123,12 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
                     device.vramKiB,
                     appleDisplayCardMonitor(device.monitor));
                 const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_display_card_824"));
+                if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
+                (void)machine->installNuBusCard(device.slot, card);
+            } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
+                auto card = std::make_shared<devices::network::nubus::AppleNuBusEthernetCard>(
+                    ethernetMacAddress(device), makeNetworkBackend(device));
+                const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_nubus_ethernet"));
                 if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
                 (void)machine->installNuBusCard(device.slot, card);
             } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {

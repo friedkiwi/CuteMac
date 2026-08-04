@@ -24,6 +24,7 @@ changing code in that subsystem.
 - Never call the System 6 Shutdown Manager from the CuteMac Video driver's early `Open` path; install its ROM-resident shutdown callback only through the explicit guest-helper control after system traps are initialized.
 - System 6 starts the IIcx in 24-bit addressing mode. Translate logical standard-slot windows `$s00000-$sfffff` to NuBus `$fs000000-$fs0fffff`, keep the CuteMac Video control aperture inside that one-megabyte window, and have its declaration-ROM driver use the logical window. Do not advertise `f32BitMode` until 68030 PMMU/address-mode translation is implemented and verified.
 - The IIcx color cursor advances from the video card's slot VBL, not VIA1 VBL alone. A video declaration-ROM driver must install its slot interrupt with `SIntInstall`, acknowledge the card, call `JVBLTask`, and remove the interrupt on close; preserve the DCE pointer across Slot Manager traps.
+- The Apple NuBus Ethernet Card uses the `aenet1` declaration ROM, byte lanes 0 and 2 (`0xa5`), local packet RAM at `$FssD0000-$FssDFFFF`, and DP8390 registers at `$FssE0000-$FssE003F`. Keep the DP8390/card model independent of host networking and attach host connectivity only through the packet-level `PacketNetworkBackend`.
 
 ## SCSI
 

@@ -77,6 +77,22 @@ std::uint8_t NuBusBus::read8(std::uint32_t address)
     return target ? target->read8(offset) : 0xff;
 }
 
+std::uint16_t NuBusBus::read16(std::uint32_t address)
+{
+    const auto slot = decodedSlot(address);
+    const auto target = card(slot);
+    const auto offset = cardOffset(address);
+    return target ? target->read16(offset) : 0xffffU;
+}
+
+std::uint32_t NuBusBus::read32(std::uint32_t address)
+{
+    const auto slot = decodedSlot(address);
+    const auto target = card(slot);
+    const auto offset = cardOffset(address);
+    return target ? target->read32(offset) : 0xffffffffU;
+}
+
 void NuBusBus::write8(std::uint32_t address, std::uint8_t value)
 {
     const auto slot = decodedSlot(address);

@@ -315,6 +315,10 @@ std::uint16_t MacIIcxMachine::read16(std::uint32_t address)
 {
     std::uint16_t directValue = 0;
     if (m_physicalMemoryMap.tryRead16(address, directValue)) return directValue;
+    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+        ++m_ioStatistics.nubusReads;
+        return m_nubus.read16(address);
+    }
     if (isScsiDma(address)) {
         m_ioStatistics.scsiReads += 2;
         return static_cast<std::uint16_t>(m_scsiBus.readPseudoDma(2));
@@ -330,6 +334,10 @@ std::uint32_t MacIIcxMachine::read32(std::uint32_t address)
 {
     std::uint32_t directValue = 0;
     if (m_physicalMemoryMap.tryRead32(address, directValue)) return directValue;
+    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+        ++m_ioStatistics.nubusReads;
+        return m_nubus.read32(address);
+    }
     return (static_cast<std::uint32_t>(read16(address)) << 16) | read16(address + 2);
 }
 

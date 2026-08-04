@@ -32,6 +32,7 @@ QVector<RomDefinition> RomCatalog::definitions()
         { QStringLiteral("powermac-pdm-9feb69b3"), QStringLiteral("Power Macintosh 6100/7100/8100 launch ROM"), RomKind::Machine, QStringLiteral("powermac-8100"), QStringLiteral("9FEB69B3"), 4 * 1024 * 1024, QByteArray::fromHex("9056dd92740d6425e93dcbc8c08c41647f1a14fcb6f5540a5bb2e96b534e8aee"), {}, {}, 10, false },
         { QStringLiteral("apple-m2-video-342-0008-a"), QStringLiteral("Apple Macintosh II Video Card (630-0153)"), RomKind::Device, QStringLiteral("apple_m2_video"), QStringLiteral("342-0008-A"), 4096, {}, QByteArray::fromHex("abe85d8a882bb2b8187a28bd6707fc2f5d77eedd"), {}, 10, false },
         { QStringLiteral("apple-display-card-824-341-0868"), QStringLiteral("Apple Macintosh Display Card 8•24"), RomKind::Device, QStringLiteral("apple_display_card_824"), QStringLiteral("341-0868"), 32 * 1024, QByteArray::fromHex("e2e763a6b432c9196f619a9f90107726ab1a84a1d54242fe5f5182bf3c97b238"), {}, {}, 10, false },
+        { QStringLiteral("apple-nubus-ethernet-aenet1"), QStringLiteral("Apple NuBus Ethernet Card"), RomKind::Device, QStringLiteral("apple_nubus_ethernet"), QStringLiteral("aenet1 / 670-0210"), 16 * 1024, QByteArray::fromHex("f199d518dee83fbf4d0c6dc34a53ffd2be02de0ab47534e9717582d19d9432d2"), {}, {}, 10, false },
         { QStringLiteral("cutemac-video"), QStringLiteral("CuteMac Video"), RomKind::Embedded, QStringLiteral("cutemac_video"), {}, 4096, {}, {}, {}, 10, false },
     };
 }
@@ -99,6 +100,7 @@ QStringList RomCatalog::requiredRomOwnerIds(const config::Configuration& configu
     for (const auto& device : configuration.nubusDevices) {
         if (device.type == config::NuBusDeviceType::MacintoshIIVideo) result.append(QStringLiteral("apple_m2_video"));
         else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) result.append(QStringLiteral("apple_display_card_824"));
+        else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) result.append(QStringLiteral("apple_nubus_ethernet"));
     }
     return result;
 }
