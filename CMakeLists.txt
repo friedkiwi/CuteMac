@@ -159,6 +159,7 @@ add_library(CuteMacCore
     src/devices/iwm/IwmController.cpp
     src/devices/modem/HayesModem.cpp
     src/devices/modem/NullModem.cpp
+    src/devices/network/SlirpEthernetBackend.cpp
     src/devices/printer/ImageWriterII.cpp
     src/devices/nubus/NuBusBus.cpp
     src/devices/rtc/MacRtc.cpp
@@ -224,6 +225,7 @@ endif()
 add_library(CuteMacWidgets
     src/ui/ConfigurationDialog.cpp
     src/ui/DiskImageWidgets.cpp
+    src/ui/FileDialogs.cpp
     src/ui/RomManagerDialog.cpp
 )
 

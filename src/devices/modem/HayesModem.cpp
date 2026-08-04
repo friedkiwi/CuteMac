@@ -1,19 +1,14 @@
 #include "cutemac/devices/modem/HayesModem.h"
 
+#include "cutemac/devices/network/SlirpEthernetBackend.h"
+
 #include <QTcpSocket>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <vector>
-
-#if CUTEMAC_HAS_LIBSLIRP
-#include <slirp/libslirp.h>
-#ifndef _WIN32
-#include <poll.h>
-#endif
-#endif
+#include <functional>
 
 namespace cutemac::devices::modem {
 
@@ -44,20 +39,6 @@ void writeBe16(std::uint8_t* bytes, std::uint16_t value)
 {
     bytes[0] = static_cast<std::uint8_t>(value >> 8);
     bytes[1] = static_cast<std::uint8_t>(value);
-}
-
-std::array<std::uint8_t, 4> parseIpv4(const QString& text, const std::array<std::uint8_t, 4>& fallback)
-{
-    const auto parts = text.split(QLatin1Char('.'));
-    if (parts.size() != 4) return fallback;
-    std::array<std::uint8_t, 4> result {};
-    for (int index = 0; index < 4; ++index) {
-        bool ok = false;
-        const auto value = parts[index].toUInt(&ok);
-        if (!ok || value > 255) return fallback;
-        result[static_cast<std::size_t>(index)] = static_cast<std::uint8_t>(value);
-    }
-    return result;
 }
 
 std::uint16_t internetChecksum(const std::uint8_t* data, qsizetype length)
@@ -266,248 +247,33 @@ private:
     std::uint8_t m_telnetVerb = 0;
 };
 
-class HayesModem::SlipConnection final : public HayesModem::Connection {
+class SerialIpOverEthernet {
 public:
-    explicit SlipConnection(HayesModem& modem, config::SerialSlipConfiguration configuration)
-        : m_modem(modem)
-        , m_configuration(std::move(configuration))
+    explicit SerialIpOverEthernet(config::SerialSlipConfiguration configuration)
+        : m_configuration(std::move(configuration))
     {
-        initialize();
-    }
-
-    ~SlipConnection() override { close(); }
-
-    void poll() override
-    {
-#if CUTEMAC_HAS_LIBSLIRP
-        if (!m_slirp) return;
-        pollSlirp();
-        drainInjectedFrames();
-#endif
-    }
-
-    void send(std::uint8_t value) override
-    {
-#if CUTEMAC_HAS_LIBSLIRP
-        if (!m_slirp) return;
-        if (value == slipEnd) {
-            if (m_droppingOversize) {
-                m_frame.clear();
-                m_droppingOversize = false;
-                m_escapePending = false;
-                return;
-            }
-            if (!m_frame.isEmpty()) {
-                handleIpPacket(m_frame);
-                m_frame.clear();
-            }
-            m_escapePending = false;
-            return;
-        }
-        if (m_droppingOversize) return;
-        if (m_escapePending) {
-            m_escapePending = false;
-            if (value == slipEscEnd) value = slipEnd;
-            else if (value == slipEscEsc) value = slipEsc;
-        } else if (value == slipEsc) {
-            m_escapePending = true;
-            return;
-        }
-        if (m_frame.size() >= m_configuration.mtu) {
-            m_droppingOversize = true;
-            return;
-        }
-        m_frame.append(static_cast<char>(value));
-#else
-        (void)value;
-#endif
-    }
-
-    void close() override
-    {
-#if CUTEMAC_HAS_LIBSLIRP
-        if (m_slirp) {
-            slirp_cleanup(m_slirp);
-            m_slirp = nullptr;
-        }
-#endif
-        m_connected = false;
-    }
-
-    bool connected() const override { return m_connected; }
-
-private:
-    void initialize()
-    {
-#if CUTEMAC_HAS_LIBSLIRP
-        m_localIp = parseIpv4(m_configuration.localIp, { 172, 16, 0, 1 });
-        m_remoteIp = parseIpv4(m_configuration.remoteIp, { 172, 16, 0, 2 });
+        m_localIp = network::parseIpv4Address(m_configuration.localIp, { 172, 16, 0, 1 });
+        m_remoteIp = network::parseIpv4Address(m_configuration.remoteIp, { 172, 16, 0, 2 });
         m_localMac = { 0x52, 0x55, m_localIp[0], m_localIp[1], m_localIp[2], m_localIp[3] };
         m_remoteMac = { 0x52, 0x55, m_remoteIp[0], m_remoteIp[1], m_remoteIp[2], m_remoteIp[3] };
-
-        SlirpConfig cfg {};
-        in_addr vnetwork {};
-        in_addr vnetmask {};
-        in_addr vhost {};
-        in_addr vdhcpStart {};
-        in_addr vnameserver {};
-        vnetwork.s_addr = htonl((static_cast<std::uint32_t>(m_localIp[0]) << 24)
-            | (static_cast<std::uint32_t>(m_localIp[1]) << 16)
-            | (static_cast<std::uint32_t>(m_localIp[2]) << 8));
-        vnetmask.s_addr = htonl(0xffffff00U);
-        vhost.s_addr = htonl((static_cast<std::uint32_t>(m_localIp[0]) << 24)
-            | (static_cast<std::uint32_t>(m_localIp[1]) << 16)
-            | (static_cast<std::uint32_t>(m_localIp[2]) << 8)
-            | static_cast<std::uint32_t>(m_localIp[3]));
-        vdhcpStart.s_addr = htonl((static_cast<std::uint32_t>(m_remoteIp[0]) << 24)
-            | (static_cast<std::uint32_t>(m_remoteIp[1]) << 16)
-            | (static_cast<std::uint32_t>(m_remoteIp[2]) << 8)
-            | static_cast<std::uint32_t>(m_remoteIp[3]));
-        vnameserver.s_addr = vhost.s_addr;
-        cfg.version = SLIRP_CONFIG_VERSION_MAX;
-        cfg.restricted = 0;
-        cfg.in_enabled = true;
-        cfg.vnetwork = vnetwork;
-        cfg.vnetmask = vnetmask;
-        cfg.vhost = vhost;
-        cfg.vdhcp_start = vdhcpStart;
-        cfg.vnameserver = vnameserver;
-        cfg.if_mru = static_cast<size_t>(m_configuration.mtu);
-        cfg.if_mtu = static_cast<size_t>(m_configuration.mtu);
-        cfg.disable_host_loopback = false;
-        cfg.enable_emu = false;
-        cfg.disable_dns = false;
-        cfg.disable_dhcp = true;
-        cfg.in6_enabled = false;
-
-        m_callbacks.send_packet = &SlipConnection::sendPacketThunk;
-        m_callbacks.guest_error = &SlipConnection::guestErrorThunk;
-        m_callbacks.clock_get_ns = &SlipConnection::clockGetNsThunk;
-        m_callbacks.timer_new = &SlipConnection::timerNewThunk;
-        m_callbacks.timer_free = &SlipConnection::timerFreeThunk;
-        m_callbacks.timer_mod = &SlipConnection::timerModThunk;
-        m_callbacks.register_poll_fd = &SlipConnection::registerPollFdThunk;
-        m_callbacks.unregister_poll_fd = &SlipConnection::unregisterPollFdThunk;
-        m_callbacks.notify = &SlipConnection::notifyThunk;
-        m_slirp = slirp_new(&cfg, &m_callbacks, this);
-        m_connected = m_slirp != nullptr;
-#else
-        m_connected = false;
-#endif
+        network::SlirpEthernetConfiguration backendConfig;
+        backendConfig.hostIp = m_configuration.localIp;
+        backendConfig.guestIp = m_configuration.remoteIp;
+        backendConfig.mtu = m_configuration.mtu;
+        m_backend = std::make_unique<network::SlirpEthernetBackend>(std::move(backendConfig));
     }
 
-#if CUTEMAC_HAS_LIBSLIRP
-    struct Timer {
-        SlirpTimerCb callback = nullptr;
-        void* opaque = nullptr;
-        bool active = false;
-        std::int64_t expireMs = 0;
-    };
-    struct PollEntry {
-        int fd = -1;
-        int events = 0;
-        int revents = 0;
-    };
-
-    static ssize_t sendPacketThunk(const void* buf, size_t len, void* opaque)
+    void poll(const std::function<void(const QByteArray&)>& receiveIpPacket)
     {
-        return static_cast<SlipConnection*>(opaque)->sendPacket(buf, len);
-    }
-    static void guestErrorThunk(const char*, void*) {}
-    static std::int64_t clockGetNsThunk(void*)
-    {
-        return static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-    }
-    static void* timerNewThunk(SlirpTimerCb cb, void* cbOpaque, void* opaque)
-    {
-        auto* self = static_cast<SlipConnection*>(opaque);
-        for (auto& timer : self->m_timers) {
-            if (timer.callback == nullptr) {
-                timer.callback = cb;
-                timer.opaque = cbOpaque;
-                return &timer;
-            }
-        }
-        return nullptr;
-    }
-    static void timerFreeThunk(void* timer, void*) { static_cast<Timer*>(timer)->callback = nullptr; }
-    static void timerModThunk(void* timer, std::int64_t expireTime, void*)
-    {
-        auto* t = static_cast<Timer*>(timer);
-        t->expireMs = expireTime;
-        t->active = true;
-    }
-    static void registerPollFdThunk(int, void*) {}
-    static void unregisterPollFdThunk(int, void*) {}
-    static void notifyThunk(void*) {}
-
-    void serviceTimers()
-    {
-        const auto nowMs = clockGetNsThunk(nullptr) / 1000000;
-        for (auto& timer : m_timers) {
-            if (timer.active && timer.callback && timer.expireMs <= nowMs) {
-                timer.active = false;
-                timer.callback(timer.opaque);
-            }
-        }
+        if (!m_backend || !m_backend->connected()) return;
+        m_backend->poll();
+        drainBackend(receiveIpPacket);
     }
 
-    static int addPollFdThunk(int fd, int events, void* opaque)
+    void transmitIpPacket(const QByteArray& packet, const std::function<void(const QByteArray&)>& receiveIpPacket)
     {
-        auto* entries = static_cast<std::vector<PollEntry>*>(opaque);
-        PollEntry entry;
-        entry.fd = fd;
-        entry.events = events;
-        entry.revents = 0;
-        entries->push_back(entry);
-        return static_cast<int>(entries->size() - 1);
-    }
-    static int getReventsThunk(int index, void* opaque)
-    {
-        auto* entries = static_cast<std::vector<PollEntry>*>(opaque);
-        if (index < 0 || static_cast<std::size_t>(index) >= entries->size()) return 0;
-        return (*entries)[static_cast<std::size_t>(index)].revents;
-    }
-
-    void pollSlirp()
-    {
-        serviceTimers();
-        std::vector<PollEntry> entries;
-        std::uint32_t timeout = 0;
-        slirp_pollfds_fill(m_slirp, &timeout, &addPollFdThunk, &entries);
-#ifndef _WIN32
-        std::vector<pollfd> pollfds;
-        pollfds.reserve(entries.size());
-        for (const auto& entry : entries) {
-            short events = 0;
-            if (entry.events & SLIRP_POLL_IN) events |= POLLIN;
-            if (entry.events & SLIRP_POLL_OUT) events |= POLLOUT;
-            if (entry.events & SLIRP_POLL_PRI) events |= POLLPRI;
-            pollfd pfd {};
-            pfd.fd = entry.fd;
-            pfd.events = events;
-            pollfds.push_back(pfd);
-        }
-        const auto result = pollfds.empty() ? 0 : ::poll(pollfds.data(), pollfds.size(), 0);
-        if (result >= 0) {
-            for (std::size_t i = 0; i < pollfds.size(); ++i) {
-                if (pollfds[i].revents & POLLIN) entries[i].revents |= SLIRP_POLL_IN;
-                if (pollfds[i].revents & POLLOUT) entries[i].revents |= SLIRP_POLL_OUT;
-                if (pollfds[i].revents & POLLPRI) entries[i].revents |= SLIRP_POLL_PRI;
-                if (pollfds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) entries[i].revents |= SLIRP_POLL_ERR;
-            }
-        }
-        slirp_pollfds_poll(m_slirp, result < 0 ? 1 : 0, &getReventsThunk, &entries);
-#else
-        slirp_pollfds_poll(m_slirp, 0, &getReventsThunk, &entries);
-#endif
-    }
-
-    void handleIpPacket(const QByteArray& packet)
-    {
-        if (!m_slirp || packet.size() < 20 || packet.size() > m_configuration.mtu) return;
-        if (handleLocalIpPacket(packet)) return;
+        if (!m_backend || !m_backend->connected() || packet.size() < 20 || packet.size() > m_configuration.mtu) return;
+        if (handleLocalIpPacket(packet, receiveIpPacket)) return;
         QByteArray frame;
         frame.resize(ethernetHeaderSize + packet.size());
         auto* out = reinterpret_cast<std::uint8_t*>(frame.data());
@@ -515,11 +281,22 @@ private:
         std::memcpy(out + 6, m_remoteMac.data(), 6);
         writeBe16(out + 12, ethertypeIpv4);
         std::memcpy(out + ethernetHeaderSize, packet.constData(), static_cast<std::size_t>(packet.size()));
-        slirp_input(m_slirp, reinterpret_cast<const std::uint8_t*>(frame.constData()), frame.size());
-        drainInjectedFrames();
+        m_backend->transmitFrame(frame);
+        drainBackend(receiveIpPacket);
     }
 
-    bool handleLocalIpPacket(const QByteArray& packet)
+    void close()
+    {
+        if (m_backend) m_backend->close();
+    }
+
+    [[nodiscard]] bool connected() const
+    {
+        return m_backend && m_backend->connected();
+    }
+
+private:
+    bool handleLocalIpPacket(const QByteArray& packet, const std::function<void(const QByteArray&)>& receiveIpPacket)
     {
         const auto* ip = reinterpret_cast<const std::uint8_t*>(packet.constData());
         const auto headerLength = static_cast<qsizetype>(ip[0] & 0x0f) * 4;
@@ -546,75 +323,133 @@ private:
         outIcmp[2] = 0;
         outIcmp[3] = 0;
         writeBe16(outIcmp + 2, internetChecksum(outIcmp, icmpLength));
-        const auto slip = encodeSlipFrame(reinterpret_cast<const std::uint8_t*>(reply.constData()), reply.size());
-        m_modem.enqueueIncoming(slip);
+        receiveIpPacket(reply);
         return true;
     }
 
-    ssize_t sendPacket(const void* buf, size_t len)
+    void drainBackend(const std::function<void(const QByteArray&)>& receiveIpPacket)
     {
-        const auto* frame = static_cast<const std::uint8_t*>(buf);
-        if (len < ethernetHeaderSize) return static_cast<ssize_t>(len);
+        while (m_backend) {
+            auto frame = m_backend->receiveFrame();
+            if (!frame) break;
+            handleEthernetFrame(*frame, receiveIpPacket);
+        }
+    }
+
+    void handleEthernetFrame(const QByteArray& bytes, const std::function<void(const QByteArray&)>& receiveIpPacket)
+    {
+        const auto* frame = reinterpret_cast<const std::uint8_t*>(bytes.constData());
+        if (bytes.size() < ethernetHeaderSize) return;
         const auto ethertype = readBe16(frame + 12);
         if (ethertype == ethertypeArp) {
-            handleArp(frame, len);
-            return static_cast<ssize_t>(len);
+            handleArp(frame, static_cast<size_t>(bytes.size()));
+            return;
         }
-        if (ethertype != ethertypeIpv4) return static_cast<ssize_t>(len);
-        const auto payloadLength = static_cast<qsizetype>(len - ethernetHeaderSize);
-        if (payloadLength <= 0 || payloadLength > m_configuration.mtu) return static_cast<ssize_t>(len);
-        const auto slip = encodeSlipFrame(frame + ethernetHeaderSize, payloadLength);
-        m_modem.enqueueIncoming(slip);
-        return static_cast<ssize_t>(len);
+        if (ethertype != ethertypeIpv4) return;
+        const auto payloadLength = static_cast<qsizetype>(bytes.size() - ethernetHeaderSize);
+        if (payloadLength <= 0 || payloadLength > m_configuration.mtu) return;
+        receiveIpPacket(QByteArray(reinterpret_cast<const char*>(frame + ethernetHeaderSize), payloadLength));
     }
 
     void handleArp(const std::uint8_t* frame, size_t len)
     {
-        if (len < ethernetHeaderSize + arpPacketSize) return;
+        if (!m_backend || len < ethernetHeaderSize + arpPacketSize) return;
         if (readBe16(frame + 20) != 1) return;
         if (std::memcmp(frame + 38, m_remoteIp.data(), 4) != 0) return;
-        std::array<std::uint8_t, ethernetHeaderSize + arpPacketSize> reply {};
-        std::memcpy(reply.data(), frame + 6, 6);
-        std::memcpy(reply.data() + 6, m_remoteMac.data(), 6);
-        writeBe16(reply.data() + 12, ethertypeArp);
-        writeBe16(reply.data() + 14, 1);
-        writeBe16(reply.data() + 16, ethertypeIpv4);
-        reply[18] = 6;
-        reply[19] = 4;
-        writeBe16(reply.data() + 20, 2);
-        std::memcpy(reply.data() + 22, m_remoteMac.data(), 6);
-        std::memcpy(reply.data() + 28, m_remoteIp.data(), 4);
-        std::memcpy(reply.data() + 32, m_localMac.data(), 6);
-        std::memcpy(reply.data() + 38, m_localIp.data(), 4);
-        m_injectedFrames.push_back(reply);
+        QByteArray reply;
+        reply.resize(ethernetHeaderSize + arpPacketSize);
+        auto* out = reinterpret_cast<std::uint8_t*>(reply.data());
+        std::memcpy(out, frame + 6, 6);
+        std::memcpy(out + 6, m_remoteMac.data(), 6);
+        writeBe16(out + 12, ethertypeArp);
+        writeBe16(out + 14, 1);
+        writeBe16(out + 16, ethertypeIpv4);
+        out[18] = 6;
+        out[19] = 4;
+        writeBe16(out + 20, 2);
+        std::memcpy(out + 22, m_remoteMac.data(), 6);
+        std::memcpy(out + 28, m_remoteIp.data(), 4);
+        std::memcpy(out + 32, m_localMac.data(), 6);
+        std::memcpy(out + 38, m_localIp.data(), 4);
+        m_backend->transmitFrame(reply);
     }
 
-    void drainInjectedFrames()
-    {
-        while (!m_injectedFrames.empty() && m_slirp) {
-            const auto frame = m_injectedFrames.front();
-            m_injectedFrames.pop_front();
-            slirp_input(m_slirp, frame.data(), static_cast<int>(frame.size()));
-        }
-    }
-#endif
-
-    HayesModem& m_modem;
     config::SerialSlipConfiguration m_configuration;
-    bool m_connected = false;
-#if CUTEMAC_HAS_LIBSLIRP
-    Slirp* m_slirp = nullptr;
-    SlirpCb m_callbacks {};
-    std::array<Timer, 8> m_timers {};
+    std::unique_ptr<network::PacketNetworkBackend> m_backend;
     std::array<std::uint8_t, 4> m_localIp {};
     std::array<std::uint8_t, 4> m_remoteIp {};
     std::array<std::uint8_t, 6> m_localMac {};
     std::array<std::uint8_t, 6> m_remoteMac {};
+};
+
+class HayesModem::SlipConnection final : public HayesModem::Connection {
+public:
+    explicit SlipConnection(HayesModem& modem, config::SerialSlipConfiguration configuration)
+        : m_modem(modem)
+        , m_configuration(std::move(configuration))
+        , m_network(m_configuration)
+    {
+    }
+
+    ~SlipConnection() override { close(); }
+
+    void poll() override
+    {
+        m_network.poll([this](const QByteArray& packet) { enqueueIpPacket(packet); });
+    }
+
+    void send(std::uint8_t value) override
+    {
+        if (!m_network.connected()) return;
+        if (value == slipEnd) {
+            if (m_droppingOversize) {
+                m_frame.clear();
+                m_droppingOversize = false;
+                m_escapePending = false;
+                return;
+            }
+            if (!m_frame.isEmpty()) {
+                m_network.transmitIpPacket(m_frame, [this](const QByteArray& packet) { enqueueIpPacket(packet); });
+                m_frame.clear();
+            }
+            m_escapePending = false;
+            return;
+        }
+        if (m_droppingOversize) return;
+        if (m_escapePending) {
+            m_escapePending = false;
+            if (value == slipEscEnd) value = slipEnd;
+            else if (value == slipEscEsc) value = slipEsc;
+        } else if (value == slipEsc) {
+            m_escapePending = true;
+            return;
+        }
+        if (m_frame.size() >= m_configuration.mtu) {
+            m_droppingOversize = true;
+            return;
+        }
+        m_frame.append(static_cast<char>(value));
+    }
+
+    void close() override
+    {
+        m_network.close();
+    }
+
+    bool connected() const override { return m_network.connected(); }
+
+private:
+    void enqueueIpPacket(const QByteArray& packet)
+    {
+        m_modem.enqueueIncoming(encodeSlipFrame(reinterpret_cast<const std::uint8_t*>(packet.constData()), packet.size()));
+    }
+
+    HayesModem& m_modem;
+    config::SerialSlipConfiguration m_configuration;
+    SerialIpOverEthernet m_network;
     QByteArray m_frame;
     bool m_escapePending = false;
     bool m_droppingOversize = false;
-    std::deque<std::array<std::uint8_t, ethernetHeaderSize + arpPacketSize>> m_injectedFrames;
-#endif
 };
 
 class HayesModem::PppConnection final : public HayesModem::Connection {
@@ -622,25 +457,22 @@ public:
     explicit PppConnection(HayesModem& modem, config::SerialSlipConfiguration configuration)
         : m_modem(modem)
         , m_configuration(std::move(configuration))
+        , m_network(m_configuration)
     {
-        initialize();
+        m_localIp = network::parseIpv4Address(m_configuration.localIp, { 172, 16, 0, 1 });
+        m_remoteIp = network::parseIpv4Address(m_configuration.remoteIp, { 172, 16, 0, 2 });
     }
 
     ~PppConnection() override { close(); }
 
     void poll() override
     {
-#if CUTEMAC_HAS_LIBSLIRP
-        if (!m_slirp) return;
-        pollSlirp();
-        drainInjectedFrames();
-#endif
+        m_network.poll([this](const QByteArray& packet) { enqueueIpPacket(packet); });
     }
 
     void send(std::uint8_t value) override
     {
-#if CUTEMAC_HAS_LIBSLIRP
-        if (!m_slirp) return;
+        if (!m_network.connected()) return;
         if (value == 0x7e) {
             if (!m_frame.isEmpty()) handlePppFrame(m_frame);
             m_frame.clear();
@@ -655,130 +487,16 @@ public:
             return;
         }
         if (m_frame.size() <= m_configuration.mtu + 16) m_frame.append(static_cast<char>(value));
-#else
-        (void)value;
-#endif
     }
 
     void close() override
     {
-#if CUTEMAC_HAS_LIBSLIRP
-        if (m_slirp) {
-            slirp_cleanup(m_slirp);
-            m_slirp = nullptr;
-        }
-#endif
-        m_connected = false;
+        m_network.close();
     }
 
-    bool connected() const override { return m_connected; }
+    bool connected() const override { return m_network.connected(); }
 
 private:
-    void initialize()
-    {
-#if CUTEMAC_HAS_LIBSLIRP
-        m_localIp = parseIpv4(m_configuration.localIp, { 172, 16, 0, 1 });
-        m_remoteIp = parseIpv4(m_configuration.remoteIp, { 172, 16, 0, 2 });
-        m_localMac = { 0x52, 0x55, m_localIp[0], m_localIp[1], m_localIp[2], m_localIp[3] };
-        m_remoteMac = { 0x52, 0x55, m_remoteIp[0], m_remoteIp[1], m_remoteIp[2], m_remoteIp[3] };
-
-        SlirpConfig cfg {};
-        in_addr vnetwork {};
-        in_addr vnetmask {};
-        in_addr vhost {};
-        in_addr vdhcpStart {};
-        in_addr vnameserver {};
-        vnetwork.s_addr = htonl((static_cast<std::uint32_t>(m_localIp[0]) << 24)
-            | (static_cast<std::uint32_t>(m_localIp[1]) << 16)
-            | (static_cast<std::uint32_t>(m_localIp[2]) << 8));
-        vnetmask.s_addr = htonl(0xffffff00U);
-        vhost.s_addr = htonl((static_cast<std::uint32_t>(m_localIp[0]) << 24)
-            | (static_cast<std::uint32_t>(m_localIp[1]) << 16)
-            | (static_cast<std::uint32_t>(m_localIp[2]) << 8)
-            | static_cast<std::uint32_t>(m_localIp[3]));
-        vdhcpStart.s_addr = htonl((static_cast<std::uint32_t>(m_remoteIp[0]) << 24)
-            | (static_cast<std::uint32_t>(m_remoteIp[1]) << 16)
-            | (static_cast<std::uint32_t>(m_remoteIp[2]) << 8)
-            | static_cast<std::uint32_t>(m_remoteIp[3]));
-        vnameserver.s_addr = vhost.s_addr;
-        cfg.version = SLIRP_CONFIG_VERSION_MAX;
-        cfg.restricted = 0;
-        cfg.in_enabled = true;
-        cfg.vnetwork = vnetwork;
-        cfg.vnetmask = vnetmask;
-        cfg.vhost = vhost;
-        cfg.vdhcp_start = vdhcpStart;
-        cfg.vnameserver = vnameserver;
-        cfg.if_mru = static_cast<size_t>(m_configuration.mtu);
-        cfg.if_mtu = static_cast<size_t>(m_configuration.mtu);
-        cfg.disable_host_loopback = false;
-        cfg.enable_emu = false;
-        cfg.disable_dns = false;
-        cfg.disable_dhcp = true;
-        cfg.in6_enabled = false;
-
-        m_callbacks.send_packet = &PppConnection::sendPacketThunk;
-        m_callbacks.guest_error = &PppConnection::guestErrorThunk;
-        m_callbacks.clock_get_ns = &PppConnection::clockGetNsThunk;
-        m_callbacks.timer_new = &PppConnection::timerNewThunk;
-        m_callbacks.timer_free = &PppConnection::timerFreeThunk;
-        m_callbacks.timer_mod = &PppConnection::timerModThunk;
-        m_callbacks.register_poll_fd = &PppConnection::registerPollFdThunk;
-        m_callbacks.unregister_poll_fd = &PppConnection::unregisterPollFdThunk;
-        m_callbacks.notify = &PppConnection::notifyThunk;
-        m_slirp = slirp_new(&cfg, &m_callbacks, this);
-        m_connected = m_slirp != nullptr;
-#else
-        m_connected = false;
-#endif
-    }
-
-#if CUTEMAC_HAS_LIBSLIRP
-    struct Timer {
-        SlirpTimerCb callback = nullptr;
-        void* opaque = nullptr;
-        bool active = false;
-        std::int64_t expireMs = 0;
-    };
-    struct PollEntry {
-        int fd = -1;
-        int events = 0;
-        int revents = 0;
-    };
-
-    static ssize_t sendPacketThunk(const void* buf, size_t len, void* opaque)
-    {
-        return static_cast<PppConnection*>(opaque)->sendPacket(buf, len);
-    }
-    static void guestErrorThunk(const char*, void*) {}
-    static std::int64_t clockGetNsThunk(void*)
-    {
-        return static_cast<std::int64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-    }
-    static void* timerNewThunk(SlirpTimerCb cb, void* cbOpaque, void* opaque)
-    {
-        auto* self = static_cast<PppConnection*>(opaque);
-        for (auto& timer : self->m_timers) {
-            if (timer.callback == nullptr) {
-                timer.callback = cb;
-                timer.opaque = cbOpaque;
-                return &timer;
-            }
-        }
-        return nullptr;
-    }
-    static void timerFreeThunk(void* timer, void*) { static_cast<Timer*>(timer)->callback = nullptr; }
-    static void timerModThunk(void* timer, std::int64_t expireTime, void*)
-    {
-        auto* t = static_cast<Timer*>(timer);
-        t->expireMs = expireTime;
-        t->active = true;
-    }
-    static void registerPollFdThunk(int, void*) {}
-    static void unregisterPollFdThunk(int, void*) {}
-    static void notifyThunk(void*) {}
-
     void handlePppFrame(const QByteArray& raw)
     {
         if (raw.size() < 4) return;
@@ -885,178 +603,25 @@ private:
 
     std::uint8_t nextId() { return ++m_nextId; }
 
-    void serviceTimers()
-    {
-        const auto nowMs = clockGetNsThunk(nullptr) / 1000000;
-        for (auto& timer : m_timers) {
-            if (timer.active && timer.callback && timer.expireMs <= nowMs) {
-                timer.active = false;
-                timer.callback(timer.opaque);
-            }
-        }
-    }
-
-    static int addPollFdThunk(int fd, int events, void* opaque)
-    {
-        auto* entries = static_cast<std::vector<PollEntry>*>(opaque);
-        PollEntry entry;
-        entry.fd = fd;
-        entry.events = events;
-        entry.revents = 0;
-        entries->push_back(entry);
-        return static_cast<int>(entries->size() - 1);
-    }
-    static int getReventsThunk(int index, void* opaque)
-    {
-        auto* entries = static_cast<std::vector<PollEntry>*>(opaque);
-        if (index < 0 || static_cast<std::size_t>(index) >= entries->size()) return 0;
-        return (*entries)[static_cast<std::size_t>(index)].revents;
-    }
-
-    void pollSlirp()
-    {
-        serviceTimers();
-        std::vector<PollEntry> entries;
-        std::uint32_t timeout = 0;
-        slirp_pollfds_fill(m_slirp, &timeout, &addPollFdThunk, &entries);
-#ifndef _WIN32
-        std::vector<pollfd> pollfds;
-        pollfds.reserve(entries.size());
-        for (const auto& entry : entries) {
-            short events = 0;
-            if (entry.events & SLIRP_POLL_IN) events |= POLLIN;
-            if (entry.events & SLIRP_POLL_OUT) events |= POLLOUT;
-            if (entry.events & SLIRP_POLL_PRI) events |= POLLPRI;
-            pollfd pfd {};
-            pfd.fd = entry.fd;
-            pfd.events = events;
-            pollfds.push_back(pfd);
-        }
-        const auto result = pollfds.empty() ? 0 : ::poll(pollfds.data(), pollfds.size(), 0);
-        if (result >= 0) {
-            for (std::size_t i = 0; i < pollfds.size(); ++i) {
-                if (pollfds[i].revents & POLLIN) entries[i].revents |= SLIRP_POLL_IN;
-                if (pollfds[i].revents & POLLOUT) entries[i].revents |= SLIRP_POLL_OUT;
-                if (pollfds[i].revents & POLLPRI) entries[i].revents |= SLIRP_POLL_PRI;
-                if (pollfds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) entries[i].revents |= SLIRP_POLL_ERR;
-            }
-        }
-        slirp_pollfds_poll(m_slirp, result < 0 ? 1 : 0, &getReventsThunk, &entries);
-#else
-        slirp_pollfds_poll(m_slirp, 0, &getReventsThunk, &entries);
-#endif
-    }
-
     void handleIpPacket(const QByteArray& packet)
     {
-        if (!m_slirp || packet.size() < 20 || packet.size() > m_configuration.mtu) return;
-        if (handleLocalIpPacket(packet)) return;
-        QByteArray frame;
-        frame.resize(ethernetHeaderSize + packet.size());
-        auto* out = reinterpret_cast<std::uint8_t*>(frame.data());
-        std::memcpy(out, m_localMac.data(), 6);
-        std::memcpy(out + 6, m_remoteMac.data(), 6);
-        writeBe16(out + 12, ethertypeIpv4);
-        std::memcpy(out + ethernetHeaderSize, packet.constData(), static_cast<std::size_t>(packet.size()));
-        slirp_input(m_slirp, reinterpret_cast<const std::uint8_t*>(frame.constData()), frame.size());
-        drainInjectedFrames();
+        m_network.transmitIpPacket(packet, [this](const QByteArray& response) { enqueueIpPacket(response); });
     }
 
-    bool handleLocalIpPacket(const QByteArray& packet)
+    void enqueueIpPacket(const QByteArray& packet)
     {
-        const auto* ip = reinterpret_cast<const std::uint8_t*>(packet.constData());
-        const auto headerLength = static_cast<qsizetype>(ip[0] & 0x0f) * 4;
-        if ((ip[0] >> 4) != 4 || headerLength < 20 || packet.size() < headerLength + 8) return false;
-        const auto totalLength = static_cast<qsizetype>(readBe16(ip + 2));
-        if (totalLength < headerLength || totalLength > packet.size()) return false;
-        if (std::memcmp(ip + 16, m_localIp.data(), 4) != 0) return false;
-        if (ip[9] != 1) return true;
-        if (internetChecksum(ip, headerLength) != 0) return true;
-        const auto* icmp = ip + headerLength;
-        const auto icmpLength = totalLength - headerLength;
-        if (icmp[0] != 8 || internetChecksum(icmp, icmpLength) != 0) return true;
-
-        QByteArray reply = packet.left(totalLength);
-        auto* out = reinterpret_cast<std::uint8_t*>(reply.data());
-        std::memcpy(out + 12, ip + 16, 4);
-        std::memcpy(out + 16, ip + 12, 4);
-        out[8] = 64;
-        out[10] = 0;
-        out[11] = 0;
-        writeBe16(out + 10, internetChecksum(out, headerLength));
-        auto* outIcmp = out + headerLength;
-        outIcmp[0] = 0;
-        outIcmp[2] = 0;
-        outIcmp[3] = 0;
-        writeBe16(outIcmp + 2, internetChecksum(outIcmp, icmpLength));
-        m_modem.enqueueIncoming(encodePppFrame(pppProtocolIp, reply));
-        return true;
+        m_modem.enqueueIncoming(encodePppFrame(pppProtocolIp, packet));
     }
-
-    ssize_t sendPacket(const void* buf, size_t len)
-    {
-        const auto* frame = static_cast<const std::uint8_t*>(buf);
-        if (len < ethernetHeaderSize) return static_cast<ssize_t>(len);
-        const auto ethertype = readBe16(frame + 12);
-        if (ethertype == ethertypeArp) {
-            handleArp(frame, len);
-            return static_cast<ssize_t>(len);
-        }
-        if (ethertype != ethertypeIpv4) return static_cast<ssize_t>(len);
-        const auto payloadLength = static_cast<qsizetype>(len - ethernetHeaderSize);
-        if (payloadLength <= 0 || payloadLength > m_configuration.mtu) return static_cast<ssize_t>(len);
-        m_modem.enqueueIncoming(encodePppFrame(pppProtocolIp, QByteArray(reinterpret_cast<const char*>(frame + ethernetHeaderSize), payloadLength)));
-        return static_cast<ssize_t>(len);
-    }
-
-    void handleArp(const std::uint8_t* frame, size_t len)
-    {
-        if (len < ethernetHeaderSize + arpPacketSize) return;
-        if (readBe16(frame + 20) != 1) return;
-        if (std::memcmp(frame + 38, m_remoteIp.data(), 4) != 0) return;
-        std::array<std::uint8_t, ethernetHeaderSize + arpPacketSize> reply {};
-        std::memcpy(reply.data(), frame + 6, 6);
-        std::memcpy(reply.data() + 6, m_remoteMac.data(), 6);
-        writeBe16(reply.data() + 12, ethertypeArp);
-        writeBe16(reply.data() + 14, 1);
-        writeBe16(reply.data() + 16, ethertypeIpv4);
-        reply[18] = 6;
-        reply[19] = 4;
-        writeBe16(reply.data() + 20, 2);
-        std::memcpy(reply.data() + 22, m_remoteMac.data(), 6);
-        std::memcpy(reply.data() + 28, m_remoteIp.data(), 4);
-        std::memcpy(reply.data() + 32, m_localMac.data(), 6);
-        std::memcpy(reply.data() + 38, m_localIp.data(), 4);
-        m_injectedFrames.push_back(reply);
-    }
-
-    void drainInjectedFrames()
-    {
-        while (!m_injectedFrames.empty() && m_slirp) {
-            const auto frame = m_injectedFrames.front();
-            m_injectedFrames.pop_front();
-            slirp_input(m_slirp, frame.data(), static_cast<int>(frame.size()));
-        }
-    }
-#endif
 
     HayesModem& m_modem;
     config::SerialSlipConfiguration m_configuration;
-    bool m_connected = false;
-#if CUTEMAC_HAS_LIBSLIRP
-    Slirp* m_slirp = nullptr;
-    SlirpCb m_callbacks {};
-    std::array<Timer, 8> m_timers {};
+    SerialIpOverEthernet m_network;
     std::array<std::uint8_t, 4> m_localIp {};
     std::array<std::uint8_t, 4> m_remoteIp {};
-    std::array<std::uint8_t, 6> m_localMac {};
-    std::array<std::uint8_t, 6> m_remoteMac {};
     QByteArray m_frame;
     bool m_escapePending = false;
     bool m_sentIpcpRequest = false;
     std::uint8_t m_nextId = 0x40;
-    std::deque<std::array<std::uint8_t, ethernetHeaderSize + arpPacketSize>> m_injectedFrames;
-#endif
 };
 
 HayesModem::HayesModem(config::SerialDeviceConfiguration configuration)
