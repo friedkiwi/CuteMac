@@ -7,7 +7,6 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFocusEvent>
-#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QImage>
@@ -197,6 +196,11 @@ public:
         m_keyCallback = std::move(callback);
     }
 
+    void setCaptureStateCallback(std::function<void(bool)> callback)
+    {
+        m_captureStateCallback = std::move(callback);
+    }
+
     // Controls whether a click on this output attempts relative capture at
     // all. The machine/video layer owns the decision because it knows whether
     // the displayed framebuffer receives absolute or relative guest pointer
@@ -222,6 +226,7 @@ public:
             m_leftButtonPressed = false;
             m_mouseCallback(0, 0, false);
         }
+        const bool wasCaptured = m_mouseCaptured;
         m_mouseCaptured = false;
         if (m_relativeCapture) {
             m_relativeCapture = false;
@@ -229,6 +234,7 @@ public:
             if (mouseGrabber() == this) releaseMouse();
         }
         releasePointerInput();
+        if (wasCaptured) notifyCaptureStateChanged();
         update();
     }
 
@@ -256,19 +262,6 @@ protected:
 
         if (!m_running) {
             painter.fillRect(target, QColor(255, 255, 255, 72));
-        }
-        if (m_mouseCaptured) {
-            const auto text = QStringLiteral("Input captured - release with %1")
-                .arg(cutemac::session::HostInputMapper::releaseChordLabel());
-            QFont font = painter.font();
-            font.setBold(true);
-            painter.setFont(font);
-            const QFontMetrics metrics(font);
-            const QRect textBounds = metrics.boundingRect(text).adjusted(-10, -6, 10, 6);
-            const QRect overlay(target.left() + 12, target.top() + 12, textBounds.width(), textBounds.height());
-            painter.fillRect(overlay, QColor(0, 0, 0, 176));
-            painter.setPen(Qt::white);
-            painter.drawText(overlay, Qt::AlignCenter, text);
         }
     }
 
@@ -390,7 +383,11 @@ private:
         }
         m_mouseCaptured = true;
         m_relativeCapture = true;
-        recenterMouse();
+        if (!recenterMouse()) {
+            releaseMouseCapture();
+            return false;
+        }
+        notifyCaptureStateChanged();
         update();
         return true;
     }
@@ -404,12 +401,19 @@ private:
 #endif
     }
 
-    void recenterMouse()
+    [[nodiscard]] bool recenterMouse()
     {
         m_mouseCenter = displayRect().center();
         m_mouseGlobalCenter = mapToGlobal(m_mouseCenter);
         m_warpPending = true;
         QCursor::setPos(m_mouseGlobalCenter);
+        return nearPoint(QCursor::pos(), m_mouseGlobalCenter, kRecenterTolerancePx);
+    }
+
+    [[nodiscard]] static bool nearPoint(const QPoint& point, const QPoint& target, int tolerance)
+    {
+        const auto delta = point - target;
+        return qAbs(delta.x()) <= tolerance && qAbs(delta.y()) <= tolerance;
     }
 
     void updatePointerPresence(const QPoint& widgetPoint)
@@ -465,13 +469,13 @@ private:
                 const auto driftFromCenter = event->globalPosition().toPoint() - m_mouseGlobalCenter;
                 if (qAbs(driftFromCenter.x()) <= kRecenterTolerancePx && qAbs(driftFromCenter.y()) <= kRecenterTolerancePx) {
                     m_warpPending = false;
-                    return;
                 }
+                return;
             }
             const auto delta = event->globalPosition().toPoint() - m_mouseGlobalCenter;
             if (!delta.isNull()) {
                 m_mouseCallback(delta.x(), delta.y(), m_leftButtonPressed);
-                recenterMouse();
+                if (!recenterMouse()) releaseMouseCapture();
             } else {
                 m_mouseCallback(0, 0, m_leftButtonPressed);
             }
@@ -479,6 +483,11 @@ private:
         }
         m_lastGuestPoint = macPointFor(event->pos());
         m_mouseCallback(m_lastGuestPoint.x(), m_lastGuestPoint.y(), m_leftButtonPressed);
+    }
+
+    void notifyCaptureStateChanged()
+    {
+        if (m_captureStateCallback) m_captureStateCallback(m_mouseCaptured && m_relativeCapture);
     }
 
     void sendKeyEvent(QKeyEvent* event, bool pressed)
@@ -581,6 +590,7 @@ private:
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
     std::function<void(int, bool)> m_keyCallback;
+    std::function<void(bool)> m_captureStateCallback;
     QSet<int> m_pressedMacKeys;
 };
 
@@ -594,7 +604,7 @@ EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QSt
     , m_audioOutput(this)
 {
     ensureFloppyDriveCount(m_configuration);
-    setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
+    updateWindowTitle();
     m_display = new DisplayWidget;
     m_display->setMouseCallback([this](int x, int y, bool pressed) {
         if (m_display->relativeMouseCapture()) {
@@ -618,6 +628,12 @@ EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QSt
             m_pressedInputKeys.remove(keyCode);
             updateInteractiveInputState();
         }
+    });
+    m_display->setCaptureStateCallback([this](bool captured) {
+        if (m_inputCaptured == captured) return;
+        m_inputCaptured = captured;
+        updateWindowTitle();
+        updateStatus();
     });
     setCentralWidget(m_display);
 
@@ -1042,6 +1058,16 @@ void EmulatorWindow::buildStatusBar()
     updateStatus();
 }
 
+void EmulatorWindow::updateWindowTitle()
+{
+    auto title = QStringLiteral("CuteMac - %1").arg(m_configuration.profileName);
+    if (m_inputCaptured) {
+        title += QStringLiteral(" - Input captured: release with %1")
+            .arg(cutemac::session::HostInputMapper::releaseChordLabel());
+    }
+    setWindowTitle(title);
+}
+
 void EmulatorWindow::loadAndReset()
 {
     setPaused(true);
@@ -1092,7 +1118,7 @@ void EmulatorWindow::configureMachine()
                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
                 == QMessageBox::Yes) {
             m_configuration = proposed;
-            setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
+            updateWindowTitle();
             saveConfiguration();
             if (resetRequired) {
                 loadAndReset();
@@ -1191,7 +1217,10 @@ void EmulatorWindow::updateStatus()
     }();
     m_status->setText(QStringLiteral("%1 | %2 | %3 | PC 0x%4 | cycles %5 | overlay %6 | frames %7 | ROM %8 | disk %9 | floppy %10")
                           .arg(m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"))
-                          .arg(state.machineId)
+                          .arg(m_inputCaptured
+                                  ? QStringLiteral("%1 | release %2")
+                                        .arg(state.machineId, cutemac::session::HostInputMapper::releaseChordLabel())
+                                  : state.machineId)
                           .arg(cutemac::config::runtimeSpeedName(m_runner.speed()))
                           .arg(state.programCounter, 6, 16, QLatin1Char('0'))
                           .arg(state.cycles)

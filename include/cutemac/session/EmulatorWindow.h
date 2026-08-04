@@ -59,6 +59,7 @@ private:
     void ejectFloppy(int drive);
     void createFloppyFromToolbar(int drive, qint64 sizeBytes);
     void buildStatusBar();
+    void updateWindowTitle();
     void loadAndReset();
     void setRuntimeSpeed(config::RuntimeSpeed speed);
     void updateSpeedActions();
@@ -93,6 +94,7 @@ private:
     QAction* m_pauseAction = nullptr;
     bool m_romLoaded = false;
     bool m_paused = true;
+    bool m_inputCaptured = false;
     bool m_zoomResizePending = false;
     quint64 m_frames = 0;
 };
