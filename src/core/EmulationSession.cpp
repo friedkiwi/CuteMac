@@ -33,6 +33,30 @@ void ensureFloppyDriveCount(config::Configuration& configuration)
     configuration.floppyPath = configuration.iwmDevices.first().imagePath;
 }
 
+devices::video::nubus::AppleDisplayCard::Monitor appleDisplayCardMonitor(config::MacMonitorType monitor)
+{
+    using AppleMonitor = devices::video::nubus::AppleDisplayCard::Monitor;
+    switch (monitor) {
+    case config::MacMonitorType::Rgb21Inch: return AppleMonitor::Rgb21Inch;
+    case config::MacMonitorType::PortraitMono15Inch: return AppleMonitor::PortraitMono15Inch;
+    case config::MacMonitorType::Rgb12Inch: return AppleMonitor::Rgb12Inch;
+    case config::MacMonitorType::TwoPageMono21Inch: return AppleMonitor::TwoPageMono21Inch;
+    case config::MacMonitorType::NtscMonitor: return AppleMonitor::NtscMonitor;
+    case config::MacMonitorType::PortraitRgb15Inch: return AppleMonitor::PortraitRgb15Inch;
+    case config::MacMonitorType::HiResRgb: return AppleMonitor::HiResRgb;
+    case config::MacMonitorType::MultipleScan14Inch: return AppleMonitor::MultipleScan14Inch;
+    case config::MacMonitorType::MultipleScan16Inch: return AppleMonitor::MultipleScan16Inch;
+    case config::MacMonitorType::MultipleScan21Inch: return AppleMonitor::MultipleScan21Inch;
+    case config::MacMonitorType::PalEncoder: return AppleMonitor::PalEncoder;
+    case config::MacMonitorType::NtscEncoder: return AppleMonitor::NtscEncoder;
+    case config::MacMonitorType::Vga: return AppleMonitor::Vga;
+    case config::MacMonitorType::Rgb16Inch: return AppleMonitor::Rgb16Inch;
+    case config::MacMonitorType::PalMonitor: return AppleMonitor::PalMonitor;
+    case config::MacMonitorType::Rgb19Inch: return AppleMonitor::Rgb19Inch;
+    }
+    return AppleMonitor::HiResRgb;
+}
+
 } // namespace
 
 EmulationSession::EmulationSession(config::Configuration configuration)
@@ -78,7 +102,8 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
             } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
                 auto card = std::make_shared<devices::video::nubus::AppleDisplayCard>(
                     devices::video::nubus::AppleDisplayCard::Variant::MacintoshDisplayCard824,
-                    device.vramKiB);
+                    device.vramKiB,
+                    appleDisplayCardMonitor(device.monitor));
                 const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_display_card_824"));
                 if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
                 (void)machine->installNuBusCard(device.slot, card);

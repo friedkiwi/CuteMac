@@ -391,6 +391,18 @@ int main()
     ok &= expect(displayCard.control() == 0x0c40
             && readCard32(displayCard, 0x00200000) == 0x00000040,
         "8-24 JMFB control register must preserve monitor sense and transfer bits");
+    AppleDisplayCard displayCard16Inch(AppleDisplayCard::Variant::MacintoshDisplayCard824, 1024,
+        AppleDisplayCard::Monitor::Rgb16Inch);
+    ok &= expect((readCard32(displayCard16Inch, 0x00200000) & 0x00000e00U) == 0x00000e00U,
+        "8-24 must expose selected 16-inch RGB monitor sense lines");
+    AppleDisplayCard displayCard21Inch(AppleDisplayCard::Variant::MacintoshDisplayCard824, 1024,
+        AppleDisplayCard::Monitor::Rgb21Inch);
+    ok &= expect((readCard32(displayCard21Inch, 0x00200000) & 0x00000e00U) == 0x00000000U,
+        "8-24 must expose selected 21-inch RGB monitor sense lines");
+    AppleDisplayCard displayCardPal(AppleDisplayCard::Variant::MacintoshDisplayCard824, 1024,
+        AppleDisplayCard::Monitor::PalMonitor);
+    ok &= expect((readCard32(displayCardPal, 0x00200000) & 0x00000e00U) == 0x00000e00U,
+        "8-24 PAL monitor config must use the MAME low-nibble monitor table index");
     displayCard.write16(0x00200000, 0x0040);
     ok &= expect(displayCard.control() == 0x0040,
         "8-24 16-bit register writes must preserve the guest value");

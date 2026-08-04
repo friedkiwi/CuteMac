@@ -25,6 +25,25 @@ enum class NuBusDeviceType {
     CuteMacVideoAccelerated,
 };
 
+enum class MacMonitorType {
+    Rgb21Inch,
+    PortraitMono15Inch,
+    Rgb12Inch,
+    TwoPageMono21Inch,
+    NtscMonitor,
+    PortraitRgb15Inch,
+    HiResRgb,
+    MultipleScan14Inch,
+    MultipleScan16Inch,
+    MultipleScan21Inch,
+    PalEncoder,
+    NtscEncoder,
+    Vga,
+    Rgb16Inch,
+    PalMonitor,
+    Rgb19Inch,
+};
+
 struct IwmDeviceConfiguration {
     QString imagePath;
     bool readOnly = false;
@@ -47,6 +66,7 @@ struct NuBusDeviceConfiguration {
     int vramKiB = 4096;
     bool acceleration = true;
     bool absolutePointer = true;
+    MacMonitorType monitor = MacMonitorType::HiResRgb;
 };
 
 [[nodiscard]] bool isCuteMacVideoDevice(NuBusDeviceType type);

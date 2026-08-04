@@ -82,6 +82,54 @@ QString nubusCardName(config::NuBusDeviceType type)
     return QStringLiteral("Unknown card");
 }
 
+QString macMonitorName(config::MacMonitorType monitor)
+{
+    switch (monitor) {
+    case config::MacMonitorType::Rgb21Inch:
+        return QStringLiteral("Mac 21\" Color Display (1152x870)");
+    case config::MacMonitorType::PortraitMono15Inch:
+        return QStringLiteral("Mac Portrait Display (B&W 15\" 640x870)");
+    case config::MacMonitorType::Rgb12Inch:
+        return QStringLiteral("Mac RGB Display (12\" 512x384)");
+    case config::MacMonitorType::TwoPageMono21Inch:
+        return QStringLiteral("Mac Two-Page Display (B&W 21\" 1152x870)");
+    case config::MacMonitorType::HiResRgb:
+        return QStringLiteral("Mac Hi-Res Display (12-14\" 640x480)");
+    case config::MacMonitorType::Rgb16Inch:
+        return QStringLiteral("Mac 16\" Color Display (832x624)");
+    case config::MacMonitorType::NtscMonitor:
+        return QStringLiteral("NTSC Monitor");
+    case config::MacMonitorType::PortraitRgb15Inch:
+        return QStringLiteral("Mac Portrait Display (RGB 15\" 640x870)");
+    case config::MacMonitorType::MultipleScan14Inch:
+        return QStringLiteral("Multiple Scan 14\"");
+    case config::MacMonitorType::MultipleScan16Inch:
+        return QStringLiteral("Multiple Scan 16\"");
+    case config::MacMonitorType::MultipleScan21Inch:
+        return QStringLiteral("Multiple Scan 21\"");
+    case config::MacMonitorType::PalEncoder:
+        return QStringLiteral("PAL Encoder");
+    case config::MacMonitorType::NtscEncoder:
+        return QStringLiteral("NTSC Encoder");
+    case config::MacMonitorType::Vga:
+        return QStringLiteral("VGA/Super VGA");
+    case config::MacMonitorType::PalMonitor:
+        return QStringLiteral("PAL Monitor");
+    case config::MacMonitorType::Rgb19Inch:
+        return QStringLiteral("Mac RGB Display (19\")");
+    }
+    return QStringLiteral("Mac Hi-Res Display (12-14\" 640x480)");
+}
+
+constexpr std::array<config::MacMonitorType, 6> apple824SelectableMonitors {
+    config::MacMonitorType::Rgb21Inch,
+    config::MacMonitorType::PortraitMono15Inch,
+    config::MacMonitorType::Rgb12Inch,
+    config::MacMonitorType::TwoPageMono21Inch,
+    config::MacMonitorType::HiResRgb,
+    config::MacMonitorType::Rgb16Inch,
+};
+
 QString nubusValidationMessage(const config::NuBusDeviceConfiguration& device)
 {
     if (config::isValidNuBusDeviceConfiguration(device)) return {};
@@ -166,6 +214,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     QSpinBox* vram = nullptr;
     QCheckBox* acceleration = nullptr;
     QCheckBox* absolutePointer = nullptr;
+    QComboBox* monitor = nullptr;
 
     if (device.type == config::NuBusDeviceType::CuteMacVideo
         || device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
@@ -193,6 +242,20 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         absolutePointer = new QCheckBox;
         absolutePointer->setChecked(device.absolutePointer);
         form->addRow(QStringLiteral("Absolute pointer integration"), absolutePointer);
+    } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
+        vram = new QSpinBox;
+        vram->setRange(512, 1024);
+        vram->setSingleStep(512);
+        vram->setSuffix(QStringLiteral(" KiB"));
+        vram->setValue(device.vramKiB);
+        form->addRow(QStringLiteral("VRAM"), vram);
+
+        monitor = new QComboBox;
+        for (const auto value : apple824SelectableMonitors) {
+            monitor->addItem(macMonitorName(value), static_cast<int>(value));
+        }
+        monitor->setCurrentIndex(qMax(0, monitor->findData(static_cast<int>(device.monitor))));
+        form->addRow(QStringLiteral("Attached monitor"), monitor);
     }
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -206,6 +269,9 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
             candidate.height = height->value();
             candidate.depth = depth->currentData().toInt();
             candidate.vramKiB = vram->value();
+        } else if (candidate.type == config::NuBusDeviceType::AppleDisplayCard824) {
+            candidate.vramKiB = vram->value();
+            candidate.monitor = static_cast<config::MacMonitorType>(monitor->currentData().toInt());
         }
         const auto validation = nubusValidationMessage(candidate);
         if (!validation.isEmpty()) {
@@ -226,6 +292,10 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         device.vramKiB = vram->value();
         device.acceleration = acceleration->isChecked();
         device.absolutePointer = absolutePointer->isChecked();
+        device.declarationRomPath.clear();
+    } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
+        device.vramKiB = vram->value();
+        device.monitor = static_cast<config::MacMonitorType>(monitor->currentData().toInt());
         device.declarationRomPath.clear();
     }
     return true;

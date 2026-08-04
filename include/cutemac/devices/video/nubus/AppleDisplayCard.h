@@ -18,12 +18,20 @@ public:
 
     enum class Monitor {
         Rgb21Inch = 0x00,
+        PortraitMono15Inch = 0x01,
         Rgb12Inch = 0x02,
+        TwoPageMono21Inch = 0x03,
         NtscMonitor = 0x04,
+        PortraitRgb15Inch = 0x05,
         HiResRgb = 0x06,
+        MultipleScan14Inch = 0x07,
+        MultipleScan16Inch = 0x08,
+        MultipleScan21Inch = 0x09,
         PalEncoder = 0x0a,
         NtscEncoder = 0x0b,
+        Vga = 0x0c,
         Rgb16Inch = 0x0d,
+        Rgb19Inch = 0x0f,
         PalMonitor = 0x1e,
     };
 

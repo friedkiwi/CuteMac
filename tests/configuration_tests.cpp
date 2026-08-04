@@ -37,7 +37,7 @@ int main()
     configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4096, true, false });
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8192, true, true });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false });
-    configuration.nubusDevices.append({ 12, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false });
+    configuration.nubusDevices.append({ 12, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb16Inch });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     cutemac::config::SerialDeviceConfiguration modem;
     modem.channel = 0;
@@ -76,7 +76,8 @@ int main()
                 && loaded->nubusDevices[1].vramKiB == 8192
                 && loaded->nubusDevices[2].type == cutemac::config::NuBusDeviceType::MacintoshIIVideo
                 && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::AppleDisplayCard824
-                && loaded->nubusDevices.last().vramKiB == 1024,
+                && loaded->nubusDevices.last().vramKiB == 1024
+                && loaded->nubusDevices.last().monitor == cutemac::config::MacMonitorType::Rgb16Inch,
             "NuBus devices did not round-trip");
         ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
                 && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
@@ -162,11 +163,13 @@ int main()
                      { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 512, true, true }),
         "CuteMac Video must reject sub-MiB VRAM even though authentic Apple cards may use it");
     ok &= expect(cutemac::config::isValidNuBusDeviceConfiguration(
-                     { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 512, false, true })
+                     { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 512, false, true, cutemac::config::MacMonitorType::Rgb16Inch })
             && cutemac::config::isValidNuBusDeviceConfiguration(
-                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true })
+                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb21Inch })
             && !cutemac::config::isValidNuBusDeviceConfiguration(
-                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 4096, false, true }),
+                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 4096, false, true, cutemac::config::MacMonitorType::Rgb16Inch })
+            && !cutemac::config::isValidNuBusDeviceConfiguration(
+                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::NtscMonitor }),
         "Apple Display Card 8-24 must accept only authentic 512 KiB and 1 MiB VRAM sizes");
 
     auto invalidConfiguration = configuration;

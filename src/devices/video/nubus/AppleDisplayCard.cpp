@@ -54,6 +54,11 @@ int clampVramKiB(int vramKiB)
     return vramKiB <= 512 ? 512 : 1024;
 }
 
+std::size_t monitorIndex(AppleDisplayCard::Monitor monitor)
+{
+    return static_cast<std::uint8_t>(monitor) & 0x0fU;
+}
+
 } // namespace
 
 AppleDisplayCard::AppleDisplayCard(Variant variant, int vramKiB, Monitor monitor)
@@ -320,10 +325,11 @@ std::uint32_t AppleDisplayCard::readJmfb(std::uint32_t offset) const
 {
     switch (offset) {
     case 0x00: {
-        auto sense = monitors[static_cast<std::size_t>(static_cast<std::uint8_t>(m_monitor) & 0x1f)].sense[0];
-        if ((m_control & 0x0800U) != 0) sense &= monitors[static_cast<std::size_t>(static_cast<std::uint8_t>(m_monitor) & 0x1f)].sense[1];
-        if ((m_control & 0x0400U) != 0) sense &= monitors[static_cast<std::size_t>(static_cast<std::uint8_t>(m_monitor) & 0x1f)].sense[2];
-        if ((m_control & 0x0200U) != 0) sense &= monitors[static_cast<std::size_t>(static_cast<std::uint8_t>(m_monitor) & 0x1f)].sense[3];
+        const auto& monitor = monitors[monitorIndex(m_monitor)];
+        auto sense = monitor.sense[0];
+        if ((m_control & 0x0800U) != 0) sense &= monitor.sense[1];
+        if ((m_control & 0x0400U) != 0) sense &= monitor.sense[2];
+        if ((m_control & 0x0200U) != 0) sense &= monitor.sense[3];
         return (m_control & 0xf1ffU) | (sense << 9);
     }
     case 0x04:

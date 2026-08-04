@@ -27,6 +27,65 @@ std::string toTomlString(const QString& value)
     return std::string(utf8.constData(), static_cast<std::size_t>(utf8.size()));
 }
 
+QString monitorName(MacMonitorType monitor)
+{
+    switch (monitor) {
+    case MacMonitorType::Rgb21Inch: return QStringLiteral("rgb_21_inch");
+    case MacMonitorType::PortraitMono15Inch: return QStringLiteral("portrait_mono_15_inch");
+    case MacMonitorType::Rgb12Inch: return QStringLiteral("rgb_12_inch");
+    case MacMonitorType::TwoPageMono21Inch: return QStringLiteral("two_page_mono_21_inch");
+    case MacMonitorType::NtscMonitor: return QStringLiteral("ntsc_monitor");
+    case MacMonitorType::PortraitRgb15Inch: return QStringLiteral("portrait_rgb_15_inch");
+    case MacMonitorType::HiResRgb: return QStringLiteral("hi_res_rgb");
+    case MacMonitorType::MultipleScan14Inch: return QStringLiteral("multiple_scan_14_inch");
+    case MacMonitorType::MultipleScan16Inch: return QStringLiteral("multiple_scan_16_inch");
+    case MacMonitorType::MultipleScan21Inch: return QStringLiteral("multiple_scan_21_inch");
+    case MacMonitorType::PalEncoder: return QStringLiteral("pal_encoder");
+    case MacMonitorType::NtscEncoder: return QStringLiteral("ntsc_encoder");
+    case MacMonitorType::Vga: return QStringLiteral("vga");
+    case MacMonitorType::Rgb16Inch: return QStringLiteral("rgb_16_inch");
+    case MacMonitorType::PalMonitor: return QStringLiteral("pal_monitor");
+    case MacMonitorType::Rgb19Inch: return QStringLiteral("rgb_19_inch");
+    }
+    return QStringLiteral("hi_res_rgb");
+}
+
+MacMonitorType monitorFromName(const QString& name)
+{
+    if (name == QStringLiteral("rgb_21_inch")) return MacMonitorType::Rgb21Inch;
+    if (name == QStringLiteral("portrait_mono_15_inch")) return MacMonitorType::PortraitMono15Inch;
+    if (name == QStringLiteral("rgb_12_inch")) return MacMonitorType::Rgb12Inch;
+    if (name == QStringLiteral("two_page_mono_21_inch")) return MacMonitorType::TwoPageMono21Inch;
+    if (name == QStringLiteral("ntsc_monitor")) return MacMonitorType::NtscMonitor;
+    if (name == QStringLiteral("portrait_rgb_15_inch")) return MacMonitorType::PortraitRgb15Inch;
+    if (name == QStringLiteral("hi_res_rgb")) return MacMonitorType::HiResRgb;
+    if (name == QStringLiteral("multiple_scan_14_inch")) return MacMonitorType::MultipleScan14Inch;
+    if (name == QStringLiteral("multiple_scan_16_inch")) return MacMonitorType::MultipleScan16Inch;
+    if (name == QStringLiteral("multiple_scan_21_inch")) return MacMonitorType::MultipleScan21Inch;
+    if (name == QStringLiteral("pal_encoder")) return MacMonitorType::PalEncoder;
+    if (name == QStringLiteral("ntsc_encoder")) return MacMonitorType::NtscEncoder;
+    if (name == QStringLiteral("vga")) return MacMonitorType::Vga;
+    if (name == QStringLiteral("rgb_16_inch")) return MacMonitorType::Rgb16Inch;
+    if (name == QStringLiteral("pal_monitor")) return MacMonitorType::PalMonitor;
+    if (name == QStringLiteral("rgb_19_inch")) return MacMonitorType::Rgb19Inch;
+    return MacMonitorType::HiResRgb;
+}
+
+bool isAppleDisplayCard824Monitor(MacMonitorType monitor)
+{
+    switch (monitor) {
+    case MacMonitorType::Rgb21Inch:
+    case MacMonitorType::PortraitMono15Inch:
+    case MacMonitorType::Rgb12Inch:
+    case MacMonitorType::TwoPageMono21Inch:
+    case MacMonitorType::HiResRgb:
+    case MacMonitorType::Rgb16Inch:
+        return true;
+    default:
+        return false;
+    }
+}
+
 QString safeProfileFileBase(QString profileName)
 {
     profileName = profileName.trimmed();
@@ -87,7 +146,10 @@ bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
 {
     if (device.slot < 9 || device.slot > 14) return false;
     if (device.type == NuBusDeviceType::MacintoshIIVideo) return true;
-    if (device.type == NuBusDeviceType::AppleDisplayCard824) return device.vramKiB == 512 || device.vramKiB == 1024;
+    if (device.type == NuBusDeviceType::AppleDisplayCard824) {
+        return (device.vramKiB == 512 || device.vramKiB == 1024)
+            && isAppleDisplayCard824Monitor(device.monitor);
+    }
     if (!isCuteMacVideoDevice(device.type)) return false;
     if (device.width < 320 || device.height < 200) return false;
     if (device.depth != 1 && device.depth != 2 && device.depth != 4
@@ -303,6 +365,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                         static_cast<int>(vramKiB),
                         (*device)["acceleration"].value_or(true),
                         (*device)["absolute_pointer"].value_or(true),
+                        monitorFromName(fromTomlString((*device)["monitor"].value_or<std::string>("hi_res_rgb"))),
                     });
                 }
             }
@@ -408,7 +471,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
     }
     toml::array nubusDevices;
     for (const auto& device : configuration.nubusDevices) {
-        nubusDevices.push_back(toml::table {
+        toml::table nubusDevice {
             { "slot", device.slot },
             { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video"
                     : device.type == NuBusDeviceType::AppleDisplayCard824 ? "apple_display_card_824"
@@ -420,7 +483,11 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             { "vram_kib", device.vramKiB },
             { "acceleration", device.acceleration },
             { "absolute_pointer", device.absolutePointer },
-        });
+        };
+        if (device.type == NuBusDeviceType::AppleDisplayCard824) {
+            nubusDevice.insert("monitor", toTomlString(monitorName(device.monitor)));
+        }
+        nubusDevices.push_back(std::move(nubusDevice));
     }
     toml::array serialDevices;
     for (const auto& device : configuration.serialDevices) {
