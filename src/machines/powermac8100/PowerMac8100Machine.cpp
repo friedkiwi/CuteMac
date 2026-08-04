@@ -65,7 +65,7 @@ PowerMac8100Machine::PowerMac8100Machine(std::size_t ramSize)
     m_via1.setShiftRegisterReadCallback([this] { m_cuda.shiftByteToHostConsumed(); });
     // The 8100 exposes NuBus slots C-E. Keep the bring-up display in slot E,
     // matching a physical slot which the unmodified ROM enumerates.
-    (void)m_nubus.install(14, std::make_shared<devices::video::nubus::CuteMacVideoCard>(640, 480, 8, 4, false));
+    (void)m_nubus.install(14, std::make_shared<devices::video::nubus::CuteMacVideoCard>(640, 480, 8, 4096, false));
 }
 
 QString PowerMac8100Machine::machineId() const { return QStringLiteral("powermac-8100"); }

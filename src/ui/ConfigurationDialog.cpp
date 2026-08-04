@@ -74,6 +74,8 @@ QString nubusCardName(config::NuBusDeviceType type)
         return QStringLiteral("CuteMac Video Accelerated");
     case config::NuBusDeviceType::MacintoshIIVideo:
         return QStringLiteral("Apple Macintosh II Video Card");
+    case config::NuBusDeviceType::AppleDisplayCard824:
+        return QStringLiteral("Apple Macintosh Display Card 8•24");
     }
     return QStringLiteral("Unknown card");
 }
@@ -577,6 +579,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     auto* addCuteMacVideo = addNuBusMenu->addAction(QStringLiteral("CuteMac Video"));
     auto* addCuteMacAcceleratedVideo = addNuBusMenu->addAction(QStringLiteral("CuteMac Video Accelerated"));
     auto* addAppleVideo = addNuBusMenu->addAction(QStringLiteral("Apple Macintosh II Video Card"));
+    auto* addApple824 = addNuBusMenu->addAction(QStringLiteral("Apple Macintosh Display Card 8•24"));
     addNuBus->setMenu(addNuBusMenu);
     auto* removeNuBus = new QPushButton(QStringLiteral("Remove"));
     nubusButtons->addWidget(addNuBus);
@@ -748,6 +751,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     });
     connect(addAppleVideo, &QAction::triggered, this, [this, refreshNuBus]() {
         config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false};
+        if (editNuBusCard(device, this)) {
+            m_impl->nubusDevices.append(device);
+            refreshNuBus();
+        }
+    });
+    connect(addApple824, &QAction::triggered, this, [this, refreshNuBus]() {
+        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false};
         if (editNuBusCard(device, this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();

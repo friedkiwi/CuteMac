@@ -20,6 +20,7 @@ enum class ScsiDeviceType {
 
 enum class NuBusDeviceType {
     MacintoshIIVideo,
+    AppleDisplayCard824,
     CuteMacVideo,
     CuteMacVideoAccelerated,
 };

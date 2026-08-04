@@ -87,6 +87,7 @@ bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
 {
     if (device.slot < 9 || device.slot > 14) return false;
     if (device.type == NuBusDeviceType::MacintoshIIVideo) return true;
+    if (device.type == NuBusDeviceType::AppleDisplayCard824) return device.vramKiB == 512 || device.vramKiB == 1024;
     if (!isCuteMacVideoDevice(device.type)) return false;
     if (device.width < 320 || device.height < 200) return false;
     if (device.depth != 1 && device.depth != 2 && device.depth != 4
@@ -287,6 +288,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                 if (const auto* device = node.as_table()) {
                     const auto type = fromTomlString((*device)["type"].value_or<std::string>("cutemac_video"));
                     const auto nubusType = type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo
+                        : type == QStringLiteral("apple_display_card_824") ? NuBusDeviceType::AppleDisplayCard824
                         : type == QStringLiteral("cutemac_video_accelerated") ? NuBusDeviceType::CuteMacVideoAccelerated
                                                                              : NuBusDeviceType::CuteMacVideo;
                     const auto vramKiB = (*device)["vram_kib"].value_or<std::int64_t>(
@@ -409,6 +411,7 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
         nubusDevices.push_back(toml::table {
             { "slot", device.slot },
             { "type", device.type == NuBusDeviceType::MacintoshIIVideo ? "apple_m2_video"
+                    : device.type == NuBusDeviceType::AppleDisplayCard824 ? "apple_display_card_824"
                     : device.type == NuBusDeviceType::CuteMacVideoAccelerated ? "cutemac_video_accelerated"
                                                                              : "cutemac_video" },
             { "width", device.width },

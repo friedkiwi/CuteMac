@@ -172,6 +172,7 @@ add_library(CuteMacCore
     src/devices/via6522/Via6522.cpp
     src/devices/video/VideoDevice.cpp
     src/devices/video/SonoraVideo.cpp
+    src/devices/video/nubus/AppleDisplayCard.cpp
     src/devices/video/nubus/CuteMacAcceleratedVideoCard.cpp
     src/devices/video/nubus/CuteMacVideoCard.cpp
     src/devices/video/nubus/MacintoshIIVideoCard.cpp

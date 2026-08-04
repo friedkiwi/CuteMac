@@ -7,6 +7,7 @@
 #include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
+#include "cutemac/devices/video/nubus/AppleDisplayCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
@@ -72,6 +73,13 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
             if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {
                 auto card = std::make_shared<devices::video::nubus::MacintoshIIVideoCard>();
                 const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_m2_video"));
+                if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
+                (void)machine->installNuBusCard(device.slot, card);
+            } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
+                auto card = std::make_shared<devices::video::nubus::AppleDisplayCard>(
+                    devices::video::nubus::AppleDisplayCard::Variant::MacintoshDisplayCard824,
+                    device.vramKiB);
+                const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_display_card_824"));
                 if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
                 (void)machine->installNuBusCard(device.slot, card);
             } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {

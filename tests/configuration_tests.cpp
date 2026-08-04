@@ -37,6 +37,7 @@ int main()
     configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4096, true, false });
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8192, true, true });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false });
+    configuration.nubusDevices.append({ 12, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     cutemac::config::SerialDeviceConfiguration modem;
     modem.channel = 0;
@@ -68,12 +69,14 @@ int main()
                 && loaded->iwmDevices[1].imagePath == QStringLiteral("/tmp/external.dsk"),
             "IWM devices did not round-trip");
         ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
-        ok &= expect(loaded->nubusDevices.size() == 3 && loaded->nubusDevices.first().width == 832
+        ok &= expect(loaded->nubusDevices.size() == 4 && loaded->nubusDevices.first().width == 832
                 && loaded->nubusDevices.first().vramKiB == 4096
                 && !loaded->nubusDevices.first().absolutePointer
                 && loaded->nubusDevices[1].type == cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated
                 && loaded->nubusDevices[1].vramKiB == 8192
-                && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
+                && loaded->nubusDevices[2].type == cutemac::config::NuBusDeviceType::MacintoshIIVideo
+                && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::AppleDisplayCard824
+                && loaded->nubusDevices.last().vramKiB == 1024,
             "NuBus devices did not round-trip");
         ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
                 && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
@@ -158,6 +161,13 @@ int main()
     ok &= expect(!cutemac::config::isValidNuBusDeviceConfiguration(
                      { 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 512, true, true }),
         "CuteMac Video must reject sub-MiB VRAM even though authentic Apple cards may use it");
+    ok &= expect(cutemac::config::isValidNuBusDeviceConfiguration(
+                     { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 512, false, true })
+            && cutemac::config::isValidNuBusDeviceConfiguration(
+                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true })
+            && !cutemac::config::isValidNuBusDeviceConfiguration(
+                { 9, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 4096, false, true }),
+        "Apple Display Card 8-24 must accept only authentic 512 KiB and 1 MiB VRAM sizes");
 
     auto invalidConfiguration = configuration;
     invalidConfiguration.ramSizeKiB = 3072;

@@ -5,6 +5,7 @@
 
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
+#include "cutemac/devices/video/nubus/AppleDisplayCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 
 namespace {
@@ -28,12 +29,13 @@ std::uint32_t readCard32(cutemac::devices::nubus::NuBusCard& card, std::uint32_t
 int main()
 {
     using cutemac::devices::video::PixelStorage;
+    using cutemac::devices::video::nubus::AppleDisplayCard;
     using cutemac::devices::video::nubus::CuteMacAcceleratedVideoCard;
     using cutemac::devices::video::nubus::CuteMacVideoCard;
     using cutemac::devices::video::nubus::MacintoshIIVideoCard;
     bool ok = true;
 
-    CuteMacVideoCard virtualCard(832, 624, 8, 4, true);
+    CuteMacVideoCard virtualCard(832, 624, 8, 4096, true);
     ok &= expect(virtualCard.declarationRom().size() == 4096, "CuteMac declaration ROM size");
     ok &= expect(virtualCard.declarationRom().mid(4090, 4).toHex() == QByteArray("5a932bc7"), "CuteMac declaration ROM test pattern");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("d5fc000e0002")),
@@ -185,14 +187,14 @@ int main()
         "CuteMac absolute pointer must become inactive when the guest disables the slot VBL helper");
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31ea0004082831ea0002082a")),
         "CuteMac video slot VBL must copy absolute pointer coordinates into MTemp");
-    CuteMacVideoCard relativeCard(640, 480, 8, 4, true, false);
+    CuteMacVideoCard relativeCard(640, 480, 8, 4096, true, false);
     ok &= expect(relativeCard.videoFrame().grabbable,
         "CuteMac video without integrated absolute pointer must allow host mouse grabbing");
     relativeCard.setHostPointerPosition(100, 120);
     ok &= expect((relativeCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 2) == 0
             && relativeCard.read8(CuteMacVideoCard::guestPointerBase) == 0,
         "disabled absolute-pointer integration must not advertise or publish host coordinates");
-    CuteMacAcceleratedVideoCard acceleratedCard(832, 624, 8, 4, true, true);
+    CuteMacAcceleratedVideoCard acceleratedCard(832, 624, 8, 4096, true, true);
     ok &= expect(acceleratedCard.id() == QStringLiteral("nubus-video-cutemac-accelerated")
             && acceleratedCard.accelerationEnabled()
             && acceleratedCard.declarationRom().size() == 4096
@@ -354,6 +356,70 @@ int main()
     ok &= expect(!authenticCard.vblEnabled()
             && authenticCard.vblAssertions() == assertionsBeforeDisabledFrame,
         "authentic VBL +4 register must disable slot interrupts");
+
+    const auto displayRomPath = directory.filePath(QStringLiteral("3410868.bin"));
+    QFile displayRom(displayRomPath);
+    ok &= expect(displayRom.open(QIODevice::WriteOnly), "8-24 card ROM fixture open");
+    QByteArray displayRomBytes(AppleDisplayCard::declarationRomBytes, static_cast<char>(0xff));
+    displayRomBytes[0] = 0x12;
+    displayRomBytes[AppleDisplayCard::declarationRomBytes - 1] = 0x78;
+    ok &= expect(displayRom.write(displayRomBytes) == AppleDisplayCard::declarationRomBytes, "8-24 card ROM fixture write");
+    displayRom.close();
+
+    AppleDisplayCard displayCard(AppleDisplayCard::Variant::MacintoshDisplayCard824, 1024);
+    ok &= expect(displayCard.id() == QStringLiteral("nubus-video-apple-mdc-824"), "8-24 card identity");
+    ok &= expect(displayCard.loadDeclarationRom(displayRomPath), "8-24 card must accept a 32 KiB lane-3 ROM");
+    ok &= expect(displayCard.read8(0x00fe0003) == 0x12
+            && displayCard.read8(0x00fe0000) == 0xff
+            && displayCard.read8(0x00ffffff) == 0x78,
+        "8-24 declaration ROM must expand onto NuBus byte lane 3");
+    ok &= expect(displayCard.vramBytes() == AppleDisplayCard::vram1MiB, "8-24 card must default to 1 MiB VRAM");
+    ok &= expect(displayCard.videoFrame().grabbable,
+        "8-24 card must allow host mouse grabbing for relative ADB movement");
+    ok &= expect(displayCard.videoFrame().storage == PixelStorage::Indexed
+            && displayCard.videoFrame().bitsPerPixel == 1
+            && displayCard.videoFrame().width == 640
+            && displayCard.videoFrame().height == 480,
+        "8-24 card must reset to a usable one-bit 640x480 frame");
+    displayCard.write32(0x00200000, 0x00000c40);
+    ok &= expect(displayCard.control() == 0x0c40
+            && readCard32(displayCard, 0x00200000) == 0x00000040,
+        "8-24 JMFB control register must preserve monitor sense and transfer bits");
+    displayCard.write16(0x00200000, 0x0040);
+    ok &= expect(displayCard.control() == 0x0040,
+        "8-24 16-bit register writes must preserve the guest value");
+    displayCard.write32(0x00200200, 0x0000002a);
+    displayCard.write32(0x00200204, 0x00000012);
+    displayCard.write32(0x00200204, 0x00000034);
+    displayCard.write32(0x00200204, 0x00000056);
+    displayCard.write32(0x00200208, 0x00000018);
+    displayCard.write8(0x00000000, 0x2a);
+    ok &= expect(displayCard.ramdacMode() == 0x0c
+            && displayCard.videoFrame().bitsPerPixel == 8
+            && displayCard.videoFrame().colorTable[0x2a] == 0xff123456U
+            && static_cast<std::uint8_t>(displayCard.videoFrame().pixels[0]) == 0x2a,
+        "8-24 RAMDAC must select eight-bit indexed scanout with guest-programmed CLUT");
+    displayCard.write32(0x0020000c, 0x00000130);
+    displayCard.write32(0x0020010c, 0x0000067e);
+    displayCard.write32(0x00200124, 0x000004e0);
+    ok &= expect(displayCard.videoFrame().width == 832 && displayCard.videoFrame().height == 624,
+        "8-24 CRTC writes must publish 832x624 RGB mode geometry");
+    displayCard.write32(0x00200208, 0x0000001a);
+    displayCard.write32(0x00200000, 0x00000044);
+    displayCard.write32(0x00000000, 0x00123456);
+    ok &= expect(displayCard.videoFrame().storage == PixelStorage::Direct
+            && displayCard.videoFrame().bitsPerPixel == 24
+            && displayCard.videoFrame().strideBytes == 0x130 * 8
+            && static_cast<std::uint8_t>(displayCard.videoFrame().pixels[0]) == 0x12
+            && static_cast<std::uint8_t>(displayCard.videoFrame().pixels[1]) == 0x34
+            && static_cast<std::uint8_t>(displayCard.videoFrame().pixels[2]) == 0x56,
+        "8-24 direct RGB mode must pack 24-bit pixels into VRAM");
+    displayCard.write32(0x00200000, 0x00000074);
+    ok &= expect(!displayCard.videoFrame().valid() && displayCard.unsupportedInterlaceSelections() == 1,
+        "8-24 NTSC/PAL interlace/convolution paths must be explicitly blanked until implemented");
+    AppleDisplayCard displayCard512(AppleDisplayCard::Variant::MacintoshDisplayCard824, 512);
+    ok &= expect(displayCard512.vramBytes() == AppleDisplayCard::vram512KiB,
+        "8-24/4-8 shared card model must retain 512 KiB VRAM configurations");
 
     return ok ? 0 : 1;
 }
