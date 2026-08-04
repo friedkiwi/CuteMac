@@ -33,6 +33,49 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Verify IPv6 connectivity
+        shell: pwsh
+        run: |
+          $ipv6Available = $false
+          $ipv6Addresses = @()
+
+          try {
+            $ipv6Addresses = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+              ForEach-Object {
+                $_.GetIPProperties().UnicastAddresses |
+                Where-Object { $_.Address.AddressFamily -eq "InterNetworkV6" }
+              }
+
+            if ($ipv6Addresses.Count -gt 0) {
+              $ipv6Available = $true
+              Write-Output "IPv6 is available with $(($ipv6Addresses | Measure-Object).Count) address(es)"
+              $ipv6Addresses | ForEach-Object { Write-Output "  - $($_.Address)" }
+            } else {
+              Write-Output "No IPv6 addresses found on network interfaces"
+            }
+          } catch {
+            Write-Output "Error checking IPv6 availability: $_"
+          }
+
+          # Try to resolve an IPv6 address
+          try {
+            $result = Resolve-DnsName -Name "ipv6.google.com" -Type AAAA -ErrorAction SilentlyContinue
+            if ($result) {
+              Write-Output "IPv6 DNS resolution works: $($result.IPAddress)"
+              $ipv6Available = $true
+            } else {
+              Write-Output "IPv6 DNS resolution failed or not available"
+            }
+          } catch {
+            Write-Output "IPv6 DNS check exception: $_"
+          }
+
+          if ($ipv6Available) {
+            Write-Output "IPv6 connectivity verified"
+          } else {
+            Write-Output "Warning: IPv6 connectivity could not be verified"
+          }
+
       - name: Create short build path
         shell: pwsh
         run: |
@@ -59,13 +102,19 @@ jobs:
             --triplet $env:VCPKG_TRIPLET `
             --host-triplet $env:VCPKG_TRIPLET `
             --x-manifest-root=. `
-            --x-install-root=build/vcpkg_installed
+            --x-install-root=build/vcpkg_installed 2>&1 | Tee-Object -FilePath build/vcpkg-install.log
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Configure
         shell: pwsh
         run: |
           Set-Location $env:GITHUB_WORKSPACE
-          cmake --preset windows-msvc-ci
+          cmake --preset windows-msvc-ci 2>&1 | Tee-Object -FilePath build/cmake-configure.log
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Build
         shell: pwsh
@@ -82,6 +131,11 @@ jobs:
 
             $annotation = ($tail -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Output "::error title=Windows build failed::$annotation"
+
+            # Save full build log for inspection
+            New-Item -ItemType Directory -Path build-diagnostics -Force | Out-Null
+            Copy-Item build-output.log -Destination build-diagnostics/build-full.log
+
             exit $buildExitCode
           }
 
@@ -151,6 +205,31 @@ jobs:
           path: |
             build/vcpkg-manifest-install.log
             third_party/vcpkg/buildtrees/**/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-diagnostics
+          path: |
+            build-diagnostics/
+            build-output.log
+            build/vcpkg-install.log
+            build/cmake-configure.log
+            build/.cmake/api/v1/reply/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload CMake configure output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs
+          path: |
+            build/CMakeFiles/CMakeOutput.log
+            build/CMakeFiles/CMakeError.log
           if-no-files-found: ignore
           retention-days: 14
 
