@@ -70,10 +70,25 @@ jobs:
             Write-Output "IPv6 DNS check exception: $_"
           }
 
+          # Test external IPv6 connectivity with curl
+          try {
+            Write-Output "`nTesting external IPv6 connectivity..."
+            $curlResult = curl.exe -6 -s -m 5 "https://ifconfig.me"
+            if ($LASTEXITCODE -eq 0) {
+              Write-Output "External IPv6 connectivity verified"
+              Write-Output "Discovered IPv6 address: $curlResult"
+              $ipv6Available = $true
+            } else {
+              Write-Output "curl to ifconfig.me failed (exit code: $LASTEXITCODE)"
+            }
+          } catch {
+            Write-Output "Exception during IPv6 connectivity test: $_"
+          }
+
           if ($ipv6Available) {
-            Write-Output "IPv6 connectivity verified"
+            Write-Output "`nIPv6 connectivity verified"
           } else {
-            Write-Output "Warning: IPv6 connectivity could not be verified"
+            Write-Output "`nWarning: IPv6 connectivity could not be verified"
           }
 
       - name: Create short build path
