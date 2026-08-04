@@ -80,9 +80,16 @@ jobs:
         shell: pwsh
         run: |
           # Map a short drive letter to the workspace to avoid long Windows paths
+          # GitHub actions workspace is typically D:\a\friedkiwi\CuteMac which is ~27 chars
+          # Adding build/ and vcpkg paths can exceed Windows path length limits
           subst V: $env:GITHUB_WORKSPACE
           # Export a shorter GITHUB_WORKSPACE for subsequent steps
           echo "GITHUB_WORKSPACE=V:\\" >> $env:GITHUB_ENV
+          # Also set VCPKG_ROOT to use short path
+          echo "VCPKG_ROOT=V:\third_party\vcpkg" >> $env:GITHUB_ENV
+          # Verify the mapping worked
+          Write-Output "Path mapping: V:\ -> $(subst list | Select-String 'V:')"
+          Write-Output "GITHUB_WORKSPACE set to: V:\\"
 
       - name: Bootstrap vendored vcpkg
         shell: pwsh
