@@ -177,6 +177,7 @@ add_library(CuteMacCore
     src/devices/scc/Z8530Scc.cpp
     src/devices/via6522/Via6522.cpp
     src/devices/video/VideoDevice.cpp
+    src/devices/video/DafbVideo.cpp
     src/devices/video/SonoraVideo.cpp
     src/devices/video/nubus/AppleDisplayCard.cpp
     src/devices/video/nubus/CuteMacAcceleratedVideoCard.cpp
@@ -186,6 +187,7 @@ add_library(CuteMacCore
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
     src/machines/maciicx/MacIIcxMachine.cpp
+    src/machines/quadra700/Quadra700Machine.cpp
     src/machines/powermac8100/PowerMac8100Machine.cpp
     src/rom/RomPatcher.cpp
     src/rom/RomCatalog.cpp
@@ -404,6 +406,9 @@ target_link_libraries(CuteMacIIcxSmoke
         CuteMacCore
 )
 
+add_executable(CuteMacQuadra700Smoke tools/quadra700_smoke.cpp)
+target_link_libraries(CuteMacQuadra700Smoke PRIVATE CuteMacCore)
+
 add_executable(CuteMacPowerMac8100Smoke
     tools/powermac8100_smoke.cpp
 )
@@ -517,6 +522,14 @@ if(BUILD_TESTING)
     add_executable(CuteMacNuBusVideoTests tests/nubus_video_tests.cpp)
     target_link_libraries(CuteMacNuBusVideoTests PRIVATE CuteMacCore)
     add_test(NAME nubus-video-cards COMMAND CuteMacNuBusVideoTests)
+
+    add_executable(CuteMacDafbVideoTests tests/dafb_video_tests.cpp)
+    target_link_libraries(CuteMacDafbVideoTests PRIVATE CuteMacCore)
+    add_test(NAME dafb-video COMMAND CuteMacDafbVideoTests)
+
+    add_executable(CuteMacQuadra700Tests tests/quadra700_tests.cpp)
+    target_link_libraries(CuteMacQuadra700Tests PRIVATE CuteMacCore)
+    add_test(NAME quadra700-bringup COMMAND CuteMacQuadra700Tests)
 
     add_executable(CuteMacNuBusEthernetTests tests/nubus_ethernet_tests.cpp)
     target_link_libraries(CuteMacNuBusEthernetTests PRIVATE CuteMacCore)

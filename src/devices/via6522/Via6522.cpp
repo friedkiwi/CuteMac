@@ -42,8 +42,10 @@ void Via6522::reset()
     m_interruptEnable = 0;
     m_timer1Counter = 0;
     m_timer1Latch = 0;
+    m_timer1FreeCounter = 0xffff;
     m_timer1Running = false;
     m_timer2Counter = 0;
+    m_timer2FreeCounter = 0xffff;
     m_timer2Running = false;
     m_vblCycles = m_automaticCa1Period;
     m_ca1 = true;
@@ -88,10 +90,22 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
     }
     if (index == timer1CounterLow) {
         m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer1InterruptBit);
+        if (!m_timer1Running) return static_cast<std::uint8_t>(m_timer1FreeCounter);
+        return m_registers[index];
+    }
+    if (index == timer1CounterHigh) {
+        if (!m_timer1Running) return static_cast<std::uint8_t>(m_timer1FreeCounter >> 8);
         return m_registers[index];
     }
     if (index == timer2CounterLow) {
         m_registers[interruptFlag] &= static_cast<std::uint8_t>(~timer2InterruptBit);
+        if (!m_timer2Running && (m_registers[auxiliaryControl] & 0x20U) == 0)
+            return static_cast<std::uint8_t>(m_timer2FreeCounter);
+        return m_registers[index];
+    }
+    if (index == timer2CounterHigh) {
+        if (!m_timer2Running && (m_registers[auxiliaryControl] & 0x20U) == 0)
+            return static_cast<std::uint8_t>(m_timer2FreeCounter >> 8);
         return m_registers[index];
     }
     if (index == interruptFlag) {
@@ -211,6 +225,8 @@ void Via6522::tick(int cycles)
         const auto counter = static_cast<std::uint16_t>(std::max(0, m_timer1Counter));
         m_registers[timer1CounterLow] = static_cast<std::uint8_t>(counter);
         m_registers[timer1CounterHigh] = static_cast<std::uint8_t>(counter >> 8);
+    } else {
+        m_timer1FreeCounter = (m_timer1FreeCounter - cycles) & 0xffff;
     }
 
     if (m_timer2Running) {
@@ -226,6 +242,8 @@ void Via6522::tick(int cycles)
             m_registers[timer2CounterHigh] = 0;
             m_registers[interruptFlag] |= timer2InterruptBit;
         }
+    } else if ((m_registers[auxiliaryControl] & 0x20U) == 0) {
+        m_timer2FreeCounter = (m_timer2FreeCounter - cycles) & 0xffff;
     }
 
     if (m_shiftCycles > 0) {

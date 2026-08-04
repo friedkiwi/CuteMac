@@ -79,3 +79,9 @@ changing code in that subsystem.
 ### Quadra 800
 
 - Reuse ADB endpoints, SWIM/floppy, SCC, RTC/PRAM, SCSI bus and targets, and suitable audio components while keeping its 68040 bus glue, interrupt map, onboard video, and SCSI controller behavior machine-specific.
+
+### Quadra 700
+
+- The 68040 reset vectors live in low RAM but point to the high ROM at `$40800000`; retain the 1 GiB low-RAM aperture and dirty-24-bit RAM aliases used by the ROM's memory manager and sizing code.
+- The Q700 ROM's VIA1 Timer 2 calibration needs the same exact-write-sequence compatibility workaround as QEMU. Keep it in Q700 chipset glue, not the reusable VIA implementation, and write the calibrated `TimeDBRA`/`TimeSCCDB` values only after the ROM sequence.
+- The optional, checksum- and byte-gated `quadra700.skip_ram_pattern_test` patch replaces only the destructive full-RAM routine entry with `MOVEQ #0,D6; JMP (A6)` and adjusts the ROM checksum header. It is a bringup aid and remains disabled by default.

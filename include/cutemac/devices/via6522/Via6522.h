@@ -74,8 +74,10 @@ private:
     std::uint8_t m_interruptEnable = 0;
     int m_timer1Counter = 0;
     int m_timer1Latch = 0;
+    int m_timer1FreeCounter = 0xffff;
     bool m_timer1Running = false;
     int m_timer2Counter = 0;
+    int m_timer2FreeCounter = 0xffff;
     bool m_timer2Running = false;
     int m_vblCycles = 0;
     int m_automaticCa1Period = 130560;

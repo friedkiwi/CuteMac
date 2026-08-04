@@ -197,7 +197,7 @@
  * to read/write data from different address spaces)
  */
 #ifndef M68K_EMULATE_FC
-#define M68K_EMULATE_FC             M68K_OPT_OFF
+#define M68K_EMULATE_FC             M68K_OPT_ON
 #define M68K_SET_FC_CALLBACK(A)     your_set_fc_handler_function(A)
 #endif
 

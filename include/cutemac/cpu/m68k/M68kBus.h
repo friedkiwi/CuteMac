@@ -37,6 +37,18 @@ public:
     {
         return { read32(address), false };
     }
+    [[nodiscard]] virtual ReadResult<std::uint8_t> readProgram8(std::uint32_t address)
+    {
+        return readPhysical8(address);
+    }
+    [[nodiscard]] virtual ReadResult<std::uint16_t> readProgram16(std::uint32_t address)
+    {
+        return readPhysical16(address);
+    }
+    [[nodiscard]] virtual ReadResult<std::uint32_t> readProgram32(std::uint32_t address)
+    {
+        return readPhysical32(address);
+    }
     virtual bool writePhysical8(std::uint32_t address, std::uint8_t value)
     {
         write8(address, value);

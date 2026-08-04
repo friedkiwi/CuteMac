@@ -14,6 +14,7 @@ namespace {
 M68kCpuCore* activeCpu = nullptr;
 M68kBus* activeBus = nullptr;
 int instructionHookBudget = -1;
+unsigned int activeFunctionCode = 0;
 
 unsigned int musashiCpuType(M68kCpuCore::Model model)
 {
@@ -53,6 +54,16 @@ void instructionHook(unsigned int)
     --instructionHookBudget;
 }
 
+void functionCodeChanged(unsigned int functionCode)
+{
+    activeFunctionCode = functionCode;
+}
+
+bool isProgramFunctionCode()
+{
+    return (activeFunctionCode & 3U) == 2U;
+}
+
 } // namespace
 
 M68kCpuCore::M68kCpuCore()
@@ -60,6 +71,7 @@ M68kCpuCore::M68kCpuCore()
     activeCpu = this;
     m68k_init();
     m68k_set_instr_hook_callback(instructionHook);
+    m68k_set_fc_callback(functionCodeChanged);
     setModel(m_model);
 }
 
@@ -201,6 +213,11 @@ extern "C" unsigned int m68k_read_memory_8(unsigned int address)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
     if (bus == nullptr) return 0xffU;
+    if (cutemac::cpu::m68k::isProgramFunctionCode()) {
+        const auto programResult = bus->readProgram8(address);
+        if (programResult.busError) m68k_report_physical_bus_error(address, 0, 1);
+        return programResult.value;
+    }
     const auto result = bus->readPhysical8(address);
     if (result.busError) m68k_report_physical_bus_error(address, 0, 1);
     return result.value;
@@ -210,6 +227,11 @@ extern "C" unsigned int m68k_read_memory_16(unsigned int address)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
     if (bus == nullptr) return 0xffffU;
+    if (cutemac::cpu::m68k::isProgramFunctionCode()) {
+        const auto programResult = bus->readProgram16(address);
+        if (programResult.busError) m68k_report_physical_bus_error(address, 0, 2);
+        return programResult.value;
+    }
     const auto result = bus->readPhysical16(address);
     if (result.busError) m68k_report_physical_bus_error(address, 0, 2);
     return result.value;
@@ -219,6 +241,11 @@ extern "C" unsigned int m68k_read_memory_32(unsigned int address)
 {
     auto* bus = cutemac::cpu::m68k::activeBus;
     if (bus == nullptr) return 0xffffffffU;
+    if (cutemac::cpu::m68k::isProgramFunctionCode()) {
+        const auto programResult = bus->readProgram32(address);
+        if (programResult.busError) m68k_report_physical_bus_error(address, 0, 4);
+        return programResult.value;
+    }
     const auto result = bus->readPhysical32(address);
     if (result.busError) m68k_report_physical_bus_error(address, 0, 4);
     return result.value;

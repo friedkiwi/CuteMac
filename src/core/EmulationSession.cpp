@@ -5,6 +5,7 @@
 
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/machines/quadra700/Quadra700Machine.h"
 #include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
@@ -75,6 +76,40 @@ std::unique_ptr<devices::network::PacketNetworkBackend> makeNetworkBackend(
     return std::make_unique<devices::network::SlirpEthernetBackend>(std::move(slirp));
 }
 
+template<typename Machine>
+void installConfiguredNuBusCards(Machine& machine, const QVector<config::NuBusDeviceConfiguration>& devices)
+{
+    for (const auto& device : devices) {
+        if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {
+            auto card = std::make_shared<devices::video::nubus::MacintoshIIVideoCard>();
+            const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_m2_video"));
+            if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
+            (void)machine.installNuBusCard(device.slot, card);
+        } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
+            auto card = std::make_shared<devices::video::nubus::AppleDisplayCard>(
+                devices::video::nubus::AppleDisplayCard::Variant::MacintoshDisplayCard824,
+                device.vramKiB,
+                appleDisplayCardMonitor(device.monitor));
+            const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_display_card_824"));
+            if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
+            (void)machine.installNuBusCard(device.slot, card);
+        } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
+            auto card = std::make_shared<devices::network::nubus::AppleNuBusEthernetCard>(
+                ethernetMacAddress(device), makeNetworkBackend(device));
+            const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_nubus_ethernet"));
+            if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
+            (void)machine.installNuBusCard(device.slot, card);
+        } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
+            (void)machine.installNuBusCard(device.slot,
+                std::make_shared<devices::video::nubus::CuteMacAcceleratedVideoCard>(device.width,
+                    device.height, device.depth, device.vramKiB, device.acceleration, device.absolutePointer));
+        } else {
+            (void)machine.installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
+                device.width, device.height, device.depth, device.vramKiB, device.acceleration, device.absolutePointer));
+        }
+    }
+}
+
 } // namespace
 
 EmulationSession::EmulationSession(config::Configuration configuration)
@@ -111,35 +146,13 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
         auto machine = std::make_unique<machines::maciicx::MacIIcxMachine>(
             static_cast<std::size_t>(configuration.ramSizeKiB) * 1024,
             configuration.nvramPath);
-        for (const auto& device : configuration.nubusDevices) {
-            if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {
-                auto card = std::make_shared<devices::video::nubus::MacintoshIIVideoCard>();
-                const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_m2_video"));
-                if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
-                (void)machine->installNuBusCard(device.slot, card);
-            } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
-                auto card = std::make_shared<devices::video::nubus::AppleDisplayCard>(
-                    devices::video::nubus::AppleDisplayCard::Variant::MacintoshDisplayCard824,
-                    device.vramKiB,
-                    appleDisplayCardMonitor(device.monitor));
-                const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_display_card_824"));
-                if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
-                (void)machine->installNuBusCard(device.slot, card);
-            } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
-                auto card = std::make_shared<devices::network::nubus::AppleNuBusEthernetCard>(
-                    ethernetMacAddress(device), makeNetworkBackend(device));
-                const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_nubus_ethernet"));
-                if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
-                (void)machine->installNuBusCard(device.slot, card);
-            } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
-                (void)machine->installNuBusCard(device.slot,
-                    std::make_shared<devices::video::nubus::CuteMacAcceleratedVideoCard>(device.width,
-                        device.height, device.depth, device.vramKiB, device.acceleration, device.absolutePointer));
-            } else {
-                (void)machine->installNuBusCard(device.slot, std::make_shared<devices::video::nubus::CuteMacVideoCard>(
-                    device.width, device.height, device.depth, device.vramKiB, device.acceleration, device.absolutePointer));
-            }
-        }
+        installConfiguredNuBusCards(*machine, configuration.nubusDevices);
+        result = std::move(machine);
+    } else if (configuration.machineId == QStringLiteral("quadra-700")) {
+        auto machine = std::make_unique<machines::quadra700::Quadra700Machine>(
+            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024,
+            configuration.nvramPath);
+        installConfiguredNuBusCards(*machine, configuration.nubusDevices);
         result = std::move(machine);
     } else if (configuration.machineId == QStringLiteral("powermac-8100")) {
         result = std::make_unique<machines::powermac8100::PowerMac8100Machine>(
