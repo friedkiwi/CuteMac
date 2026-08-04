@@ -33,10 +33,12 @@ bool HostInputMapper::isReleaseChord(const QKeyEvent& event)
     // Option key is Qt::AltModifier. Checking Qt::ControlModifier here would
     // fire on Command+Option instead of the Control+Option shown in the
     // Display menu.
-    return (event.modifiers() & Qt::MetaModifier) != 0 && (event.modifiers() & Qt::AltModifier) != 0;
+    const bool controlHeld = (event.modifiers() & Qt::MetaModifier) != 0 || event.key() == Qt::Key_Meta;
 #else
-    return (event.modifiers() & Qt::ControlModifier) != 0 && (event.modifiers() & Qt::AltModifier) != 0;
+    const bool controlHeld = (event.modifiers() & Qt::ControlModifier) != 0 || event.key() == Qt::Key_Control;
 #endif
+    const bool optionHeld = (event.modifiers() & Qt::AltModifier) != 0 || event.key() == Qt::Key_Alt;
+    return controlHeld && optionHeld;
 }
 
 int HostInputMapper::macKeyCode(const QKeyEvent& event)

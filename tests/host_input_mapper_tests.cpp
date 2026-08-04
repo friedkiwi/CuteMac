@@ -64,6 +64,9 @@ int main()
         const QKeyEvent chordHeld(QEvent::KeyPress, Qt::Key_A, releaseModifier | Qt::AltModifier);
         ok &= expect(cutemac::session::HostInputMapper::isReleaseChord(chordHeld),
             "the platform-correct Control+Option/Ctrl+Alt chord must be recognized as the release chord");
+        const QKeyEvent optionPressedSecond(QEvent::KeyPress, Qt::Key_Alt, releaseModifier);
+        ok &= expect(cutemac::session::HostInputMapper::isReleaseChord(optionPressedSecond),
+            "pressing Option/Alt as the second release-chord key must release capture immediately");
         const QKeyEvent halfChord(QEvent::KeyPress, Qt::Key_A, releaseModifier);
         ok &= expect(!cutemac::session::HostInputMapper::isReleaseChord(halfChord),
             "the modifier alone, without Option/Alt, must not be mistaken for the release chord");

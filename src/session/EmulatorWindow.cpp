@@ -287,13 +287,10 @@ protected:
     {
         setFocus(Qt::MouseFocusReason);
         if (!m_mouseCaptured && m_captureEligible && displayRect().contains(event->pos())) {
-            captureMouse();
-            if (!m_relativeCapture && m_mouseCallback) {
-                const auto point = macPointFor(event->pos());
-                m_mouseCallback(point.x(), point.y(), false);
+            if (captureMouse()) {
+                event->accept();
+                return;
             }
-            event->accept();
-            return;
         }
         if (!m_mouseCaptured) {
             updatePointerPresence(event->pos());
@@ -362,6 +359,14 @@ protected:
         QWidget::focusOutEvent(event);
     }
 
+    bool event(QEvent* event) override
+    {
+        if (event->type() == QEvent::UngrabMouse && m_mouseCaptured) {
+            releaseMouseCapture();
+        }
+        return QWidget::event(event);
+    }
+
     void leaveEvent(QEvent* event) override
     {
         if (!m_mouseCaptured) releasePointerInput();
@@ -369,23 +374,25 @@ protected:
     }
 
 private:
-    void captureMouse()
+    [[nodiscard]] bool captureMouse()
     {
-        m_mouseCaptured = true;
         setCursor(Qt::BlankCursor);
-        m_relativeCapture = supportsRelativeCapture();
-        if (m_relativeCapture) {
-            grabMouse();
-            // grabMouse() has no failure return; some platforms (Wayland
-            // compositors in particular) silently decline it. Checking who
-            // actually holds the grab afterward is what lets a declined grab
-            // fall back to absolute forwarding instead of behaving erratically.
-            m_relativeCapture = mouseGrabber() == this;
+        if (!supportsRelativeCapture()) {
+            return false;
         }
-        if (m_relativeCapture) {
-            recenterMouse();
+        grabMouse(QCursor(Qt::BlankCursor));
+        // grabMouse() has no failure return; some platforms silently decline
+        // it. Checking who actually holds the grab afterward is what lets a
+        // declined grab fall back to absolute forwarding without entering a
+        // misleading half-captured state.
+        if (mouseGrabber() != this) {
+            return false;
         }
+        m_mouseCaptured = true;
+        m_relativeCapture = true;
+        recenterMouse();
         update();
+        return true;
     }
 
     [[nodiscard]] bool supportsRelativeCapture() const
@@ -400,8 +407,9 @@ private:
     void recenterMouse()
     {
         m_mouseCenter = displayRect().center();
+        m_mouseGlobalCenter = mapToGlobal(m_mouseCenter);
         m_warpPending = true;
-        QCursor::setPos(mapToGlobal(m_mouseCenter));
+        QCursor::setPos(m_mouseGlobalCenter);
     }
 
     void updatePointerPresence(const QPoint& widgetPoint)
@@ -454,13 +462,13 @@ private:
             // warp-back event reads as a large spurious jump in the guest
             // pointer every time the host cursor recenters.
             if (event->type() == QEvent::MouseMove && m_warpPending) {
-                const auto driftFromCenter = event->pos() - m_mouseCenter;
+                const auto driftFromCenter = event->globalPosition().toPoint() - m_mouseGlobalCenter;
                 if (qAbs(driftFromCenter.x()) <= kRecenterTolerancePx && qAbs(driftFromCenter.y()) <= kRecenterTolerancePx) {
                     m_warpPending = false;
                     return;
                 }
             }
-            const auto delta = event->pos() - m_mouseCenter;
+            const auto delta = event->globalPosition().toPoint() - m_mouseGlobalCenter;
             if (!delta.isNull()) {
                 m_mouseCallback(delta.x(), delta.y(), m_leftButtonPressed);
                 recenterMouse();
@@ -568,6 +576,7 @@ private:
     bool m_pointerInsideDisplay = false;
     bool m_leftButtonPressed = false;
     QPoint m_mouseCenter;
+    QPoint m_mouseGlobalCenter;
     QPoint m_lastGuestPoint;
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
