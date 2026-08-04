@@ -38,6 +38,7 @@ public:
     [[nodiscard]] virtual int runCycles(int cycles) = 0;
     [[nodiscard]] virtual std::uint64_t cycleCount() const = 0;
     [[nodiscard]] virtual std::uint32_t programCounter() const = 0;
+    [[nodiscard]] virtual std::uint64_t diskActivityCounter() const { return 0; }
     [[nodiscard]] virtual bool overlayEnabled() const = 0;
     [[nodiscard]] virtual QByteArray framebufferBytes() const = 0;
     [[nodiscard]] virtual devices::video::VideoFrame videoFrame() const = 0;

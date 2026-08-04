@@ -7,6 +7,7 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFocusEvent>
+#include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QImage>
@@ -85,6 +86,14 @@ void ensureFloppyDriveCount(cutemac::config::Configuration& configuration)
 QString floppyDriveName(int drive)
 {
     return drive == 0 ? QStringLiteral("Internal Floppy") : QStringLiteral("External Floppy");
+}
+
+QFrame* makeStatusSeparator(QWidget* parent)
+{
+    auto* separator = new QFrame(parent);
+    separator->setFrameShape(QFrame::VLine);
+    separator->setFrameShadow(QFrame::Sunken);
+    return separator;
 }
 
 bool sameScsiDevices(const QVector<cutemac::config::ScsiDeviceConfiguration>& left,
@@ -1101,8 +1110,21 @@ void EmulatorWindow::createFloppyFromToolbar(int drive, qint64 sizeBytes)
 
 void EmulatorWindow::buildStatusBar()
 {
-    m_status = new QLabel;
-    statusBar()->addPermanentWidget(m_status, 1);
+    m_profileStatus = new QLabel;
+    m_runStatus = new QLabel;
+    m_speedStatus = new QLabel;
+    m_diskActivityStatus = new QLabel;
+    m_diskActivityStatus->setFixedSize(10, 10);
+    m_diskActivityStatus->setToolTip(QStringLiteral("Disk activity"));
+
+    statusBar()->addPermanentWidget(m_runStatus);
+    statusBar()->addPermanentWidget(makeStatusSeparator(statusBar()));
+    statusBar()->addPermanentWidget(m_speedStatus);
+    statusBar()->addPermanentWidget(makeStatusSeparator(statusBar()));
+    statusBar()->addPermanentWidget(m_profileStatus, 1);
+    statusBar()->addPermanentWidget(makeStatusSeparator(statusBar()));
+    statusBar()->addPermanentWidget(new QLabel(QStringLiteral("Disk"), statusBar()));
+    statusBar()->addPermanentWidget(m_diskActivityStatus);
     updateStatus();
 }
 
@@ -1130,6 +1152,8 @@ void EmulatorWindow::loadAndReset()
     } else {
         statusBar()->showMessage(QStringLiteral("ROM not loaded"));
     }
+    m_diskActivityCounterInitialized = false;
+    m_diskActivityFlashFrames = 0;
     setPaused(!m_romLoaded);
     updateStatus();
 }
@@ -1249,34 +1273,34 @@ void EmulatorWindow::runFrame()
 
 void EmulatorWindow::updateStatus()
 {
-    if (m_status == nullptr) {
+    if (m_profileStatus == nullptr || m_runStatus == nullptr || m_speedStatus == nullptr || m_diskActivityStatus == nullptr) {
         return;
     }
 
     const auto state = m_session.status();
     updateSpeedActions();
-    const auto floppyStatus = [this]() {
-        if (m_configuration.iwmDevices.isEmpty()) return QStringLiteral("none");
-        auto driveText = [](const QVector<cutemac::config::IwmDeviceConfiguration>& devices, int drive) {
-            if (drive >= devices.size() || devices[drive].imagePath.isEmpty()) return QStringLiteral("empty");
-            return QFileInfo(devices[drive].imagePath).fileName();
-        };
-        return QStringLiteral("I:%1 E:%2").arg(driveText(m_configuration.iwmDevices, 0), driveText(m_configuration.iwmDevices, 1));
-    }();
-    m_status->setText(QStringLiteral("%1 | %2 | %3 | PC 0x%4 | cycles %5 | overlay %6 | frames %7 | ROM %8 | disk %9 | floppy %10")
-                          .arg(m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"))
-                          .arg(m_inputCaptured
-                                  ? QStringLiteral("%1 | release %2")
-                                        .arg(state.machineId, cutemac::session::HostInputMapper::releaseChordLabel())
-                                  : state.machineId)
-                          .arg(cutemac::config::runtimeSpeedName(m_runner.speed()))
-                          .arg(state.programCounter, 6, 16, QLatin1Char('0'))
-                          .arg(state.cycles)
-                          .arg(state.overlayEnabled ? QStringLiteral("on") : QStringLiteral("off"))
-                          .arg(m_frames)
-                          .arg(m_romLoaded ? QStringLiteral("loaded") : QStringLiteral("missing"))
-                          .arg(m_configuration.diskPath.isEmpty() ? QStringLiteral("none") : QFileInfo(m_configuration.diskPath).fileName())
-                          .arg(floppyStatus));
+
+    if (!m_diskActivityCounterInitialized) {
+        m_lastDiskActivityCounter = state.diskActivityCounter;
+        m_diskActivityCounterInitialized = true;
+    } else if (state.diskActivityCounter != m_lastDiskActivityCounter) {
+        m_lastDiskActivityCounter = state.diskActivityCounter;
+        m_diskActivityFlashFrames = 3;
+    } else if (m_diskActivityFlashFrames > 0) {
+        --m_diskActivityFlashFrames;
+    }
+
+    const auto runText = !m_romLoaded
+        ? QStringLiteral("No ROM")
+        : (m_paused ? QStringLiteral("Paused") : QStringLiteral("Running"));
+    const bool diskActive = m_romLoaded && m_diskActivityFlashFrames > 0;
+
+    m_profileStatus->setText(QStringLiteral("Profile: %1").arg(m_configuration.profileName));
+    m_runStatus->setText(runText);
+    m_speedStatus->setText(QStringLiteral("Speed: %1").arg(cutemac::config::runtimeSpeedName(m_runner.speed())));
+    m_diskActivityStatus->setStyleSheet(diskActive
+            ? QStringLiteral("border-radius: 5px; background: #28c76f;")
+            : QStringLiteral("border-radius: 5px; background: #5f666d;"));
 }
 
 void EmulatorWindow::showProfileManager()

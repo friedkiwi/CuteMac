@@ -251,6 +251,11 @@ int MacIIcxMachine::stepInstruction()
 
 std::uint64_t MacIIcxMachine::cycleCount() const { return m_scheduler.now(); }
 std::uint32_t MacIIcxMachine::programCounter() const { return m_cpu.programCounter(); }
+std::uint64_t MacIIcxMachine::diskActivityCounter() const
+{
+    return m_ioStatistics.scsiReads + m_ioStatistics.scsiWrites
+        + m_ioStatistics.swimReads + m_ioStatistics.swimWrites;
+}
 bool MacIIcxMachine::overlayEnabled() const { return m_overlay; }
 
 QByteArray MacIIcxMachine::framebufferBytes() const

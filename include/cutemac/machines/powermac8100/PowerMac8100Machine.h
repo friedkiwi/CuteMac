@@ -61,6 +61,7 @@ public:
     [[nodiscard]] int stepInstruction() override;
     [[nodiscard]] std::uint64_t cycleCount() const override;
     [[nodiscard]] std::uint32_t programCounter() const override;
+    [[nodiscard]] std::uint64_t diskActivityCounter() const override { return m_diskActivityCounter; }
     [[nodiscard]] bool overlayEnabled() const override { return false; }
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;
@@ -162,6 +163,7 @@ private:
     bool m_cpuTraceFrozen = false;
     bool m_freezeCpuTraceOnEmulatorException = false;
     std::uint64_t m_unmappedAccessCount = 0;
+    std::uint64_t m_diskActivityCounter = 0;
     std::array<std::uint64_t, 8> m_ascCompatibilityReadCounts {};
     std::array<std::uint32_t, 8> m_ascCompatibilityReadCallers {};
     std::deque<BusAccess> m_busTrace;

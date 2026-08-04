@@ -456,6 +456,12 @@ std::uint32_t MacPlusMachine::programCounter() const
     return m_cpu.programCounter();
 }
 
+std::uint64_t MacPlusMachine::diskActivityCounter() const
+{
+    return m_accessSummary.scsiReads + m_accessSummary.scsiWrites
+        + m_accessSummary.iwmReads + m_accessSummary.iwmWrites;
+}
+
 cpu::m68k::M68kCpuCore::RegisterSnapshot MacPlusMachine::cpuRegisters() const
 {
     return m_cpu.registers();

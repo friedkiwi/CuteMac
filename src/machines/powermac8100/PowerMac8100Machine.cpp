@@ -168,6 +168,7 @@ void PowerMac8100Machine::reset()
     m_videoVblankCycles = 1'330'008;
     m_amicRegisters.fill(0);
     m_unmappedAccessCount = 0;
+    m_diskActivityCounter = 0;
     m_ascCompatibilityReadCounts.fill(0);
     m_busTrace.clear();
     m_cpuTrace.clear();
@@ -284,6 +285,7 @@ void PowerMac8100Machine::serviceScsiDma()
     unsigned guard = 0;
     while (controller->dmaRequest() && guard++ < 1'048'576U) {
         const auto address = m_scsiDmaAddress + m_scsiDmaOffset;
+        ++m_diskActivityCounter;
         if (controller->dmaToHost()) {
             const auto swapped = controller->readDmaWord();
             const auto word = static_cast<std::uint16_t>((swapped << 8) | (swapped >> 8));
@@ -399,10 +401,14 @@ std::uint8_t PowerMac8100Machine::readMapped8(std::uint32_t address)
     case BusRegion::Amic: {
         flushDevices();
         const auto offset = address - amicBase;
-        if (offset >= 0x10000U && offset < 0x10100U)
+        if (offset >= 0x10000U && offset < 0x10100U) {
+            ++m_diskActivityCounter;
             return m_scsi.readRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4));
-        if (offset >= 0x11000U && offset < 0x11100U)
+        }
+        if (offset >= 0x11000U && offset < 0x11100U) {
+            ++m_diskActivityCounter;
             return m_scsiB.readRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4));
+        }
         if (offset >= 0x31000U && offset < 0x31004U)
             return static_cast<std::uint8_t>(m_dmaBase >> ((3U - (offset & 3U)) * 8U));
         if (offset >= 0x32000U && offset < 0x32004U)
@@ -465,9 +471,11 @@ void PowerMac8100Machine::writeMapped8(std::uint32_t address, std::uint8_t value
         flushDevices();
         const auto offset = address - amicBase;
         if (offset >= 0x10000U && offset < 0x10100U) {
+            ++m_diskActivityCounter;
             m_scsi.writeRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4), value); serviceScsiDma(); updateInterrupts(); break;
         }
         if (offset >= 0x11000U && offset < 0x11100U) {
+            ++m_diskActivityCounter;
             m_scsiB.writeRegister(static_cast<std::uint8_t>((offset & 0xffU) >> 4), value); serviceScsiDma(); updateInterrupts(); break;
         }
         if (offset >= 0x31000U && offset < 0x31004U) {
@@ -714,6 +722,7 @@ std::uint16_t PowerMac8100Machine::read16(std::uint32_t address)
     std::uint16_t value;
     if (isScsiPseudoDmaAddress(address)) {
         flushDevices();
+        ++m_diskActivityCounter;
         value = byteSwap16(isInternalScsiPseudoDmaAddress(address)
                 ? m_scsiB.readDmaWord() : m_scsi.readDmaWord());
         updateInterrupts();
@@ -741,6 +750,7 @@ std::uint32_t PowerMac8100Machine::read32(std::uint32_t address)
     } else if (isScsiPseudoDmaAddress(address)) {
         flushDevices();
         auto& controller = isInternalScsiPseudoDmaAddress(address) ? m_scsiB : m_scsi;
+        m_diskActivityCounter += 2;
         value = (static_cast<std::uint32_t>(byteSwap16(controller.readDmaWord())) << 16)
             | byteSwap16(controller.readDmaWord());
         updateInterrupts();
@@ -772,6 +782,7 @@ void PowerMac8100Machine::write16(std::uint32_t address, std::uint16_t value)
     const auto region = regionFor(address);
     if (isScsiPseudoDmaAddress(address)) {
         flushDevices();
+        ++m_diskActivityCounter;
         if (isInternalScsiPseudoDmaAddress(address)) m_scsiB.writeDmaWord(byteSwap16(value));
         else m_scsi.writeDmaWord(byteSwap16(value));
         updateInterrupts();
@@ -791,6 +802,7 @@ void PowerMac8100Machine::write32(std::uint32_t address, std::uint32_t value)
     if (isScsiPseudoDmaAddress(address)) {
         flushDevices();
         auto& controller = isInternalScsiPseudoDmaAddress(address) ? m_scsiB : m_scsi;
+        m_diskActivityCounter += 2;
         controller.writeDmaWord(byteSwap16(static_cast<std::uint16_t>(value >> 16)));
         controller.writeDmaWord(byteSwap16(static_cast<std::uint16_t>(value)));
         updateInterrupts();

@@ -55,6 +55,7 @@ public:
     [[nodiscard]] int stepInstruction() override;
     [[nodiscard]] std::uint64_t cycleCount() const override;
     [[nodiscard]] std::uint32_t programCounter() const override;
+    [[nodiscard]] std::uint64_t diskActivityCounter() const override;
     [[nodiscard]] bool overlayEnabled() const override;
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;

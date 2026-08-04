@@ -19,6 +19,7 @@ public:
         QString machineId;
         std::uint32_t programCounter = 0;
         std::uint64_t cycles = 0;
+        std::uint64_t diskActivityCounter = 0;
         bool overlayEnabled = false;
         bool romLoaded = false;
         bool paused = true;

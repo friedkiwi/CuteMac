@@ -223,10 +223,10 @@ EmulationSession::Status EmulationSession::status() const
 {
     std::lock_guard lock(m_mutex);
     if (!m_machine) {
-        return { m_configuration.machineId, 0, 0, false, false, true };
+        return { m_configuration.machineId, 0, 0, 0, false, false, true };
     }
     return { m_machine->machineId(), m_machine->programCounter(), m_machine->cycleCount(),
-        m_machine->overlayEnabled(), m_romLoaded, m_paused };
+        m_machine->diskActivityCounter(), m_machine->overlayEnabled(), m_romLoaded, m_paused };
 }
 
 QByteArray EmulationSession::framebufferBytes() const

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <QMainWindow>
 #include <QPointer>
 #include <QSet>
@@ -83,7 +85,10 @@ private:
     AudioOutput m_audioOutput;
     int m_audioPacingFrames = 0;
     DisplayWidget* m_display = nullptr;
-    QLabel* m_status = nullptr;
+    QLabel* m_profileStatus = nullptr;
+    QLabel* m_runStatus = nullptr;
+    QLabel* m_speedStatus = nullptr;
+    QLabel* m_diskActivityStatus = nullptr;
     QAction* m_realtimeSpeedAction = nullptr;
     QAction* m_unlimitedSpeedAction = nullptr;
     QAction* m_zoom1xAction = nullptr;
@@ -96,10 +101,13 @@ private:
     QTimer m_frameTimer;
     QToolBar* m_toolbar = nullptr;
     QAction* m_pauseAction = nullptr;
+    std::uint64_t m_lastDiskActivityCounter = 0;
+    int m_diskActivityFlashFrames = 0;
     bool m_romLoaded = false;
     bool m_paused = true;
     bool m_inputCaptured = false;
     bool m_zoomResizePending = false;
+    bool m_diskActivityCounterInitialized = false;
     quint64 m_frames = 0;
 };
 

@@ -101,6 +101,7 @@ public:
     [[nodiscard]] bool runUntilPc(std::uint32_t address, int maxCycles);
 
     [[nodiscard]] std::uint32_t programCounter() const override;
+    [[nodiscard]] std::uint64_t diskActivityCounter() const override;
     [[nodiscard]] cpu::m68k::M68kCpuCore::RegisterSnapshot cpuRegisters() const;
     [[nodiscard]] QString disassemble(std::uint32_t address) const override;
     [[nodiscard]] int disassembleBytes(std::uint32_t address) const override;
