@@ -14,11 +14,18 @@ jobs:
   build:
     runs-on: windows-2022
     # Qt, libslirp, and glib are built from source by vcpkg. A warm shared
-    # binary cache makes this quick; a cold one has to build Qt.
+    # binary cache makes this quick; a cold one has to build Qt, which can
+    # approach the six-hour ceiling GitHub imposes on a job. The cache is
+    # readwrite and each package uploads as it finishes, so a run that times
+    # out still leaves its work behind: re-run the workflow and it resumes
+    # from wherever the cache now covers.
     timeout-minutes: 360
 
     env:
       VCPKG_BINARY_SOURCES: "clear;http,http://buildcache.cyber.gent/ac/{sha},readwrite"
+      # Must match VCPKG_TARGET_TRIPLET in the windows-msvc-ci preset; the
+      # packaging step reads the installed tree by that name.
+      VCPKG_TRIPLET: x64-windows
 
     steps:
       - name: Check out source
@@ -29,6 +36,19 @@ jobs:
       - name: Bootstrap vendored vcpkg
         shell: pwsh
         run: ./third_party/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+
+      # Installing the manifest as its own step keeps the multi-hour cold-cache
+      # dependency build off the configure step, where CMake buffers vcpkg's
+      # output and the log only appears once it is over. The flags match what
+      # the toolchain file would pass, so the install below is a no-op.
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          ./third_party/vcpkg/vcpkg.exe install `
+            --triplet $env:VCPKG_TRIPLET `
+            --host-triplet $env:VCPKG_TRIPLET `
+            --x-manifest-root=. `
+            --x-install-root=build/vcpkg_installed
 
       - name: Configure
         shell: pwsh
@@ -70,7 +90,7 @@ jobs:
           # Qt now comes from the vcpkg manifest, so its tools live in the
           # per-build installed tree rather than on PATH. Let windeployqt
           # classify the binary itself instead of forcing --release.
-          $vcpkgInstalled = Join-Path $env:GITHUB_WORKSPACE "build/vcpkg_installed/x64-windows"
+          $vcpkgInstalled = Join-Path $env:GITHUB_WORKSPACE "build/vcpkg_installed/$env:VCPKG_TRIPLET"
           $windeployqt = Join-Path $vcpkgInstalled "tools/Qt6/bin/windeployqt.exe"
           if (-not (Test-Path $windeployqt)) {
             throw "windeployqt was not found at $windeployqt"
@@ -90,4 +110,18 @@ jobs:
           name: CuteMac-win64
           path: package/CuteMac-win64
           if-no-files-found: error
+          retention-days: 14
+
+      # A dependency that fails to build reports only a path to a log inside
+      # buildtrees, which is discarded with the runner. Collect them so a
+      # failed run is diagnosable without reproducing a multi-hour build.
+      - name: Upload vcpkg logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs
+          path: |
+            build/vcpkg-manifest-install.log
+            third_party/vcpkg/buildtrees/**/*.log
+          if-no-files-found: ignore
           retention-days: 14
