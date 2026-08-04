@@ -2,10 +2,13 @@
 #include <QActionGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QFocusEvent>
+#include <QFontMetrics>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QKeyEvent>
@@ -47,6 +50,14 @@
 #include "cutemac/ui/DiskImageWidgets.h"
 
 namespace {
+
+// Tolerance, in widget-local pixels, for recognizing the synthetic mouse-move
+// event that recenterMouse()'s own QCursor::setPos() call generates while a
+// relative-capture grab is active. mapToGlobal()/mapFromGlobal() can round
+// that warp to a pixel or two off-center under fractional display scaling;
+// requiring exact equality would occasionally misread the warp-back itself
+// as a large host mouse movement.
+constexpr int kRecenterTolerancePx = 2;
 
 bool sameIwmDevices(const QVector<cutemac::config::IwmDeviceConfiguration>& left,
     const QVector<cutemac::config::IwmDeviceConfiguration>& right)
@@ -164,6 +175,7 @@ public:
     {
         const auto image = cutemac::session::FramebufferRenderer::render(frame);
         if (!image.isNull()) m_image = image;
+        setCaptureEligible(frame.valid() && frame.grabbable);
         update();
     }
 
@@ -183,6 +195,41 @@ public:
     void setKeyCallback(std::function<void(int, bool)> callback)
     {
         m_keyCallback = std::move(callback);
+    }
+
+    // Controls whether a click on this output attempts relative capture at
+    // all. The machine/video layer owns the decision because it knows whether
+    // the displayed framebuffer receives absolute or relative guest pointer
+    // input.
+    void setCaptureEligible(bool eligible)
+    {
+        m_captureEligible = eligible;
+        if (!eligible) releaseMouseCapture();
+    }
+
+    // True while the guest is receiving relative deltas rather than absolute
+    // widget-mapped coordinates. Only ever true if capture was both eligible
+    // and the host platform actually granted the mouse grab.
+    [[nodiscard]] bool relativeMouseCapture() const { return m_mouseCaptured && m_relativeCapture; }
+
+    void releaseMouseCapture()
+    {
+        if (!m_mouseCaptured) {
+            releasePointerInput();
+            return;
+        }
+        if (m_relativeCapture && m_leftButtonPressed && m_mouseCallback) {
+            m_leftButtonPressed = false;
+            m_mouseCallback(0, 0, false);
+        }
+        m_mouseCaptured = false;
+        if (m_relativeCapture) {
+            m_relativeCapture = false;
+            m_warpPending = false;
+            if (mouseGrabber() == this) releaseMouse();
+        }
+        releasePointerInput();
+        update();
     }
 
     void releasePointerInput()
@@ -210,10 +257,27 @@ protected:
         if (!m_running) {
             painter.fillRect(target, QColor(255, 255, 255, 72));
         }
+        if (m_mouseCaptured) {
+            const auto text = QStringLiteral("Input captured - release with %1")
+                .arg(cutemac::session::HostInputMapper::releaseChordLabel());
+            QFont font = painter.font();
+            font.setBold(true);
+            painter.setFont(font);
+            const QFontMetrics metrics(font);
+            const QRect textBounds = metrics.boundingRect(text).adjusted(-10, -6, 10, 6);
+            const QRect overlay(target.left() + 12, target.top() + 12, textBounds.width(), textBounds.height());
+            painter.fillRect(overlay, QColor(0, 0, 0, 176));
+            painter.setPen(Qt::white);
+            painter.drawText(overlay, Qt::AlignCenter, text);
+        }
     }
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
+        if (m_mouseCaptured) {
+            sendMouseEvent(event);
+            return;
+        }
         updatePointerPresence(event->pos());
         if (!m_pointerInsideDisplay) return;
         sendMouseEvent(event);
@@ -222,10 +286,21 @@ protected:
     void mousePressEvent(QMouseEvent* event) override
     {
         setFocus(Qt::MouseFocusReason);
-        updatePointerPresence(event->pos());
-        if (!m_pointerInsideDisplay) {
+        if (!m_mouseCaptured && m_captureEligible && displayRect().contains(event->pos())) {
+            captureMouse();
+            if (!m_relativeCapture && m_mouseCallback) {
+                const auto point = macPointFor(event->pos());
+                m_mouseCallback(point.x(), point.y(), false);
+            }
             event->accept();
             return;
+        }
+        if (!m_mouseCaptured) {
+            updatePointerPresence(event->pos());
+            if (!m_pointerInsideDisplay) {
+                event->accept();
+                return;
+            }
         }
         if (event->button() == Qt::LeftButton) {
             m_leftButtonPressed = true;
@@ -235,11 +310,13 @@ protected:
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
-        updatePointerPresence(event->pos());
+        if (!m_mouseCaptured) {
+            updatePointerPresence(event->pos());
+        }
         if (event->button() == Qt::LeftButton) {
             m_leftButtonPressed = false;
         }
-        if (m_pointerInsideDisplay) sendMouseEvent(event);
+        if (m_mouseCaptured || m_pointerInsideDisplay) sendMouseEvent(event);
     }
 
     void mouseDoubleClickEvent(QMouseEvent* event) override
@@ -247,15 +324,22 @@ protected:
         // Qt sends the second press of a double-click as MouseButtonDblClick
         // instead of calling mousePressEvent(). Forward it so the guest sees
         // both complete clicks and can perform Finder's double-click action.
-        updatePointerPresence(event->pos());
-        if (m_pointerInsideDisplay && event->button() == Qt::LeftButton) {
+        if (!m_mouseCaptured) {
+            updatePointerPresence(event->pos());
+        }
+        if ((m_mouseCaptured || m_pointerInsideDisplay) && event->button() == Qt::LeftButton) {
             m_leftButtonPressed = true;
         }
-        if (m_pointerInsideDisplay) sendMouseEvent(event);
+        if (m_mouseCaptured || m_pointerInsideDisplay) sendMouseEvent(event);
     }
 
     void keyPressEvent(QKeyEvent* event) override
     {
+        if (m_mouseCaptured && cutemac::session::HostInputMapper::isReleaseChord(*event)) {
+            releaseMouseCapture();
+            event->accept();
+            return;
+        }
         sendKeyEvent(event, true);
     }
 
@@ -266,7 +350,11 @@ protected:
 
     void focusOutEvent(QFocusEvent* event) override
     {
-        releasePointerInput();
+        // A platform mouse grab can otherwise block input to every other
+        // window if focus moves away by some means other than the release
+        // chord (e.g. a host-level window switch), which would read as the
+        // whole desktop having become unresponsive.
+        releaseMouseCapture();
         if (m_keyCallback) {
             for (const auto keyCode : std::as_const(m_pressedMacKeys)) m_keyCallback(keyCode, false);
         }
@@ -276,11 +364,46 @@ protected:
 
     void leaveEvent(QEvent* event) override
     {
-        releasePointerInput();
+        if (!m_mouseCaptured) releasePointerInput();
         QWidget::leaveEvent(event);
     }
 
 private:
+    void captureMouse()
+    {
+        m_mouseCaptured = true;
+        setCursor(Qt::BlankCursor);
+        m_relativeCapture = supportsRelativeCapture();
+        if (m_relativeCapture) {
+            grabMouse();
+            // grabMouse() has no failure return; some platforms (Wayland
+            // compositors in particular) silently decline it. Checking who
+            // actually holds the grab afterward is what lets a declined grab
+            // fall back to absolute forwarding instead of behaving erratically.
+            m_relativeCapture = mouseGrabber() == this;
+        }
+        if (m_relativeCapture) {
+            recenterMouse();
+        }
+        update();
+    }
+
+    [[nodiscard]] bool supportsRelativeCapture() const
+    {
+#if defined(Q_OS_WASM)
+        return false;
+#else
+        return cutemac::session::HostInputMapper::supportsRelativeCapture(QGuiApplication::platformName());
+#endif
+    }
+
+    void recenterMouse()
+    {
+        m_mouseCenter = displayRect().center();
+        m_warpPending = true;
+        QCursor::setPos(mapToGlobal(m_mouseCenter));
+    }
+
     void updatePointerPresence(const QPoint& widgetPoint)
     {
         const bool inside = displayRect().contains(widgetPoint);
@@ -320,6 +443,30 @@ private:
     void sendMouseEvent(QMouseEvent* event)
     {
         if (!m_mouseCallback) {
+            return;
+        }
+        if (m_mouseCaptured && m_relativeCapture) {
+            // Swallow the one synthetic move generated by recenterMouse()'s own
+            // QCursor::setPos() call so it isn't misread as host mouse motion.
+            // A small tolerance (rather than exact-position equality) absorbs
+            // the sub-pixel drift mapToGlobal()/mapFromGlobal() can introduce
+            // under fractional display scaling; without it, an unswallowed
+            // warp-back event reads as a large spurious jump in the guest
+            // pointer every time the host cursor recenters.
+            if (event->type() == QEvent::MouseMove && m_warpPending) {
+                const auto driftFromCenter = event->pos() - m_mouseCenter;
+                if (qAbs(driftFromCenter.x()) <= kRecenterTolerancePx && qAbs(driftFromCenter.y()) <= kRecenterTolerancePx) {
+                    m_warpPending = false;
+                    return;
+                }
+            }
+            const auto delta = event->pos() - m_mouseCenter;
+            if (!delta.isNull()) {
+                m_mouseCallback(delta.x(), delta.y(), m_leftButtonPressed);
+                recenterMouse();
+            } else {
+                m_mouseCallback(0, 0, m_leftButtonPressed);
+            }
             return;
         }
         m_lastGuestPoint = macPointFor(event->pos());
@@ -414,8 +561,13 @@ private:
 
     bool m_running = false;
     double m_zoomFactor = 0.0;
+    bool m_captureEligible = false;
+    bool m_mouseCaptured = false;
+    bool m_relativeCapture = false;
+    bool m_warpPending = false;
     bool m_pointerInsideDisplay = false;
     bool m_leftButtonPressed = false;
+    QPoint m_mouseCenter;
     QPoint m_lastGuestPoint;
     QImage m_image;
     std::function<void(int, int, bool)> m_mouseCallback;
@@ -436,7 +588,11 @@ EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QSt
     setWindowTitle(QStringLiteral("CuteMac - %1").arg(m_configuration.profileName));
     m_display = new DisplayWidget;
     m_display->setMouseCallback([this](int x, int y, bool pressed) {
-        m_session.queueMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+        if (m_display->relativeMouseCapture()) {
+            m_session.queueMouseDelta(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+        } else {
+            m_session.queueMousePosition(static_cast<std::int16_t>(x), static_cast<std::int16_t>(y));
+        }
         if (pressed != m_mouseInputPressed) {
             m_mouseInputPressed = pressed;
             m_session.queueMouseButton(pressed);
@@ -566,6 +722,12 @@ void EmulatorWindow::buildMenus()
     m_zoomCustomAction->setActionGroup(zoomGroup);
     m_zoomCustomAction->setCheckable(true);
     connect(m_zoomCustomAction, &QAction::triggered, this, [this]() { setCustomZoom(); });
+
+    displayMenu->addSeparator();
+    // A no-op when capture isn't active (ineligible machine/adapter, or the
+    // grab was never acquired), so it's safe to always show this action.
+    const auto releaseInputText = QStringLiteral("Release Input\t") + cutemac::session::HostInputMapper::releaseChordLabel();
+    displayMenu->addAction(releaseInputText, this, [this]() { m_display->releaseMouseCapture(); });
 
     auto* mediaMenu = menuBar()->addMenu(QStringLiteral("Media"));
     if (!m_configuration.iwmDevices.isEmpty()) {
@@ -909,7 +1071,7 @@ void EmulatorWindow::updateSpeedActions()
 void EmulatorWindow::configureMachine()
 {
     const auto wasPaused = m_paused;
-    m_display->releasePointerInput();
+    m_display->releaseMouseCapture();
     setPaused(true);
 
     cutemac::ui::ConfigurationDialog dialog(m_configuration, this);

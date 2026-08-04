@@ -201,6 +201,7 @@ VideoFrame MacintoshIIVideoCard::videoFrame() const
         m_palette,
         mapping,
         {},
+        true,
     };
 }
 

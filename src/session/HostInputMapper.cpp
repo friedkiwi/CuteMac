@@ -1,8 +1,43 @@
 #include "cutemac/session/HostInputMapper.h"
 
 #include <QKeyEvent>
+#include <QtGlobal>
 
 namespace cutemac::session {
+
+bool HostInputMapper::supportsRelativeCapture(const QString& platformName)
+{
+#if defined(Q_OS_WASM)
+    Q_UNUSED(platformName);
+    return false;
+#else
+    return !platformName.startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
+#endif
+}
+
+QString HostInputMapper::releaseChordLabel()
+{
+#if defined(Q_OS_MACOS)
+    return QStringLiteral("Control+Option");
+#else
+    return QStringLiteral("Ctrl+Alt");
+#endif
+}
+
+bool HostInputMapper::isReleaseChord(const QKeyEvent& event)
+{
+#if defined(Q_OS_MACOS)
+    // Qt swaps Ctrl/Cmd's symbolic modifiers on macOS by default (no
+    // Qt::AA_MacDontSwapCtrlAndMeta is set anywhere in this project): the
+    // physical Control key is reported as Qt::MetaModifier, and the physical
+    // Option key is Qt::AltModifier. Checking Qt::ControlModifier here would
+    // fire on Command+Option instead of the Control+Option shown in the
+    // Display menu.
+    return (event.modifiers() & Qt::MetaModifier) != 0 && (event.modifiers() & Qt::AltModifier) != 0;
+#else
+    return (event.modifiers() & Qt::ControlModifier) != 0 && (event.modifiers() & Qt::AltModifier) != 0;
+#endif
+}
 
 int HostInputMapper::macKeyCode(const QKeyEvent& event)
 {

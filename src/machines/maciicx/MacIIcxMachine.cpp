@@ -631,6 +631,7 @@ void MacIIcxMachine::applyInput(const core::GuestInputEvent& event)
     switch (event.type) {
     case core::GuestInputEvent::Type::MouseDelta:
         m_adbTransceiver.moveMouse(static_cast<std::int16_t>(event.first), static_cast<std::int16_t>(event.second));
+        m_hostMousePositionValid = false;
         break;
     case core::GuestInputEvent::Type::MouseButton:
         m_adbTransceiver.setMouseButton(event.pressed);

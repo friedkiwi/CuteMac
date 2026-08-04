@@ -79,6 +79,8 @@ int main()
         "CuteMac video driver must return a page-zero offset for its non-f32BitMode declaration");
     ok &= expect(virtualCard.videoFrame().storage == PixelStorage::Indexed && virtualCard.videoFrame().bitsPerPixel == 1,
         "CuteMac video must reset to one-bit indexed mode");
+    ok &= expect(!virtualCard.videoFrame().grabbable,
+        "CuteMac video with integrated absolute pointer must not request host mouse grabbing");
     ok &= expect(virtualCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 1 }
             && virtualCard.videoFrame().colorTable[1] == 0xff000000U,
         "CuteMac one-bit mode must use logical CLUT entries");
@@ -184,6 +186,8 @@ int main()
     ok &= expect(virtualCard.declarationRom().contains(QByteArray::fromHex("31ea0004082831ea0002082a")),
         "CuteMac video slot VBL must copy absolute pointer coordinates into MTemp");
     CuteMacVideoCard relativeCard(640, 480, 8, 4, true, false);
+    ok &= expect(relativeCard.videoFrame().grabbable,
+        "CuteMac video without integrated absolute pointer must allow host mouse grabbing");
     relativeCard.setHostPointerPosition(100, 120);
     ok &= expect((relativeCard.read8(CuteMacVideoCard::guestServicesBase + 5) & 2) == 0
             && relativeCard.read8(CuteMacVideoCard::guestPointerBase) == 0,
@@ -198,6 +202,8 @@ int main()
             && acceleratedCard.read8(0x00f00000 + 0x20) == static_cast<std::uint8_t>(acceleratedCard.declarationRom()[0x20])
             && acceleratedCard.videoFrame().bitsPerPixel == 1,
         "accelerated adapter must carry a separate ROM-resident Toolbox hook");
+    ok &= expect(!acceleratedCard.videoFrame().grabbable,
+        "accelerated video with integrated absolute pointer must not request host mouse grabbing");
     acceleratedCard.write8(0x000e0000, 3);
     acceleratedCard.setHostPointerPosition(123, 234);
     ok &= expect(acceleratedCard.videoFrame().bitsPerPixel == 8
@@ -300,6 +306,8 @@ int main()
     ok &= expect(authenticCard.videoFrame().pixelToColorIndex == QVector<std::uint16_t> { 0, 128 }
             && authenticCard.videoFrame().colorTable[128] == 0xff000000U,
         "authentic one-bit boot mode must use TFB's high-bit CLUT mapping");
+    ok &= expect(authenticCard.videoFrame().grabbable,
+        "authentic video cards must allow host mouse grabbing for relative ADB movement");
     authenticCard.write8(0x20, 0xaa);
     ok &= expect(static_cast<unsigned char>(authenticCard.videoFrame().pixels[0]) == 0x55, "authentic card inverted VRAM mapping");
     authenticCard.write8(0x0008003c, 0xcf);

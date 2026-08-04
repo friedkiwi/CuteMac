@@ -30,6 +30,7 @@ struct VideoFrame {
     QVector<std::uint32_t> colorTable;
     QVector<std::uint16_t> pixelToColorIndex;
     ChannelLayout channels;
+    bool grabbable = false;
 
     [[nodiscard]] bool valid() const
     {

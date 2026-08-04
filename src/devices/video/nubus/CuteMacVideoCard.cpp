@@ -309,10 +309,10 @@ VideoFrame CuteMacVideoCard::videoFrame() const
             mapping[value] = static_cast<std::uint16_t>(value);
         }
         return { m_width, m_height, stride, PixelStorage::Indexed, m_depth, ByteOrder::BigEndian,
-            BitOrder::MostSignificantFirst, m_vram.left(required), m_palette, mapping, {} };
+            BitOrder::MostSignificantFirst, m_vram.left(required), m_palette, mapping, {}, !absolutePointerEnabled() };
     }
     return { m_width, m_height, stride, PixelStorage::Direct, m_depth, ByteOrder::BigEndian,
-        BitOrder::MostSignificantFirst, m_vram.left(required), {}, {}, channelLayout() };
+        BitOrder::MostSignificantFirst, m_vram.left(required), {}, {}, channelLayout(), !absolutePointerEnabled() };
 }
 
 int CuteMacVideoCard::strideBytes() const { return ((m_width * m_depth + 31) / 32) * 4; }
