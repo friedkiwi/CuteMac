@@ -52,6 +52,14 @@ cmake --build --preset windows-msvc-debug
 
 The presets point `VCPKG_BINARY_SOURCES` at the shared binary cache at `http://buildcache.cyber.gent/ac/{sha}`. With a warm cache, dependencies are downloaded rather than compiled; without it, the first configure builds Qt from source and takes a long time.
 
+To build against a different cache, pass its URL when configuring:
+
+```
+cmake -S . -B build -DCUTEMAC_BINARY_CACHE_URL=http://cache.example.lan:8080/
+```
+
+The URL is a template: `{sha}` is appended if you leave it out. A `VCPKG_BINARY_SOURCES` set in the environment takes precedence over this flag.
+
 The build produces `CuteMac`, the emulator application, plus `CuteMacDebugSession` for a readline debug console and headless Mac Plus/IIcx smoke tools.
 
 The Windows Win64 workflow is temporarily manual while Retro68 installation is added to CI. Its `CuteMac-win64` artifact is a portable folder containing the release executables and their Qt 6 runtime dependencies.

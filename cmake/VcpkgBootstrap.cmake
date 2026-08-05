@@ -18,9 +18,21 @@ endif()
 
 # Every dependency, Qt included, is a source build on a cache miss. Default to
 # the shared HTTP cache unless the environment already chose something.
+#
+# -DCUTEMAC_BINARY_CACHE_URL=<url> points the build at a different cache without
+# anyone having to spell out the whole VCPKG_BINARY_SOURCES grammar. The URL is
+# a template: it must contain {sha}, and one is appended if it does not.
+set(CUTEMAC_BINARY_CACHE_URL "http://buildcache.cyber.gent/ac/{sha}"
+    CACHE STRING "Base URL of the vcpkg HTTP binary cache ({sha} placeholder)")
+
+if(NOT CUTEMAC_BINARY_CACHE_URL MATCHES "{sha}")
+    string(REGEX REPLACE "/+$" "" CUTEMAC_BINARY_CACHE_URL "${CUTEMAC_BINARY_CACHE_URL}")
+    set(CUTEMAC_BINARY_CACHE_URL "${CUTEMAC_BINARY_CACHE_URL}/{sha}")
+endif()
+
 if(NOT DEFINED ENV{VCPKG_BINARY_SOURCES})
     set(ENV{VCPKG_BINARY_SOURCES}
-        "clear;http,http://buildcache.cyber.gent/ac/{sha},readwrite")
+        "clear;http,${CUTEMAC_BINARY_CACHE_URL},readwrite")
 endif()
 message(STATUS "CuteMac: VCPKG_BINARY_SOURCES=$ENV{VCPKG_BINARY_SOURCES}")
 
