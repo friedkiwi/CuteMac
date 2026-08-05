@@ -98,9 +98,21 @@ jobs:
       - name: Create short build path
         shell: pwsh
         run: |
-          # Map a short drive letter to the workspace to avoid long Windows paths
-          # GitHub actions workspace is typically D:\a\friedkiwi\CuteMac which is ~27 chars
-          # Adding build/ and vcpkg paths can exceed Windows path length limits
+          # cl.exe is not long-path aware and fails with C1083 on any output past
+          # MAX_PATH. Two independent shortenings guard against that:
+          #
+          #   1. subst V: for the workspace, so the build tree and vcpkg_installed
+          #      are reached through a two-character prefix.
+          #   2. A scratch root on the workspace drive for vcpkg's buildtrees and
+          #      packages. vcpkg canonicalises the paths it is given, so the subst
+          #      alone does not shorten them -- and Qt's object paths under
+          #      buildtrees are the ones that actually cross 260 characters.
+          # Not Join-Path: given a bare qualifier it can produce the
+          # drive-relative "D:cutemac-vcpkg" rather than "D:\cutemac-vcpkg".
+          $scratch = "$(Split-Path -Qualifier $env:GITHUB_WORKSPACE)\cutemac-vcpkg"
+          New-Item -ItemType Directory -Force -Path "$scratch\bt", "$scratch\pkg" | Out-Null
+          echo "CUTEMAC_VCPKG_SCRATCH=$scratch" >> $env:GITHUB_ENV
+
           subst V: $env:GITHUB_WORKSPACE
           # Export a shorter GITHUB_WORKSPACE for subsequent steps
           echo "GITHUB_WORKSPACE=V:\\" >> $env:GITHUB_ENV
@@ -109,6 +121,7 @@ jobs:
           # Verify the mapping worked
           Write-Output "Path mapping: V:\ -> $(subst list | Select-String 'V:')"
           Write-Output "GITHUB_WORKSPACE set to: V:\\"
+          Write-Output "vcpkg scratch root: $scratch"
 
       - name: Bootstrap vendored vcpkg
         shell: pwsh
@@ -128,7 +141,9 @@ jobs:
             --triplet $env:VCPKG_TRIPLET `
             --host-triplet $env:VCPKG_TRIPLET `
             --x-manifest-root=. `
-            --x-install-root=build/vcpkg_installed 2>&1 | Tee-Object -FilePath build/vcpkg-install.log
+            --x-install-root=build/vcpkg_installed `
+            --x-buildtrees-root=$env:CUTEMAC_VCPKG_SCRATCH/bt `
+            --x-packages-root=$env:CUTEMAC_VCPKG_SCRATCH/pkg 2>&1 | Tee-Object -FilePath build/vcpkg-install.log
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -215,14 +230,34 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          Set-Location $env:GITHUB_WORKSPACE
-          Get-ChildItem third_party/vcpkg/buildtrees -Recurse -Force -ErrorAction SilentlyContinue |
+          Get-ChildItem "$env:CUTEMAC_VCPKG_SCRATCH\bt" -Recurse -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '\\fuzzing($|\\)' } |
             ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
       # A dependency that fails to build reports only a path to a log inside
       # buildtrees, which is discarded with the runner. Collect them so a
       # failed run is diagnosable without reproducing a multi-hour build.
+      # buildtrees now lives outside the workspace, and upload-artifact only
+      # takes workspace-relative paths, so stage the logs first.
+      - name: Collect vcpkg logs
+        if: failure()
+        shell: pwsh
+        run: |
+          Set-Location $env:GITHUB_WORKSPACE
+          New-Item -ItemType Directory -Force -Path vcpkg-logs | Out-Null
+          $bt = "$env:CUTEMAC_VCPKG_SCRATCH\bt"
+          if (Test-Path $bt) {
+            Get-ChildItem $bt -Recurse -Filter *.log -ErrorAction SilentlyContinue |
+              # CMakeConfigureLog.yaml.log alone runs to ~130 MB per config and
+              # says nothing about a compile failure.
+              Where-Object { $_.Length -lt 20MB } |
+              ForEach-Object {
+                # Flatten <package>/<log>.log so names stay unique and short.
+                $relative = $_.FullName.Substring($bt.Length).TrimStart('\', '/').Replace('\', '_').Replace('/', '_')
+                Copy-Item $_.FullName -Destination "vcpkg-logs/$relative" -Force -ErrorAction SilentlyContinue
+              }
+          }
+
       - name: Upload vcpkg logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -230,7 +265,7 @@ jobs:
           name: vcpkg-logs
           path: |
             build/vcpkg-manifest-install.log
-            third_party/vcpkg/buildtrees/**/*.log
+            vcpkg-logs/
           if-no-files-found: ignore
           retention-days: 14
 

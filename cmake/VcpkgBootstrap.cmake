@@ -44,6 +44,44 @@ if(NOT EXISTS "${CUTEMAC_VCPKG_EXE}")
     endif()
 endif()
 
+# MSVC's cl.exe is not long-path aware: it reports
+#     fatal error C1083: Cannot open compiler generated file: '': Invalid argument
+# for any output past MAX_PATH (260), regardless of the LongPathsEnabled policy.
+# vcpkg builds under third_party/vcpkg/buildtrees, and Qt's own object paths are
+# long enough that a checkout in a normal user directory crosses the limit --
+# qtdeclarative's QQmlNativeDebugConnectorFactoryPlugin object lands at 262
+# characters. Give vcpkg a short scratch root instead of hoping the checkout is
+# shallow. Only the intermediate trees move; downloads, the binary cache, and
+# the installed tree stay where they are.
+if(CMAKE_HOST_WIN32)
+    if(DEFINED ENV{CUTEMAC_VCPKG_SCRATCH})
+        file(TO_CMAKE_PATH "$ENV{CUTEMAC_VCPKG_SCRATCH}" CUTEMAC_VCPKG_SCRATCH)
+    else()
+        string(REGEX MATCH "^[A-Za-z]:" CUTEMAC_VCPKG_DRIVE "${CMAKE_CURRENT_SOURCE_DIR}")
+        if(NOT CUTEMAC_VCPKG_DRIVE)
+            set(CUTEMAC_VCPKG_DRIVE "C:")
+        endif()
+        set(CUTEMAC_VCPKG_SCRATCH "${CUTEMAC_VCPKG_DRIVE}/cutemac-vcpkg")
+    endif()
+
+    file(MAKE_DIRECTORY "${CUTEMAC_VCPKG_SCRATCH}/bt" "${CUTEMAC_VCPKG_SCRATCH}/pkg")
+    if(NOT IS_DIRECTORY "${CUTEMAC_VCPKG_SCRATCH}/bt")
+        message(FATAL_ERROR
+            "CuteMac: could not create the vcpkg scratch root at ${CUTEMAC_VCPKG_SCRATCH}. "
+            "Set CUTEMAC_VCPKG_SCRATCH to a short writable path such as C:/cutemac-vcpkg.")
+    endif()
+
+    # Appending unconditionally would duplicate the flags on every reconfigure.
+    if(NOT VCPKG_INSTALL_OPTIONS MATCHES "x-buildtrees-root")
+        list(APPEND VCPKG_INSTALL_OPTIONS
+            "--x-buildtrees-root=${CUTEMAC_VCPKG_SCRATCH}/bt"
+            "--x-packages-root=${CUTEMAC_VCPKG_SCRATCH}/pkg")
+        set(VCPKG_INSTALL_OPTIONS "${VCPKG_INSTALL_OPTIONS}"
+            CACHE STRING "Additional install options to pass to vcpkg" FORCE)
+    endif()
+    message(STATUS "CuteMac: vcpkg scratch root=${CUTEMAC_VCPKG_SCRATCH} (MSVC MAX_PATH)")
+endif()
+
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CUTEMAC_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
         CACHE STRING "Vendored vcpkg toolchain")
