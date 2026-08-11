@@ -18,6 +18,7 @@
 
 #include "cutemac/rom/RomCatalog.h"
 #include "cutemac/session/SessionWindowManager.h"
+#include "cutemac/session/WindowMenu.h"
 #include "cutemac/ui/ConfigurationDialog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
 #include "cutemac/ui/RomManagerDialog.h"
@@ -142,6 +143,8 @@ void ProfileManagerWindow::buildUi()
     toolsMenu->addAction(QStringLiteral("Open Disk Image Folder"), this, []() {
         QDesktopServices::openUrl(QUrl::fromLocalFile(config::ConfigurationManager::diskImageDirectoryPath()));
     });
+
+    session::WindowMenu::install(this);
 
     connect(m_startButton, &QPushButton::clicked, this, [this]() { startSelectedProfile(); });
     connect(newButton, &QPushButton::clicked, this, [this]() { createProfile(); });

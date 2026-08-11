@@ -57,6 +57,7 @@
 #include "cutemac/session/FramebufferRenderer.h"
 #include "cutemac/session/HostInputMapper.h"
 #include "cutemac/session/HostRelativeMouseCapture.h"
+#include "cutemac/session/WindowMenu.h"
 #if defined(CUTEMAC_ENABLE_SESSION_CONTROL)
 #include "cutemac/session/SessionControlServer.h"
 #endif
@@ -906,6 +907,7 @@ void EmulatorWindow::buildMenus()
         }
     }
 
+    WindowMenu::install(this);
 }
 
 QAction* EmulatorWindow::addZoomAction(QMenu* menu, QActionGroup* group, const QString& text, double factor)

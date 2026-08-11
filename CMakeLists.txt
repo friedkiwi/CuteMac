@@ -308,6 +308,7 @@ add_library(CuteMacFrontend
     src/session/FramebufferRenderer.cpp
     src/session/AudioOutput.cpp
     src/session/HostInputMapper.cpp
+    src/session/WindowMenu.cpp
     src/ui/ProfileManagerWindow.cpp
 )
 
