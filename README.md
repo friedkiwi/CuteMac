@@ -15,6 +15,8 @@ The repository is currently early emulator bringup work:
 
 The M68k CPU core starts from Musashi-derived source maintained directly in the CuteMac tree.
 
+`HARDWARE_SUPPORT.md` maps the project's long-term scope — every pre-PCI Macintosh, its required and optional peripherals, and all pre-Mac OS X system software — against what CuteMac currently implements, with a traffic-light status for each entry.
+
 ## Build
 
 Every third-party dependency, Qt included, comes from the [vcpkg](https://vcpkg.io) manifest in `vcpkg.json`, resolved through the vcpkg vendored at `third_party/vcpkg`. There are no system Qt or library packages to install.
