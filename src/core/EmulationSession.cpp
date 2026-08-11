@@ -10,6 +10,7 @@
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/network/nubus/AppleNuBusEthernetCard.h"
+#include "cutemac/devices/network/PcapEthernetBackend.h"
 #include "cutemac/devices/network/SlirpEthernetBackend.h"
 #include "cutemac/devices/video/nubus/AppleDisplayCard.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
@@ -70,10 +71,18 @@ QString ethernetMacAddress(const config::NuBusDeviceConfiguration& device)
 std::unique_ptr<devices::network::PacketNetworkBackend> makeNetworkBackend(
     const config::NuBusDeviceConfiguration& device)
 {
-    if (device.networkBackend != config::NetworkBackendType::Slirp || !config::slirpNetworkingAvailable()) return {};
-    devices::network::SlirpEthernetConfiguration slirp;
-    slirp.dhcpEnabled = true;
-    return std::make_unique<devices::network::SlirpEthernetBackend>(std::move(slirp));
+    if (!config::networkBackendAvailability(device.networkBackend).available) return {};
+    if (device.networkBackend == config::NetworkBackendType::Slirp) {
+        devices::network::SlirpEthernetConfiguration slirp;
+        slirp.dhcpEnabled = true;
+        return std::make_unique<devices::network::SlirpEthernetBackend>(std::move(slirp));
+    }
+    if (device.networkBackend == config::NetworkBackendType::Pcap) {
+        devices::network::PcapEthernetConfiguration pcap;
+        pcap.interfaceName = device.networkInterface.trimmed();
+        return std::make_unique<devices::network::PcapEthernetBackend>(std::move(pcap));
+    }
+    return {};
 }
 
 template<typename Machine>

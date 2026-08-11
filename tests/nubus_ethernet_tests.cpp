@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#include <array>
 #include <deque>
 #include <iostream>
 #include <optional>
@@ -22,7 +23,11 @@ bool expect(bool condition, const char* message)
 class FakeBackend final : public cutemac::devices::network::PacketNetworkBackend {
 public:
     void poll() override { ++polls; }
-    void transmitFrame(const QByteArray& frame) override { transmitted.push_back(frame); }
+    bool transmitFrame(const QByteArray& frame) override
+    {
+        transmitted.push_back(frame);
+        return connectedValue;
+    }
     std::optional<QByteArray> receiveFrame() override
     {
         if (received.empty()) return std::nullopt;
@@ -36,8 +41,17 @@ public:
         received.clear();
     }
     bool connected() const override { return connectedValue; }
+    void setStationAddress(const std::array<std::uint8_t, 6>& mac) override
+    {
+        stationAddress = mac;
+        ++stationAddressUpdates;
+    }
+    void setPromiscuous(bool enabled) override { promiscuous = enabled; }
 
     bool connectedValue = true;
+    std::array<std::uint8_t, 6> stationAddress {};
+    int stationAddressUpdates = 0;
+    bool promiscuous = false;
     int polls = 0;
     QVector<QByteArray> transmitted;
     std::deque<QByteArray> received;
@@ -134,6 +148,27 @@ int main()
             && card.packetRamByte(0x4100) == 0x21
             && card.packetRamByte(0x4104) == 0xff,
         "Apple Ethernet DP8390 receive must ring-buffer backend frames");
+
+    // The host-side backend can only filter for the guest if the card forwards
+    // what the driver programmed into PAR and RCR.
+    ok &= expect(backendPtr->stationAddress
+            == std::array<std::uint8_t, 6> { 0x02, 0x00, 0x1b, 0x00, 0x00, 0x09 },
+        "the card must publish its configured MAC address to the backend on reset");
+
+    card.write8(regAddress(0x00), 0x62);
+    const std::array<std::uint8_t, 6> programmedMac { 0x08, 0x00, 0x07, 0x11, 0x22, 0x33 };
+    for (std::uint8_t index = 0; index < 6; ++index) {
+        card.write8(regAddress(static_cast<std::uint8_t>(0x01 + index)), programmedMac[index]);
+    }
+    card.write8(regAddress(0x00), 0x22);
+    ok &= expect(backendPtr->stationAddress == programmedMac,
+        "PAR writes must reach the backend so it can filter for the guest");
+
+    ok &= expect(!backendPtr->promiscuous, "a card filtering by address must not ask for promiscuous capture");
+    card.write8(regAddress(0x0c), 0x14);
+    ok &= expect(backendPtr->promiscuous, "RCR promiscuous mode must reach the backend");
+    card.write8(regAddress(0x0c), 0x04);
+    ok &= expect(!backendPtr->promiscuous, "leaving promiscuous mode must reach the backend");
 
     cutemac::devices::nubus::NuBusBus bus;
     auto first = std::make_shared<AppleNuBusEthernetCard>();

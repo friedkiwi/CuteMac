@@ -1,0 +1,8 @@
+{
+  "name": "npcap-sdk",
+  "version": "1.15",
+  "description": "Npcap SDK: pcap headers and wpcap/Packet import libraries for Windows",
+  "homepage": "https://npcap.com",
+  "license": null,
+  "supports": "windows & !uwp"
+}

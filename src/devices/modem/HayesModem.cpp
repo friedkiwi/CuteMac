@@ -281,7 +281,7 @@ public:
         std::memcpy(out + 6, m_remoteMac.data(), 6);
         writeBe16(out + 12, ethertypeIpv4);
         std::memcpy(out + ethernetHeaderSize, packet.constData(), static_cast<std::size_t>(packet.size()));
-        m_backend->transmitFrame(frame);
+        (void)m_backend->transmitFrame(frame);
         drainBackend(receiveIpPacket);
     }
 
@@ -371,7 +371,7 @@ private:
         std::memcpy(out + 28, m_remoteIp.data(), 4);
         std::memcpy(out + 32, m_localMac.data(), 6);
         std::memcpy(out + 38, m_localIp.data(), 4);
-        m_backend->transmitFrame(reply);
+        (void)m_backend->transmitFrame(reply);
     }
 
     config::SerialSlipConfiguration m_configuration;

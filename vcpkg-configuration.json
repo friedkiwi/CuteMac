@@ -1,0 +1,6 @@
+{
+  "$comment": "Overlay ports live in the repository, never in the pinned third_party/vcpkg submodule.",
+  "overlay-ports": [
+    "./cmake/vcpkg-ports"
+  ]
+}

@@ -217,6 +217,16 @@ jobs:
             Get-ChildItem $vcpkgBin -Filter *.dll | Copy-Item -Destination $package -Force
           }
 
+          # Npcap is not open source and may not be redistributed without a
+          # licence from the Nmap Project. CuteMac delay-loads the copy the user
+          # installed, so its runtime must never reach an artifact; the npcap-sdk
+          # port installs import libraries only, and this check keeps it that way.
+          $npcapRuntime = Get-ChildItem $package -Filter *.dll |
+            Where-Object { $_.Name -in @('wpcap.dll', 'Packet.dll', 'npcap.dll', 'NPFInstall.exe') }
+          if ($npcapRuntime) {
+            throw "Npcap runtime must never be redistributed: $($npcapRuntime.Name -join ', ')"
+          }
+
       - name: Upload portable Win64 package
         uses: actions/upload-artifact@v4
         with:

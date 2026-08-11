@@ -26,10 +26,11 @@ public:
     SlirpEthernetBackend& operator=(const SlirpEthernetBackend&) = delete;
 
     void poll() override;
-    void transmitFrame(const QByteArray& frame) override;
+    [[nodiscard]] bool transmitFrame(const QByteArray& frame) override;
     [[nodiscard]] std::optional<QByteArray> receiveFrame() override;
     void close() override;
     [[nodiscard]] bool connected() const override;
+    [[nodiscard]] QString statusDetail() const override;
 
 private:
     class Impl;

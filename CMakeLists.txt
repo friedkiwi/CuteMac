@@ -30,16 +30,24 @@ find_package(tomlplusplus CONFIG REQUIRED)
 find_package(Readline)
 
 option(CUTEMAC_ENABLE_SLIRP "Build SLIP/PPP guest networking through libslirp" ON)
+option(CUTEMAC_ENABLE_PCAP "Build bridged guest networking through libpcap/Npcap" ON)
 
 if(EMSCRIPTEN AND CUTEMAC_ENABLE_SLIRP)
     message(STATUS "CuteMac: libslirp networking disabled; browsers have no raw sockets")
     set(CUTEMAC_ENABLE_SLIRP OFF CACHE BOOL "" FORCE)
 endif()
 
-if(CUTEMAC_ENABLE_SLIRP)
-    # libslirp installs pkg-config metadata rather than a CMake package config,
-    # and the vcpkg toolchain does not put pkg-config on PATH. The manifest
-    # therefore provides pkgconf as a host tool; prefer it over any system copy.
+if(EMSCRIPTEN AND CUTEMAC_ENABLE_PCAP)
+    message(STATUS "CuteMac: bridged networking disabled; browsers have no raw sockets")
+    set(CUTEMAC_ENABLE_PCAP OFF CACHE BOOL "" FORCE)
+endif()
+
+# libslirp and libpcap install pkg-config metadata rather than a CMake package
+# config, and the vcpkg toolchain does not put pkg-config on PATH. Windows takes
+# neither path: there libpcap is replaced by the Npcap SDK, which has no
+# pkg-config metadata at all.
+if(CUTEMAC_ENABLE_SLIRP OR (CUTEMAC_ENABLE_PCAP AND NOT WIN32))
+    # The manifest provides pkgconf as a host tool; prefer it over any system copy.
     if(DEFINED VCPKG_INSTALLED_DIR)
         find_program(PKG_CONFIG_EXECUTABLE
             NAMES pkgconf pkg-config
@@ -69,10 +77,28 @@ if(CUTEMAC_ENABLE_SLIRP)
     endif()
 
     find_package(PkgConfig REQUIRED)
+endif()
+
+if(CUTEMAC_ENABLE_SLIRP)
     pkg_check_modules(CUTEMAC_LIBSLIRP REQUIRED IMPORTED_TARGET slirp)
     message(STATUS "CuteMac: SLIP/PPP networking enabled (libslirp ${CUTEMAC_LIBSLIRP_VERSION})")
 else()
     message(STATUS "CuteMac: SLIP/PPP networking disabled; modem SLIP and PPP targets report NO CARRIER")
+endif()
+
+# Bridged networking. Windows builds against the Npcap SDK, which supplies the
+# headers and the wpcap import library; the DLL itself belongs to the user's own
+# Npcap installation and is delay-loaded, never redistributed. Everywhere else
+# libpcap comes from vcpkg with pkg-config metadata, as libslirp does.
+if(CUTEMAC_ENABLE_PCAP AND WIN32)
+    find_path(CUTEMAC_NPCAP_INCLUDE_DIR NAMES pcap.h REQUIRED)
+    find_library(CUTEMAC_NPCAP_WPCAP_LIBRARY NAMES wpcap REQUIRED)
+    message(STATUS "CuteMac: bridged networking enabled (Npcap SDK, wpcap.dll delay-loaded)")
+elseif(CUTEMAC_ENABLE_PCAP)
+    pkg_check_modules(CUTEMAC_LIBPCAP REQUIRED IMPORTED_TARGET libpcap)
+    message(STATUS "CuteMac: bridged networking enabled (libpcap ${CUTEMAC_LIBPCAP_VERSION})")
+else()
+    message(STATUS "CuteMac: bridged networking disabled; the pcap backend reports why it is idle")
 endif()
 
 qt_standard_project_setup()
@@ -144,6 +170,7 @@ add_library(CuteMacCore
     "${CUTEMAC_VIDEO_DRIVER_HEADER}"
     "${CUTEMAC_ACCEL_VIDEO_HEADER}"
     src/config/Configuration.cpp
+    src/config/NetworkBackends.cpp
     src/config/ProfileResolver.cpp
     src/core/EmulationSession.cpp
     src/core/MachineScheduler.cpp
@@ -164,7 +191,10 @@ add_library(CuteMacCore
     src/devices/modem/HayesModem.cpp
     src/devices/modem/NullModem.cpp
     src/devices/network/nubus/AppleNuBusEthernetCard.cpp
+    src/devices/network/PcapEthernetBackend.cpp
     src/devices/network/SlirpEthernetBackend.cpp
+    src/devices/network/pcap/CaptureInterfaces.cpp
+    src/devices/network/pcap/PcapRuntime.cpp
     src/devices/printer/ImageWriterII.cpp
     src/devices/nubus/NuBusBus.cpp
     src/devices/rtc/MacRtc.cpp
@@ -227,6 +257,23 @@ if(CUTEMAC_ENABLE_SLIRP)
     target_link_libraries(CuteMacCore PRIVATE PkgConfig::CUTEMAC_LIBSLIRP)
 else()
     target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_LIBSLIRP=0)
+endif()
+
+if(CUTEMAC_ENABLE_PCAP)
+    target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_PCAP=1)
+    if(WIN32)
+        target_include_directories(CuteMacCore PRIVATE "${CUTEMAC_NPCAP_INCLUDE_DIR}")
+        target_link_libraries(CuteMacCore PRIVATE "${CUTEMAC_NPCAP_WPCAP_LIBRARY}")
+        # CuteMacCore is a static library, so the delay-load directive has to
+        # reach every executable that links it. A load-time import would make
+        # CuteMac.exe refuse to start on any machine without Npcap installed.
+        target_link_libraries(CuteMacCore INTERFACE delayimp)
+        target_link_options(CuteMacCore INTERFACE "/DELAYLOAD:wpcap.dll")
+    else()
+        target_link_libraries(CuteMacCore PRIVATE PkgConfig::CUTEMAC_LIBPCAP)
+    endif()
+else()
+    target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_PCAP=0)
 endif()
 
 add_library(CuteMacWidgets
@@ -418,6 +465,9 @@ target_link_libraries(CuteMacPowerMac8100Smoke PRIVATE CuteMacCore)
 add_executable(CuteMacWrapHfsScsi tools/wrap_hfs_scsi.cpp)
 target_link_libraries(CuteMacWrapHfsScsi PRIVATE Qt6::Core)
 
+add_executable(CuteMacPcapInterfaces tools/pcap_interfaces.cpp)
+target_link_libraries(CuteMacPcapInterfaces PRIVATE CuteMacCore Qt6::Core)
+
 if(Readline_FOUND AND NOT EMSCRIPTEN)
     add_executable(CuteMacDebugSession
         src/debug/main.cpp
@@ -506,6 +556,10 @@ if(BUILD_TESTING)
     add_executable(CuteMacScsiBlockDeviceTests tests/scsi_block_device_tests.cpp)
     target_link_libraries(CuteMacScsiBlockDeviceTests PRIVATE CuteMacCore)
     add_test(NAME scsi-block-device COMMAND CuteMacScsiBlockDeviceTests)
+
+    add_executable(CuteMacPcapBackendTests tests/pcap_backend_tests.cpp)
+    target_link_libraries(CuteMacPcapBackendTests PRIVATE CuteMacCore Qt6::Core)
+    add_test(NAME pcap-backend COMMAND CuteMacPcapBackendTests)
 
     add_executable(CuteMacSccTests tests/scc_tests.cpp)
     target_link_libraries(CuteMacSccTests PRIVATE CuteMacCore Qt6::Core)

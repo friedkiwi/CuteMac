@@ -6,6 +6,8 @@
 #include <QVector>
 #include <optional>
 
+#include "cutemac/config/NetworkBackends.h"
+
 namespace cutemac::config {
 
 enum class RuntimeSpeed {
@@ -24,11 +26,6 @@ enum class NuBusDeviceType {
     AppleNuBusEthernet,
     CuteMacVideo,
     CuteMacVideoAccelerated,
-};
-
-enum class NetworkBackendType {
-    None,
-    Slirp,
 };
 
 enum class MacMonitorType {
@@ -75,10 +72,13 @@ struct NuBusDeviceConfiguration {
     MacMonitorType monitor = MacMonitorType::HiResRgb;
     NetworkBackendType networkBackend = NetworkBackendType::None;
     QString macAddress;
+    // Host capture device for the bridged backend, in the backend's own naming
+    // ("en0", "\\Device\\NPF_{GUID}"). Profiles travel between machines, so an
+    // interface that is absent here is a runtime condition, not a config error.
+    QString networkInterface;
 };
 
 [[nodiscard]] bool isCuteMacVideoDevice(NuBusDeviceType type);
-[[nodiscard]] bool slirpNetworkingAvailable();
 [[nodiscard]] int cuteMacVideoFramebufferLimitBytes();
 [[nodiscard]] int framebufferStrideBytes(int width, int depth);
 [[nodiscard]] bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device);

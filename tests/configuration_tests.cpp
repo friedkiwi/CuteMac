@@ -38,10 +38,10 @@ int main()
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8192, true, true });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false });
     configuration.nubusDevices.append({ 12, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb16Inch });
-    const auto ethernetBackend = cutemac::config::slirpNetworkingAvailable()
+    const auto ethernetBackend = cutemac::config::networkBackendSupported(cutemac::config::NetworkBackendType::Slirp)
         ? cutemac::config::NetworkBackendType::Slirp
         : cutemac::config::NetworkBackendType::None;
-    configuration.nubusDevices.append({ 13, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, ethernetBackend, QStringLiteral("02:00:1b:00:00:0d") });
+    configuration.nubusDevices.append({ 13, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, ethernetBackend, QStringLiteral("02:00:1b:00:00:0d"), QStringLiteral("en0") });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     cutemac::config::SerialDeviceConfiguration modem;
     modem.channel = 0;
@@ -84,7 +84,8 @@ int main()
                 && loaded->nubusDevices[3].monitor == cutemac::config::MacMonitorType::Rgb16Inch
                 && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::AppleNuBusEthernet
                 && loaded->nubusDevices.last().networkBackend == ethernetBackend
-                && loaded->nubusDevices.last().macAddress == QStringLiteral("02:00:1b:00:00:0d"),
+                && loaded->nubusDevices.last().macAddress == QStringLiteral("02:00:1b:00:00:0d")
+                && loaded->nubusDevices.last().networkInterface == QStringLiteral("en0"),
             "NuBus devices did not round-trip");
         ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
                 && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
@@ -182,8 +183,23 @@ int main()
                      { 9, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, cutemac::config::NetworkBackendType::None })
             && cutemac::config::isValidNuBusDeviceConfiguration(
                 { 9, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, cutemac::config::NetworkBackendType::Slirp })
-                == cutemac::config::slirpNetworkingAvailable(),
+                == cutemac::config::networkBackendSupported(cutemac::config::NetworkBackendType::Slirp),
         "Apple NuBus Ethernet backend choices must be gated by compiled networking support");
+    ok &= expect(!cutemac::config::isValidNuBusDeviceConfiguration(
+                     { 9, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true,
+                         cutemac::config::MacMonitorType::HiResRgb, cutemac::config::NetworkBackendType::Pcap, {}, {} })
+            || !cutemac::config::networkBackendSupported(cutemac::config::NetworkBackendType::Pcap),
+        "the bridged backend must require a named host interface");
+    ok &= expect(cutemac::config::networkBackendFromName(QStringLiteral("pcap"))
+                == cutemac::config::NetworkBackendType::Pcap
+            && cutemac::config::networkBackendName(cutemac::config::NetworkBackendType::Pcap)
+                == QStringLiteral("pcap"),
+        "network backend names must round-trip through the registry");
+    for (const auto& descriptor : cutemac::config::networkBackendDescriptors()) {
+        const auto availability = cutemac::config::networkBackendAvailability(descriptor.type);
+        ok &= expect(availability.available == availability.reason.isEmpty(),
+            "an unavailable network backend must explain itself");
+    }
 
     auto invalidConfiguration = configuration;
     invalidConfiguration.ramSizeKiB = 3072;

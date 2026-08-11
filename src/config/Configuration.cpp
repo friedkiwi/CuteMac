@@ -71,21 +71,6 @@ MacMonitorType monitorFromName(const QString& name)
     return MacMonitorType::HiResRgb;
 }
 
-QString networkBackendName(NetworkBackendType backend)
-{
-    switch (backend) {
-    case NetworkBackendType::Slirp: return QStringLiteral("slirp");
-    case NetworkBackendType::None:
-    default:
-        return QStringLiteral("none");
-    }
-}
-
-NetworkBackendType networkBackendFromName(const QString& name)
-{
-    return name == QStringLiteral("slirp") ? NetworkBackendType::Slirp : NetworkBackendType::None;
-}
-
 bool isAppleDisplayCard824Monitor(MacMonitorType monitor)
 {
     switch (monitor) {
@@ -147,11 +132,6 @@ bool isCuteMacVideoDevice(NuBusDeviceType type)
     return type == NuBusDeviceType::CuteMacVideo || type == NuBusDeviceType::CuteMacVideoAccelerated;
 }
 
-bool slirpNetworkingAvailable()
-{
-    return CUTEMAC_HAS_LIBSLIRP != 0;
-}
-
 int cuteMacVideoFramebufferLimitBytes()
 {
     return 0x000e0000;
@@ -171,8 +151,11 @@ bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
             && isAppleDisplayCard824Monitor(device.monitor);
     }
     if (device.type == NuBusDeviceType::AppleNuBusEthernet) {
-        return device.networkBackend == NetworkBackendType::None
-            || (device.networkBackend == NetworkBackendType::Slirp && slirpNetworkingAvailable());
+        if (!networkBackendSupported(device.networkBackend)) return false;
+        // The interface only has to be named, not present: the profile may have
+        // been written on another machine.
+        return !networkBackendDescriptor(device.networkBackend).requiresInterface
+            || !device.networkInterface.trimmed().isEmpty();
     }
     if (!isCuteMacVideoDevice(device.type)) return false;
     if (device.width < 320 || device.height < 200) return false;
@@ -393,6 +376,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                         monitorFromName(fromTomlString((*device)["monitor"].value_or<std::string>("hi_res_rgb"))),
                         networkBackendFromName(fromTomlString((*device)["network_backend"].value_or<std::string>("none"))),
                         fromTomlString((*device)["mac_address"].value_or<std::string>("")),
+                        fromTomlString((*device)["network_interface"].value_or<std::string>("")),
                     });
                 }
             }
@@ -518,6 +502,9 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
             nubusDevice.insert("network_backend", toTomlString(networkBackendName(device.networkBackend)));
             if (!device.macAddress.trimmed().isEmpty()) {
                 nubusDevice.insert("mac_address", toTomlString(device.macAddress.trimmed()));
+            }
+            if (!device.networkInterface.trimmed().isEmpty()) {
+                nubusDevice.insert("network_interface", toTomlString(device.networkInterface.trimmed()));
             }
         }
         nubusDevices.push_back(std::move(nubusDevice));

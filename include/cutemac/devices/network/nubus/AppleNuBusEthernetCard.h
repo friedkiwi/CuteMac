@@ -46,6 +46,7 @@ private:
     void writeRegisterByte(std::uint32_t local, std::uint8_t value);
     void writeRegisterWord(std::uint32_t local, std::uint16_t value);
     [[nodiscard]] bool transmitFrame(const QByteArray& frame);
+    void publishStationFilter();
     [[nodiscard]] std::array<std::uint8_t, 6> macAddressBytes() const;
 
     QString m_macAddress;

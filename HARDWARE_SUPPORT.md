@@ -288,7 +288,7 @@ least one video card to be usable.
 | Apple Two-Page Monochrome / Portrait Video Card | II family | 🔴 TODO | |
 | **CuteMac Video** (project-owned, non-historical) | Any NuBus machine | 🟢 Good | Own declaration ROM and 68k driver built from `cutemac_video_driver.S` via Retro68. Configurable dimensions/depth, guest-programmable RAMDAC, dirty-region reporting, optional integrated absolute pointer. |
 | **CuteMac Video Accelerated** (project-owned) | Any NuBus machine | 🟠 WIP | Separate adapter delegating to the known-good card; host-accelerated fill/copy/expand/cursor is the development track. |
-| Apple NuBus Ethernet Card (`aenet1`, 670-0210) | II family, Quadra | 🟡 Mostly working | DP8390 with local packet RAM; host connectivity only through `PacketNetworkBackend`. Has CTest coverage. |
+| Apple NuBus Ethernet Card (`aenet1`, 670-0210) | II family, Quadra | 🟡 Mostly working | DP8390 with local packet RAM; host connectivity only through `PacketNetworkBackend`, either SLIRP user-mode NAT or bridged capture onto a host interface (libpcap, or Npcap on Windows). Has CTest coverage. |
 | Apple Ethernet NB / EtherTalk NB | II family, Quadra | 🔴 TODO | |
 | Apple Token Ring 4/16 NB | II family, Quadra | 🔴 TODO | |
 | Apple Serial NB | II family | 🔴 TODO | |

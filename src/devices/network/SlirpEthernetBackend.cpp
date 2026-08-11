@@ -94,13 +94,15 @@ public:
 #endif
     }
 
-    void transmitFrame(const QByteArray& frame)
+    bool transmitFrame(const QByteArray& frame)
     {
 #if CUTEMAC_HAS_LIBSLIRP
-        if (!m_slirp || frame.isEmpty()) return;
+        if (!m_slirp || frame.isEmpty()) return false;
         slirp_input(m_slirp, reinterpret_cast<const std::uint8_t*>(frame.constData()), frame.size());
+        return true;
 #else
         (void)frame;
+        return false;
 #endif
     }
 
@@ -280,9 +282,9 @@ void SlirpEthernetBackend::poll()
     m_impl->poll();
 }
 
-void SlirpEthernetBackend::transmitFrame(const QByteArray& frame)
+bool SlirpEthernetBackend::transmitFrame(const QByteArray& frame)
 {
-    m_impl->transmitFrame(frame);
+    return m_impl->transmitFrame(frame);
 }
 
 std::optional<QByteArray> SlirpEthernetBackend::receiveFrame()
@@ -298,6 +300,16 @@ void SlirpEthernetBackend::close()
 bool SlirpEthernetBackend::connected() const
 {
     return m_impl->connected();
+}
+
+QString SlirpEthernetBackend::statusDetail() const
+{
+    if (m_impl->connected()) return {};
+#if CUTEMAC_HAS_LIBSLIRP
+    return QStringLiteral("SLIRP failed to start.");
+#else
+    return QStringLiteral("This build has no SLIRP support.");
+#endif
 }
 
 } // namespace cutemac::devices::network

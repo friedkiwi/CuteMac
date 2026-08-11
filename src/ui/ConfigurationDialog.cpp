@@ -16,6 +16,7 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSpinBox>
+#include <QStandardItemModel>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -24,6 +25,8 @@
 #include <algorithm>
 #include <array>
 
+#include "cutemac/devices/network/CaptureInterfaces.h"
+#include "cutemac/devices/network/PcapRuntime.h"
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/rom/RomCatalog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
@@ -132,15 +135,77 @@ constexpr std::array<config::MacMonitorType, 6> apple824SelectableMonitors {
     config::MacMonitorType::Rgb16Inch,
 };
 
-QString networkBackendName(config::NetworkBackendType backend)
+// Populates a backend chooser from the shared registry. Unsupported or
+// unavailable backends stay visible but disabled, with the reason as a tooltip,
+// so a build without a backend never silently hides the feature.
+void populateNetworkBackends(QComboBox* combo, config::NetworkBackendType current)
 {
-    switch (backend) {
-    case config::NetworkBackendType::Slirp:
-        return QStringLiteral("SLIRP");
-    case config::NetworkBackendType::None:
-    default:
-        return QStringLiteral("None");
+    auto* model = qobject_cast<QStandardItemModel*>(combo->model());
+    for (const auto& descriptor : config::networkBackendDescriptors()) {
+        const auto availability = config::networkBackendAvailability(descriptor.type);
+        combo->addItem(descriptor.displayName, static_cast<int>(descriptor.type));
+        const auto row = combo->count() - 1;
+        combo->setItemData(row,
+            availability.available ? descriptor.summary : availability.reason,
+            Qt::ToolTipRole);
+        if (!availability.available && descriptor.type != current && model) {
+            if (auto* item = model->item(row)) item->setEnabled(false);
+        }
     }
+    combo->setCurrentIndex(qMax(0, combo->findData(static_cast<int>(current))));
+}
+
+// Host interfaces for the bridged backend. The configured interface is always
+// offered even when absent, so opening a profile from another machine on this
+// one does not silently rewrite its interface away.
+void populateCaptureInterfaces(QComboBox* combo,
+    const QVector<devices::network::CaptureInterface>& interfaces,
+    const QString& current)
+{
+    for (const auto& entry : interfaces) {
+        auto label = entry.displayName == entry.deviceName
+            ? entry.deviceName
+            : QStringLiteral("%1 (%2)").arg(entry.displayName, entry.deviceName);
+        if (entry.wireless) label.append(QStringLiteral("  \u2014 Wi-Fi"));
+        else if (!entry.up) label.append(QStringLiteral("  \u2014 down"));
+        combo->addItem(label, entry.deviceName);
+    }
+    if (current.trimmed().isEmpty()) return;
+    if (combo->findData(current) >= 0) return;
+    combo->insertItem(0,
+        QStringLiteral("%1 (not present on this machine)").arg(current),
+        current);
+}
+
+// One line under the picker explaining whatever will stop this working.
+QString captureInterfaceAdvice(config::NetworkBackendType backend,
+    const QVector<devices::network::CaptureInterface>& interfaces,
+    const QString& interfaceName)
+{
+    if (!config::networkBackendDescriptor(backend).requiresInterface) return {};
+    const auto availability = config::networkBackendAvailability(backend);
+    if (!availability.available) return availability.reason;
+    if (interfaceName.trimmed().isEmpty()) return QStringLiteral("Choose a host network interface.");
+    for (const auto& entry : interfaces) {
+        if (entry.deviceName != interfaceName) continue;
+        if (entry.wireless) {
+            return QStringLiteral("'%1' is a Wi-Fi adapter. Access points reject a second MAC address, so "
+                                  "the emulated Mac will usually send but not receive. Use SLIRP on Wi-Fi.")
+                .arg(entry.displayName);
+        }
+        if (entry.loopback) {
+            return QStringLiteral("'%1' is a loopback interface and carries no local network traffic.")
+                .arg(entry.displayName);
+        }
+        if (!entry.up) {
+            return QStringLiteral("'%1' is down. The link will stay idle until the interface comes up.")
+                .arg(entry.displayName);
+        }
+        return {};
+    }
+    return QStringLiteral("'%1' is not present on this machine. The card will stay idle until it is, or "
+                          "until you choose another interface.")
+        .arg(interfaceName);
 }
 
 QString nubusValidationMessage(const config::NuBusDeviceConfiguration& device)
@@ -154,6 +219,12 @@ QString nubusValidationMessage(const config::NuBusDeviceConfiguration& device)
             .arg(device.depth)
             .arg(bytes)
             .arg(config::cuteMacVideoFramebufferLimitBytes());
+    }
+    if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
+        const auto availability = config::networkBackendAvailability(device.networkBackend);
+        if (!config::networkBackendSupported(device.networkBackend)) return availability.reason;
+        return QStringLiteral("Choose a host network interface for the %1 backend.")
+            .arg(config::networkBackendDescriptor(device.networkBackend).displayName);
     }
     return QStringLiteral("Invalid NuBus device configuration.");
 }
@@ -229,6 +300,8 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     QCheckBox* absolutePointer = nullptr;
     QComboBox* monitor = nullptr;
     QComboBox* networkBackend = nullptr;
+    QComboBox* networkInterface = nullptr;
+    QLabel* networkAdvice = nullptr;
 
     if (device.type == config::NuBusDeviceType::CuteMacVideo
         || device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
@@ -272,14 +345,32 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         form->addRow(QStringLiteral("Attached monitor"), monitor);
     } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
         networkBackend = new QComboBox;
-        networkBackend->addItem(networkBackendName(config::NetworkBackendType::None),
-            static_cast<int>(config::NetworkBackendType::None));
-        if (config::slirpNetworkingAvailable() || device.networkBackend == config::NetworkBackendType::Slirp) {
-            networkBackend->addItem(networkBackendName(config::NetworkBackendType::Slirp),
-                static_cast<int>(config::NetworkBackendType::Slirp));
-        }
-        networkBackend->setCurrentIndex(qMax(0, networkBackend->findData(static_cast<int>(device.networkBackend))));
+        populateNetworkBackends(networkBackend, device.networkBackend);
         form->addRow(QStringLiteral("Network backend"), networkBackend);
+
+        // Enumerated once: on Windows pcap_findalldevs walks the driver stack,
+        // which is too slow to repeat on every combo change.
+        const auto captureInterfaces = devices::network::availableCaptureInterfaces();
+        networkInterface = new QComboBox;
+        populateCaptureInterfaces(networkInterface, captureInterfaces, device.networkInterface);
+        networkInterface->setCurrentIndex(qMax(0, networkInterface->findData(device.networkInterface)));
+        form->addRow(QStringLiteral("Host interface"), networkInterface);
+
+        networkAdvice = new QLabel;
+        networkAdvice->setWordWrap(true);
+        form->addRow(QString(), networkAdvice);
+
+        const auto refreshNetworkRows = [networkBackend, networkInterface, networkAdvice, captureInterfaces]() {
+            const auto backend = static_cast<config::NetworkBackendType>(networkBackend->currentData().toInt());
+            const auto needsInterface = config::networkBackendDescriptor(backend).requiresInterface;
+            networkInterface->setEnabled(needsInterface);
+            networkAdvice->setText(needsInterface
+                    ? captureInterfaceAdvice(backend, captureInterfaces, networkInterface->currentData().toString())
+                    : config::networkBackendAvailability(backend).reason);
+        };
+        QObject::connect(networkBackend, &QComboBox::currentIndexChanged, networkBackend, refreshNetworkRows);
+        QObject::connect(networkInterface, &QComboBox::currentIndexChanged, networkInterface, refreshNetworkRows);
+        refreshNetworkRows();
     }
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -298,6 +389,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
             candidate.monitor = static_cast<config::MacMonitorType>(monitor->currentData().toInt());
         } else if (candidate.type == config::NuBusDeviceType::AppleNuBusEthernet) {
             candidate.networkBackend = static_cast<config::NetworkBackendType>(networkBackend->currentData().toInt());
+            candidate.networkInterface = networkInterface->currentData().toString();
         }
         const auto validation = nubusValidationMessage(candidate);
         if (!validation.isEmpty()) {
@@ -325,6 +417,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
         device.declarationRomPath.clear();
     } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
         device.networkBackend = static_cast<config::NetworkBackendType>(networkBackend->currentData().toInt());
+        device.networkInterface = networkInterface->currentData().toString();
         device.declarationRomPath.clear();
     }
     return true;

@@ -27,6 +27,16 @@
       "$comment": "SLIP/PPP guest networking. Browsers have no raw sockets, so wasm builds omit it."
     },
     {
+      "name": "libpcap",
+      "platform": "!windows & !emscripten",
+      "$comment": "Bridged host networking. On Windows the same feature builds against the Npcap SDK instead; the vcpkg libpcap port there is a capture-less stub."
+    },
+    {
+      "name": "npcap-sdk",
+      "platform": "windows",
+      "$comment": "Overlay port in cmake/vcpkg-ports. Headers and import libraries only; the Npcap runtime is installed by the user and must never be redistributed."
+    },
+    {
       "name": "pkgconf",
       "host": true,
       "platform": "!emscripten",

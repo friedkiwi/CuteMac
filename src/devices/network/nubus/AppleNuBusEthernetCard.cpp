@@ -81,6 +81,20 @@ public:
         std::copy(mac.cbegin(), mac.cend(), std::begin(m_regs.par));
     }
 
+    void setFilterChanged(std::function<void()> callback)
+    {
+        m_filterChanged = std::move(callback);
+    }
+
+    [[nodiscard]] std::array<std::uint8_t, 6> stationAddress() const
+    {
+        std::array<std::uint8_t, 6> mac {};
+        std::copy(std::begin(m_regs.par), std::end(m_regs.par), mac.begin());
+        return mac;
+    }
+
+    [[nodiscard]] bool promiscuous() const { return (m_regs.rcr & 0x10U) != 0; }
+
     std::uint8_t csRead(std::uint8_t offset) const
     {
         switch ((offset & 0x0fU) | (m_regs.cr & 0xc0U)) {
@@ -163,7 +177,10 @@ public:
             break;
         case 0x0a: m_regs.rbcr = static_cast<std::uint16_t>((m_regs.rbcr & 0xff00U) | data); break;
         case 0x0b: m_regs.rbcr = static_cast<std::uint16_t>((m_regs.rbcr & 0x00ffU) | (data << 8)); break;
-        case 0x0c: m_regs.rcr = data; break;
+        case 0x0c:
+            m_regs.rcr = data;
+            notifyFilterChanged();
+            break;
         case 0x0d: m_regs.tcr = data; break;
         case 0x0e: m_regs.dcr = data; break;
         case 0x0f:
@@ -177,6 +194,7 @@ public:
         case 0x45:
         case 0x46:
             m_regs.par[(offset & 0x07U) - 1U] = data;
+            notifyFilterChanged();
             break;
         case 0x47: m_regs.curr = data; break;
         case 0x48:
@@ -417,8 +435,14 @@ private:
 
     ReadMemory m_readMemory;
     WriteMemory m_writeMemory;
+    void notifyFilterChanged() const
+    {
+        if (m_filterChanged) m_filterChanged();
+    }
+
     Transmit m_transmit;
     Irq m_irq;
+    std::function<void()> m_filterChanged;
     Registers m_regs;
     bool m_reset = false;
     int m_rdmaActive = 0;
@@ -436,6 +460,7 @@ AppleNuBusEthernetCard::AppleNuBusEthernetCard(QString macAddress,
         [this](const QByteArray& frame) { return transmitFrame(frame); },
         [this](bool asserted) { setIrq(asserted); });
     m_dp8390->setInitialMac(macAddressBytes());
+    m_dp8390->setFilterChanged([this]() { publishStationFilter(); });
     reset();
 }
 
@@ -468,6 +493,7 @@ void AppleNuBusEthernetCard::reset()
     std::fill(m_packetRam.begin(), m_packetRam.end(), 0);
     m_dp8390->reset();
     m_dp8390->setInitialMac(macAddressBytes());
+    publishStationFilter();
     setIrq(false);
 }
 
@@ -589,8 +615,14 @@ void AppleNuBusEthernetCard::writeRegisterWord(std::uint32_t local, std::uint16_
 bool AppleNuBusEthernetCard::transmitFrame(const QByteArray& frame)
 {
     if (!m_backend || !m_backend->connected()) return false;
-    m_backend->transmitFrame(frame);
-    return true;
+    return m_backend->transmitFrame(frame);
+}
+
+void AppleNuBusEthernetCard::publishStationFilter()
+{
+    if (!m_backend) return;
+    m_backend->setStationAddress(m_dp8390->stationAddress());
+    m_backend->setPromiscuous(m_dp8390->promiscuous());
 }
 
 std::array<std::uint8_t, 6> AppleNuBusEthernetCard::macAddressBytes() const

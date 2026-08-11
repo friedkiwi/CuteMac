@@ -130,6 +130,25 @@ tcp_host = "127.0.0.1"
 tcp_port = 2323
 ```
 
+The Apple NuBus Ethernet card takes one of two backends. `slirp` is user-mode NAT: outbound TCP/IP works with no driver and no privileges, but the guest is not reachable from the local network. `pcap` bridges the card onto a host interface, so the emulated Mac appears on the LAN under its own MAC address and can be connected to from other machines:
+
+```toml
+[[nubus.devices]]
+slot = 10
+type = "apple_nubus_ethernet"
+network_backend = "pcap" # or "slirp", or "none"
+network_interface = "eth0"
+mac_address = "02:00:1b:00:00:0a"
+```
+
+Bridging needs a **wired** interface. Wi-Fi access points reject a second MAC address from one station, so an emulated Mac bridged onto Wi-Fi will generally send without receiving; use `slirp` there. It also needs capture rights, which differ per platform:
+
+- **Windows** — install [Npcap](https://npcap.com). CuteMac does not bundle it (Npcap may not be redistributed) and loads it only when the bridged backend is used, so CuteMac still starts normally without it. WinPcap API-compatible mode is not required. If no interfaces appear, re-run the Npcap installer with "Restrict Npcap driver's access to Administrators only" unchecked.
+- **macOS** — install Wireshark's ChmodBPF helper, or add your user to the `access_bpf` group, so `/dev/bpf*` is readable.
+- **Linux** — grant the binary raw-socket rights: `sudo setcap cap_net_raw,cap_net_admin+eip /path/to/CuteMac`.
+
+`CuteMacPcapInterfaces` lists what the backend can see, and given an interface name captures from it, so a capture problem can be diagnosed without launching the emulator.
+
 Mac Plus profiles can configure a 256-byte NVRAM image. RTC reads expose the current host-local date/time in the classic Macintosh epoch; guest time writes are intentionally discarded, while PRAM changes persist to this image:
 
 ```toml
