@@ -1,3 +1,4 @@
+#include "cutemac/cpu/m68k/M68kFpuDiagnostics.h"
 #include "cutemac/machines/quadra700/Quadra700Machine.h"
 #include "cutemac/debug/SnapshotBuilder.h"
 
@@ -68,6 +69,7 @@ Quadra700Machine::Quadra700Machine(std::size_t ramSize, const QString& nvramPath
 {
     (void)m_rtc.setNvramImagePath(nvramPath);
     m_cpu.setModel(cpu::m68k::M68kCpuCore::Model::M68040);
+    m_cpu.setFpuModel(cpu::m68k::M68kCpuCore::FpuModel::M68040);
     m_cpu.setBus(this);
 
     m_dafb.attachTurboScsi(0, &m_scsi);
@@ -745,6 +747,13 @@ debug::MachineSnapshot Quadra700Machine::debugSnapshot() const
 
     snapshot.frame = videoFrame();
     snapshot.schedulerEvents = m_scheduler.pendingEvents();
+    // Floating-point encodings the FPU refused. A guest that bombs with system
+    // error 10 leaves no exception frame behind by the time the dialog is up,
+    // so without this a dump cannot name the instruction that did it.
+    const auto fpuDiagnostics = cpu::m68k::fpuDiagnosticLines();
+    if (!fpuDiagnostics.isEmpty()) {
+        snapshot.traces.insert(QStringLiteral("fpu-refused"), fpuDiagnostics);
+    }
     const auto swimTrace = m_swim.traceEvents();
     if (!swimTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("swim"), swimTrace);
     return snapshot;

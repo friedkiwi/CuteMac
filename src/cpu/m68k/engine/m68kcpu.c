@@ -879,8 +879,31 @@ void m68k_set_instr_hook_callback(void  (*callback)(unsigned int pc))
 }
 
 /* Set the CPU type. */
+void m68k_set_fpu_model(int model)
+{
+	m68ki_cpu.fpu_model = model;
+}
+
 void m68k_set_cpu_type(unsigned int cpu_type)
 {
+	/* Default to the coprocessor that shipped with the part; a machine can
+	   override afterwards. Selecting the CPU first and the FPU second is the
+	   order the machine constructors use. */
+	switch (cpu_type)
+	{
+		case M68K_CPU_TYPE_68040:
+			m68ki_cpu.fpu_model = M68K_FPU_MODEL_68040;
+			break;
+		case M68K_CPU_TYPE_68030:
+		case M68K_CPU_TYPE_68EC030:
+		case M68K_CPU_TYPE_68020:
+			m68ki_cpu.fpu_model = M68K_FPU_MODEL_68882;
+			break;
+		default:
+			m68ki_cpu.fpu_model = M68K_FPU_MODEL_NONE;
+			break;
+	}
+
 	HAS_PMMU = 0;
 	PMMU_ENABLED = 0;
 	m68ki_cpu.mmu_kind = M68K_MMU_KIND_NONE;

@@ -23,7 +23,9 @@ static void m68k_op_1111(void)
 
 static void m68k_op_040fpu0_32(void)
 {
-	if(CPU_TYPE_IS_030_PLUS(CPU_TYPE))
+	/* A machine with no coprocessor fitted must take the line-1111 exception,
+	   which is how a 68020 without a 68881 behaves. */
+	if(CPU_TYPE_IS_030_PLUS(CPU_TYPE) && m68ki_cpu.fpu_model != M68K_FPU_MODEL_NONE)
 	{
 		m68040_fpu_op0();
 		return;
@@ -34,7 +36,9 @@ static void m68k_op_040fpu0_32(void)
 
 static void m68k_op_040fpu1_32(void)
 {
-	if(CPU_TYPE_IS_030_PLUS(CPU_TYPE))
+	/* A machine with no coprocessor fitted must take the line-1111 exception,
+	   which is how a 68020 without a 68881 behaves. */
+	if(CPU_TYPE_IS_030_PLUS(CPU_TYPE) && m68ki_cpu.fpu_model != M68K_FPU_MODEL_NONE)
 	{
 		m68040_fpu_op1();
 		return;

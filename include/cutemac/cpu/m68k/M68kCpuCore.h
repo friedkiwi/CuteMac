@@ -47,6 +47,16 @@ public:
         M68040,
     };
 
+    // Which coprocessor the machine fitted. Arithmetic is shared across parts;
+    // the FSAVE/FRESTORE state frame format is not, and guest software reads
+    // the frame's format byte to identify the FPU.
+    enum class FpuModel {
+        None,
+        M68881,
+        M68882,
+        M68040,
+    };
+
     M68kCpuCore();
     ~M68kCpuCore() override;
 
@@ -57,6 +67,9 @@ public:
     void reset() override;
 
     void setModel(Model model);
+    // Call after setModel(): selecting a CPU resets this to the part that
+    // shipped with it.
+    void setFpuModel(FpuModel model);
     void setExternal68851(bool enabled);
     void setBus(M68kBus* bus);
     void setIrqLevel(unsigned int level);
@@ -72,6 +85,7 @@ public:
 
 private:
     Model m_model = Model::M68000;
+    FpuModel m_fpuModel = FpuModel::None;
     M68kBus* m_bus = nullptr;
 };
 

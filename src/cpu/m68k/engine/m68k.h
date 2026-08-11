@@ -438,4 +438,15 @@ unsigned int m68k_disassemble_raw(char* str_buff, unsigned int pc, const unsigne
 #endif
 
 
+/* Which floating-point coprocessor the machine fitted. The arithmetic is
+   shared across parts; the FSAVE/FRESTORE state frame format is not. */
+#define M68K_FPU_MODEL_NONE   0
+#define M68K_FPU_MODEL_68881  1
+#define M68K_FPU_MODEL_68882  2
+#define M68K_FPU_MODEL_68040  3
+
+/* Selects the coprocessor the guest sees. Defaults to the part that shipped
+   with the configured CPU. */
+void m68k_set_fpu_model(int model);
+
 #endif /* M68K__HEADER */

@@ -2,15 +2,45 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "m68kcpu.h"
+#include "cutemac/cpu/m68k/M68kFpuDiagnostics.h"
 
-extern void exit(int);
+/* An encoding the FPU cannot execute must never end the host process. Both
+   helpers below record what happened and raise a line-1111 exception, which is
+   what a 68881/68882 does for an instruction it cannot execute: the guest gets
+   system error 10 and CuteMac stays up to be debugged.
+
+   They return normally. m68ki_exception_1111() has already redirected the PC by
+   then, so the remainder of the calling handler runs against scratch state that
+   the exception handler never reads; the alternative is threading a fault flag
+   through every arithmetic path for encodings that cannot occur in valid code.
+
+   fpu_illegal() is for encodings real hardware would also refuse.
+   fpu_unimplemented() marks a CuteMac limitation, so a panic dump distinguishes
+   "the guest is wrong" from "we are". */
+
+static void fpu_report(int limitation, const char *format, va_list ap)
+{
+	char detail[192];
+	vsnprintf(detail, sizeof(detail), format, ap);
+	/* The extension word is not reachable from every call site; the pc and the
+	   opcode identify the instruction, and a reader can disassemble for the
+	   rest. */
+	cutemac_m68k_fpu_report(ADDRESS_68K(REG_PPC), (uint16_t)REG_IR, 0, detail, limitation);
+	m68ki_exception_1111();
+}
 
 static void fatalerror(const char *format, ...) {
       va_list ap;
       va_start(ap,format);
-      vfprintf(stderr,format,ap);  // JFF: fixed. Was using fprintf and arguments were wrong
+      fpu_report(0, format, ap);
       va_end(ap);
-      exit(1);
+}
+
+static void fpu_unimplemented(const char *format, ...) {
+      va_list ap;
+      va_start(ap,format);
+      fpu_report(1, format, ap);
+      va_end(ap);
 }
 
 #define FPCC_N			0x08000000
@@ -266,6 +296,66 @@ static inline void store_pack_float80(uint32 ea, int k, floatx80 fpr)
 	m68ki_write_32(ea, dw1);
 	m68ki_write_32(ea+4, dw2);
 	m68ki_write_32(ea+8, dw3);
+}
+
+/* FPSR exception status byte (bits 15-8) and accrued exception byte (bits 7-0).
+   SoftFloat raises its own flags as it works; this folds them into the 68881
+   layout after each operation. Operations that go through host libm rather than
+   SoftFloat report their domain errors through SET_OPERR_IF_NAN below. */
+#define FPES_BSUN   0x00008000
+#define FPES_SNAN   0x00004000
+#define FPES_OPERR  0x00002000
+#define FPES_OVFL   0x00001000
+#define FPES_UNFL   0x00000800
+#define FPES_DZ     0x00000400
+#define FPES_INEX2  0x00000200
+#define FPES_INEX1  0x00000100
+
+#define FPAE_IOP    0x00000080
+#define FPAE_OVFL   0x00000040
+#define FPAE_UNFL   0x00000020
+#define FPAE_DZ     0x00000010
+#define FPAE_INEX   0x00000008
+
+static inline void UPDATE_ACCRUED_EXCEPTIONS(void)
+{
+	if (REG_FPSR & (FPES_BSUN | FPES_SNAN | FPES_OPERR)) REG_FPSR |= FPAE_IOP;
+	if (REG_FPSR & FPES_OVFL) REG_FPSR |= FPAE_OVFL;
+	if ((REG_FPSR & FPES_UNFL) && (REG_FPSR & FPES_INEX2)) REG_FPSR |= FPAE_UNFL;
+	if (REG_FPSR & FPES_DZ) REG_FPSR |= FPAE_DZ;
+	if (REG_FPSR & (FPES_INEX1 | FPES_INEX2 | FPES_OVFL)) REG_FPSR |= FPAE_INEX;
+}
+
+/* Clears SoftFloat's flags so the next operation starts from a known state. The
+   exception status byte is per-operation; the accrued byte is sticky until the
+   guest clears it, which is what software checks after a sequence. */
+static inline void SET_EXCEPTION_FLAGS(void)
+{
+	int8 flags = float_exception_flags;
+	float_exception_flags = 0;
+
+	REG_FPSR &= ~(FPES_SNAN | FPES_OPERR | FPES_OVFL | FPES_UNFL | FPES_DZ | FPES_INEX2 | FPES_INEX1);
+	if (flags & float_flag_invalid)   REG_FPSR |= FPES_OPERR;
+	if (flags & float_flag_divbyzero) REG_FPSR |= FPES_DZ;
+	if (flags & float_flag_overflow)  REG_FPSR |= FPES_OVFL;
+	if (flags & float_flag_underflow) REG_FPSR |= FPES_UNFL;
+	if (flags & float_flag_inexact)   REG_FPSR |= FPES_INEX2;
+	UPDATE_ACCRUED_EXCEPTIONS();
+}
+
+/* Host libm signals a domain error by returning NaN. A NaN out of a non-NaN
+   operand is exactly the 68881's OPERR condition. */
+static inline void SET_OPERR_IF_NAN(floatx80 result, floatx80 source)
+{
+	const int resultIsNan = ((result.high & 0x7fff) == 0x7fff) && (result.low << 1) != 0;
+	const int sourceIsNan = ((source.high & 0x7fff) == 0x7fff) && (source.low << 1) != 0;
+	REG_FPSR &= ~(FPES_OPERR | FPES_INEX2);
+	if (resultIsNan && !sourceIsNan) REG_FPSR |= FPES_OPERR;
+	/* A libm result is rounded to double and then widened, so it is inexact
+	   unless it happens to be exactly representable. Reporting it always would
+	   be a lie in the easy cases; reporting it never matches what the existing
+	   FSIN/FCOS have always done. */
+	UPDATE_ACCRUED_EXCEPTIONS();
 }
 
 static inline void SET_CONDITION_CODES(floatx80 reg)
@@ -1278,7 +1368,7 @@ static void fpgen_rm_reg(uint16 w2)
 						source.low = U64(0x935d8dddaaa8ac17);
 						break;
 
-					case 0x32:	// 1 (or 100?  manuals are unclear, but 1 would make more sense)
+					case 0x32:	// 10^0, i.e. 1.0 - the constant ROM's decimal ladder starts here
 						source = int32_to_floatx80((sint32)1);
 						break;
 
@@ -1385,6 +1475,7 @@ static void fpgen_rm_reg(uint16 w2)
 		}
 		case 0x01:		// Fsint
 		{
+			USE_CYCLES(43);
 			sint32 temp;
 			temp = floatx80_to_int32(source);
 			REG_FP[dst] = int32_to_floatx80(temp);
@@ -1393,6 +1484,7 @@ static void fpgen_rm_reg(uint16 w2)
 		}
 		case 0x03:		// FsintRZ
 		{
+			USE_CYCLES(43);
 			sint32 temp;
 			temp = floatx80_to_int32_round_to_zero(source);
 			REG_FP[dst] = int32_to_floatx80(temp);
@@ -1402,6 +1494,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x04:		// FSQRT
 		{
 			REG_FP[dst] = floatx80_sqrt(source);
+			SET_EXCEPTION_FLAGS();
 			SET_CONDITION_CODES(REG_FP[dst]);
 			USE_CYCLES(109);
 			break;
@@ -1451,7 +1544,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x1e:		// FGETEXP
 		{
 			sint16 temp;
-			temp = source.high;	// get the exponent
+			temp = source.high & 0x7fff;	// exponent, without the sign bit
 			temp -= 0x3fff;	// take off the bias
 			REG_FP[dst] = double_to_fx80((double)temp);
 			SET_CONDITION_CODES(REG_FP[dst]);
@@ -1461,6 +1554,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x20:		// FDIV
 		{
 			REG_FP[dst] = floatx80_div(REG_FP[dst], source);
+		    SET_EXCEPTION_FLAGS();
 		    SET_CONDITION_CODES(REG_FP[dst]); // JFF
 			USE_CYCLES(43);
 			break;
@@ -1468,6 +1562,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x21:		// FMOD
 		{
 			REG_FP[dst] = floatx80_rem(REG_FP[dst], source);
+		    	SET_EXCEPTION_FLAGS();
 		    	SET_CONDITION_CODES(REG_FP[dst]);
 			USE_CYCLES(43);
 			break;
@@ -1482,6 +1577,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x22:		// FADD
 		{
 			REG_FP[dst] = floatx80_add(REG_FP[dst], source);
+			SET_EXCEPTION_FLAGS();
 			SET_CONDITION_CODES(REG_FP[dst]);
 			USE_CYCLES(9);
 			break;
@@ -1489,6 +1585,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x23:		// FMUL
 		{
 			REG_FP[dst] = floatx80_mul(REG_FP[dst], source);
+			SET_EXCEPTION_FLAGS();
 			SET_CONDITION_CODES(REG_FP[dst]);
 			USE_CYCLES(11);
 			break;
@@ -1503,6 +1600,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x25:		// FREM
 		{
 			REG_FP[dst] = floatx80_rem(REG_FP[dst], source);
+			SET_EXCEPTION_FLAGS();
 			SET_CONDITION_CODES(REG_FP[dst]);
 			USE_CYCLES(43);	// guess
 			break;
@@ -1510,6 +1608,7 @@ static void fpgen_rm_reg(uint16 w2)
 		case 0x28:		// FSUB
 		{
 			REG_FP[dst] = floatx80_sub(REG_FP[dst], source);
+			SET_EXCEPTION_FLAGS();
 			SET_CONDITION_CODES(REG_FP[dst]);
 			USE_CYCLES(9);
 			break;
@@ -1553,8 +1652,146 @@ static void fpgen_rm_reg(uint16 w2)
 			break;
 		}
 
-		default:	fatalerror("fpgen_rm_reg: unimplemented opmode %02X at %08X\n", opmode, REG_PC-4);
+		case 0x02:		// FSINH
+			REG_FP[dst] = double_to_fx80(sinh(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x06:		// FLOGNP1
+			REG_FP[dst] = double_to_fx80(log1p(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x08:		// FETOXM1
+			REG_FP[dst] = double_to_fx80(expm1(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x09:		// FTANH
+			REG_FP[dst] = double_to_fx80(tanh(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x0a:		// FATAN
+			REG_FP[dst] = double_to_fx80(atan(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(400);
+			break;
+		case 0x0c:		// FASIN
+			REG_FP[dst] = double_to_fx80(asin(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x0d:		// FATANH
+			REG_FP[dst] = double_to_fx80(atanh(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x0f:		// FTAN
+			REG_FP[dst] = double_to_fx80(tan(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(500);
+			break;
+		case 0x10:		// FETOX
+			REG_FP[dst] = double_to_fx80(exp(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(500);
+			break;
+		case 0x11:		// FTWOTOX
+			REG_FP[dst] = double_to_fx80(exp2(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(500);
+			break;
+		case 0x12:		// FTENTOX
+			REG_FP[dst] = double_to_fx80(pow(10.0, fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(500);
+			break;
+		case 0x14:		// FLOGN
+			REG_FP[dst] = double_to_fx80(log(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(525);
+			break;
+		case 0x15:		// FLOG10
+			REG_FP[dst] = double_to_fx80(log10(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(525);
+			break;
+		case 0x16:		// FLOG2
+			REG_FP[dst] = double_to_fx80(log2(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(525);
+			break;
+		case 0x19:		// FCOSH
+			REG_FP[dst] = double_to_fx80(cosh(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x1c:		// FACOS
+			REG_FP[dst] = double_to_fx80(acos(fx80_to_double(source)));
+			SET_OPERR_IF_NAN(REG_FP[dst], source);
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(600);
+			break;
+		case 0x1f:		// FGETMAN
+		{
+			// Mantissa in [1,2) keeping the sign. Exact: forcing the exponent
+			// to the bias leaves the significand untouched, where a round trip
+			// through double would drop its low 11 bits.
+			floatx80 result = source;
+			if ((source.high & 0x7fff) != 0 || source.low != 0) {
+				result.high = (bits16)((source.high & 0x8000) | 0x3fff);
+			}
+			REG_FP[dst] = result;
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(31);
+			break;
+		}
+		case 0x26:		// FSCALE
+		{
+			// dst * 2^int(src), by adjusting the exponent rather than
+			// multiplying, so an in-range result is exact.
+			sint32 factor = floatx80_to_int32_round_to_zero(source);
+			floatx80 result = REG_FP[dst];
+			sint32 exponent = (sint32)(result.high & 0x7fff);
+			if (exponent != 0 || result.low != 0) {
+				exponent += factor;
+				if (exponent > 0 && exponent < 0x7fff) {
+					result.high = (bits16)((result.high & 0x8000) | (bits16)exponent);
+				} else {
+					// Overflow, underflow, or scaling a denormal: fall back to
+					// the library, which handles the edges.
+					result = double_to_fx80(ldexp(fx80_to_double(REG_FP[dst]), (int)factor));
+				}
+			}
+			REG_FP[dst] = result;
+			SET_CONDITION_CODES(REG_FP[dst]);
+			USE_CYCLES(31);
+			break;
+		}
+		default:	fpu_unimplemented("fpgen_rm_reg: unimplemented opmode %02X at %08X\n", opmode, REG_PC-4);
 	}
+	/* Instruction-encoded precision (the 68040 FSxxx/FDxxx forms) wins; when the
+	   instruction says nothing, FPCR bits 7-6 select the rounding precision for
+	   every operation, which is what a guest sets to keep results comparable
+	   with single- or double-precision hardware. */
+	if (round == 0) round = (REG_FPCR >> 6) & 0x3;
+
 	if (round == 1)
 	{
 		// round to single
@@ -1632,11 +1869,78 @@ static void fmove_reg_mem(uint16 w2)
 	USE_CYCLES(12);
 }
 
+/* Address of a control-alterable effective address, computed once.
+   The EA_* helpers consume extension words from the instruction stream, so
+   calling one per register - as this function used to - both wrote every
+   register to the same place and ate displacement words that belonged to the
+   next instruction. */
+static uint32 EA_CONTROL_ADDRESS_32(int ea, int *ok)
+{
+	int mode = (ea >> 3) & 0x7;
+	int reg = (ea & 0x7);
+
+	*ok = 1;
+	switch (mode)
+	{
+		case 2:		return REG_A[reg];			// (An)
+		case 5:		return EA_AY_DI_32();			// (d16, An)
+		case 6:		return EA_AY_IX_32();			// (An) + (Xn) + d8
+		case 7:
+			switch (reg)
+			{
+				case 0:	return EA_AW_32();		// (xxx).W
+				case 1:	return EA_AL_32();		// (xxx).L
+				case 2:	return EA_PCDI_32();		// (d16, PC)
+				case 3:	return EA_PCIX_32();		// (d8, PC, Xn)
+				default: break;
+			}
+			break;
+		default:	break;
+	}
+	*ok = 0;
+	return 0;
+}
+
 static void fmove_fpcr(uint16 w2)
 {
 	int ea = REG_IR & 0x3f;
 	int dir = (w2 >> 13) & 0x1;
 	int reg = (w2 >> 10) & 0x7;
+	int mode = (ea >> 3) & 0x7;
+	int selected = ((reg & 4) ? 1 : 0) + ((reg & 2) ? 1 : 0) + ((reg & 1) ? 1 : 0);
+
+	/* One register, or a mode that advances on its own ((An)+ and -(An)), can
+	   go through the ordinary per-register path. Everything else needs the
+	   address computed once and the registers written consecutively, in the
+	   68881's FPCR, FPSR, FPIAR order. */
+	if (selected > 1 && mode != 3 && mode != 4)
+	{
+		int ok = 0;
+		uint32 address = EA_CONTROL_ADDRESS_32(ea, &ok);
+		if (ok)
+		{
+			uint32 offset = 0;
+			if (dir)
+			{
+				if (reg & 4) { m68ki_write_32(address + offset, REG_FPCR); offset += 4; }
+				if (reg & 2) { m68ki_write_32(address + offset, REG_FPSR); offset += 4; }
+				if (reg & 1) { m68ki_write_32(address + offset, REG_FPIAR); offset += 4; }
+			}
+			else
+			{
+				if (reg & 4)
+				{
+					REG_FPCR = m68ki_read_32(address + offset);
+					float_rounding_mode = (REG_FPCR >> 4) & 0x3;
+					offset += 4;
+				}
+				if (reg & 2) { REG_FPSR = m68ki_read_32(address + offset); offset += 4; }
+				if (reg & 1) { REG_FPIAR = m68ki_read_32(address + offset); offset += 4; }
+			}
+			USE_CYCLES(10);
+			return;
+		}
+	}
 
 	if (dir)	// From system control reg to <ea>
 	{
@@ -1716,7 +2020,7 @@ static void fmovem(uint16 w2)
 				break;
 			}
 
-			default:	fatalerror("040fpu0: FMOVEM: mode %d unimplemented at %08X\n", mode, REG_PC-4);
+			default:	fpu_unimplemented("040fpu0: FMOVEM: mode %d unimplemented at %08X\n", mode, REG_PC-4);
 		}
 	}
 	else		// From mem to FP regs
@@ -1744,7 +2048,7 @@ static void fmovem(uint16 w2)
 				break;
 			}
 
-			default:	fatalerror("040fpu0: FMOVEM: mode %d unimplemented at %08X\n", mode, REG_PC-4);
+			default:	fpu_unimplemented("040fpu0: FMOVEM: mode %d unimplemented at %08X\n", mode, REG_PC-4);
 		}
 	}
 }
@@ -1779,7 +2083,7 @@ static void fscc(void)
   default:
     {
       // unimplemented see fpu_uae.cpp around line 1300
-      fatalerror("040fpu0: fscc: mode %d not implemented at %08X\n", mode, REG_PC-4);
+      fpu_unimplemented("040fpu0: fscc: mode %d not implemented at %08X\n", mode, REG_PC-4);
     }
     }
   USE_CYCLES(7);  // JFF unsure of the number of cycles!!
@@ -1822,6 +2126,7 @@ static void fbcc32(void)
 void m68040_fpu_op0(void)
 {
 	m68ki_cpu.fpu_just_reset = 0;
+	REG_FPIAR = ADDRESS_68K(REG_PPC);
 
 	switch ((REG_IR >> 6) & 0x3)
 	{
@@ -1857,7 +2162,7 @@ void m68040_fpu_op0(void)
 					break;
 				}
 
-				default:	fatalerror("M68kFPU: unimplemented subop %d at %08X\n", (w2 >> 13) & 0x7, REG_PC-4);
+				default:	fpu_unimplemented("M68kFPU: unimplemented subop %d at %08X\n", (w2 >> 13) & 0x7, REG_PC-4);
 			}
 			break;
 		}
@@ -1878,16 +2183,42 @@ void m68040_fpu_op0(void)
 			break;
 		}
 
-      default:	fatalerror("M68kFPU: unimplemented main op %d at %08X\n", (m68ki_cpu.ir >> 6) & 0x3,  REG_PC-4);
+      default:	fpu_unimplemented("M68kFPU: unimplemented main op %d at %08X\n", (m68ki_cpu.ir >> 6) & 0x3,  REG_PC-4);
 	}
+}
+
+/* IDLE state frame header, by part. Guest software reads the format byte to
+   identify the coprocessor, so a Quadra must not be handed a 68881 frame. */
+static uint32 fpu_idle_frame_header(void)
+{
+	switch (m68ki_cpu.fpu_model)
+	{
+		case M68K_FPU_MODEL_68040:	return 0x00000000;	/* 68040 IDLE: null size byte */
+		case M68K_FPU_MODEL_68882:	return 0x2f180000;	/* 68882 IDLE, version 0x2f */
+		case M68K_FPU_MODEL_68881:
+		default:			return 0x1f180000;	/* 68881 IDLE, version 0x1f */
+	}
+}
+
+int m68ki_fpu_state_frame_bytes(void)
+{
+	/* 68040 IDLE frames are 4 bytes; the 68881/68882 IDLE frame is 28. */
+	return m68ki_cpu.fpu_model == M68K_FPU_MODEL_68040 ? 4 : 7 * 4;
 }
 
 static void perform_fsave(uint32 addr, int inc)
 {
+	const uint32 header = fpu_idle_frame_header();
+
+	if (m68ki_cpu.fpu_model == M68K_FPU_MODEL_68040)
+	{
+		m68ki_write_32(inc ? addr : addr, header);
+		return;
+	}
+
 	if (inc)
 	{
-		// 68881 IDLE, version 0x1f
-		m68ki_write_32(addr, 0x1f180000);
+		m68ki_write_32(addr, header);
 		m68ki_write_32(addr+4, 0);
 		m68ki_write_32(addr+8, 0);
 		m68ki_write_32(addr+12, 0);
@@ -1903,7 +2234,7 @@ static void perform_fsave(uint32 addr, int inc)
 		m68ki_write_32(addr-12, 0);
 		m68ki_write_32(addr-16, 0);
 		m68ki_write_32(addr-20, 0);
-		m68ki_write_32(addr-24, 0x1f180000);
+		m68ki_write_32(addr-24, header);
 	}
 }
 
@@ -1929,6 +2260,7 @@ static void do_frestore_null(void)
 void m68040_fpu_op1(void)
 {
 	int ea = REG_IR & 0x3f;
+	REG_FPIAR = ADDRESS_68K(REG_PPC);
 	int mode = (ea >> 3) & 0x7;
 	int reg = (ea & 0x7);
 	uint32 addr, temp;
@@ -1957,7 +2289,7 @@ void m68040_fpu_op1(void)
 					else
 					{
 						// we normally generate an IDLE frame
-						REG_A[reg] += 6*4;
+						REG_A[reg] += m68ki_fpu_state_frame_bytes() - 4;
 						perform_fsave(addr, 1);
 					}
 					break;
@@ -1972,13 +2304,13 @@ void m68040_fpu_op1(void)
 					else
 					{
 						// we normally generate an IDLE frame
-						REG_A[reg] -= 6*4;
+						REG_A[reg] -= m68ki_fpu_state_frame_bytes() - 4;
 						perform_fsave(addr, 0);
 					}
 					break;
 
 				default:
-					fatalerror("M68kFPU: FSAVE unhandled mode %d reg %d at %x\n", mode, reg, REG_PC);
+					fpu_unimplemented("M68kFPU: FSAVE unhandled mode %d reg %d at %x\n", mode, reg, REG_PC);
 			}
 			break;
 		}
@@ -1995,7 +2327,11 @@ void m68040_fpu_op1(void)
 					// check for NULL frame
 					if (temp & 0xff000000)
 					{
-						// we don't handle non-NULL frames and there's no pre/post inc/dec to do here
+						// A non-NULL frame means the coprocessor was mid-flight
+						// when it was saved. The frame carries internal state,
+						// not FP0-FP7 - those travel separately through FMOVEM -
+						// so there is nothing to load back into the register
+						// file; the FPU just stops looking freshly reset.
 						m68ki_cpu.fpu_just_reset = 0;
 					}
 					else
@@ -2034,13 +2370,13 @@ void m68040_fpu_op1(void)
 					break;
 
 				default:
-					fatalerror("M68kFPU: FRESTORE unhandled mode %d reg %d at %x\n", mode, reg, REG_PC);
+					fpu_unimplemented("M68kFPU: FRESTORE unhandled mode %d reg %d at %x\n", mode, reg, REG_PC);
 			}
 			break;
 		}
 		break;
 
-		default:	fatalerror("m68040_fpu_op1: unimplemented op %d at %08X\n", (REG_IR >> 6) & 0x3, REG_PC-2);
+		default:	fpu_unimplemented("m68040_fpu_op1: unimplemented op %d at %08X\n", (REG_IR >> 6) & 0x3, REG_PC-2);
 	}
 }
 

@@ -998,6 +998,11 @@ typedef struct
 	int    pmmu_enabled; /* Indicates if the PMMU is enabled */
 	int    mmu_kind;     /* None, external 68851, integrated 68030, or integrated 68040. */
 	int    fpu_just_reset; /* Indicates the FPU was just reset */
+	/* Which coprocessor the machine fitted. The arithmetic is shared, but the
+	   FSAVE/FRESTORE state frame format is not: a 68040 frame is not a 68882
+	   frame, and guest software reads the format byte. 0 none, 1 68881,
+	   2 68882, 3 68040. */
+	int    fpu_model;
 	uint reset_cycles;
 
 	/* Clocks required for instructions / exceptions */

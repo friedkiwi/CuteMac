@@ -1,3 +1,4 @@
+#include "cutemac/cpu/m68k/M68kFpuDiagnostics.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/debug/SnapshotBuilder.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
@@ -42,6 +43,8 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
 {
     (void)m_rtc.setNvramImagePath(nvramPath);
     m_cpu.setModel(cpu::m68k::M68kCpuCore::Model::M68030);
+    // The IIcx shipped with a 68882 fitted; the ROM's probe expects to find one.
+    m_cpu.setFpuModel(cpu::m68k::M68kCpuCore::FpuModel::M68882);
     m_cpu.setBus(this);
 
     m_via1.setPowerOnState(0, 0, 0, 0);
@@ -817,6 +820,13 @@ debug::MachineSnapshot MacIIcxMachine::debugSnapshot() const
 
     snapshot.frame = videoFrame();
     snapshot.schedulerEvents = m_scheduler.pendingEvents();
+    // Floating-point encodings the FPU refused. A guest that bombs with system
+    // error 10 leaves no exception frame behind by the time the dialog is up,
+    // so without this a dump cannot name the instruction that did it.
+    const auto fpuDiagnostics = cpu::m68k::fpuDiagnosticLines();
+    if (!fpuDiagnostics.isEmpty()) {
+        snapshot.traces.insert(QStringLiteral("fpu-refused"), fpuDiagnostics);
+    }
     const auto swimTrace = m_swim.traceEvents();
     if (!swimTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("swim"), swimTrace);
     return snapshot;

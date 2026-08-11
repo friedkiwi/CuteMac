@@ -26,6 +26,13 @@ changing code in that subsystem.
 - The IIcx color cursor advances from the video card's slot VBL, not VIA1 VBL alone. A video declaration-ROM driver must install its slot interrupt with `SIntInstall`, acknowledge the card, call `JVBLTask`, and remove the interrupt on close; preserve the DCE pointer across Slot Manager traps.
 - The Apple NuBus Ethernet Card uses the `aenet1` declaration ROM, byte lanes 0 and 2 (`0xa5`), local packet RAM at `$FssD0000-$FssDFFFF`, and DP8390 registers at `$FssE0000-$FssE003F`. Keep the DP8390/card model independent of host networking and attach host connectivity only through the packet-level `PacketNetworkBackend`.
 
+### Floating point
+
+- The Macintosh IIcx shipped with a 68882 and the Quadra 700's FPU is on the 68040 die, so both machines call `setFpuModel()` after `setModel()`. A machine that fits no coprocessor must select `FpuModel::None`, which sends cpid-1 F-line opcodes to the exception vector the way a 68020 without a 68881 does.
+- F-line dispatch: `0xF000`-`0xF1FF` is the PMMU, `0xF200`-`0xF2FF` and `0xF300`-`0xF3FF` are the FPU, and everything else falls to the generic handler and raises line-1111. A guest bombing with system error 10 and nothing in the `fpu-refused` ring therefore executed an F-line outside the coprocessor range.
+- Opmodes `0x40`-`0x7f` are the 68040 rounding-precision variants (`FSxxx`/`FDxxx`), masked down to their base operation before dispatch; they are not undefined encodings. When an instruction encodes no precision, FPCR bits 7-6 select it.
+- `FSAVE`/`FRESTORE` carry the coprocessor's internal state, not FP0-FP7 — those travel separately through `FMOVEM`. A non-NULL frame on restore therefore only means "the FPU was in use"; there is nothing to load back into the register file.
+
 ## SCSI
 
 - Mac Plus SCSI bringup can complete an NCR5380 READ(6) of the provided `work/system6withsw.dsk` image, but that image is raw HFS/Mini vMac-style media. The Plus ROM expects a SCSI disk to start with an Apple driver descriptor map (`ER`) and an Apple_Driver entry whose driver installs itself in the Unit Table. Reaching the System 6 desktop from this image requires synthesizing or generating a real Apple-compatible SCSI hard-disk wrapper and clean driver path.

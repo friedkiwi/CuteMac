@@ -101,6 +101,18 @@ void M68kCpuCore::setModel(Model model)
     m68k_set_cpu_type(musashiCpuType(model));
 }
 
+void M68kCpuCore::setFpuModel(FpuModel model)
+{
+    m_fpuModel = model;
+    activeCpu = this;
+    switch (model) {
+    case FpuModel::None: m68k_set_fpu_model(M68K_FPU_MODEL_NONE); break;
+    case FpuModel::M68881: m68k_set_fpu_model(M68K_FPU_MODEL_68881); break;
+    case FpuModel::M68882: m68k_set_fpu_model(M68K_FPU_MODEL_68882); break;
+    case FpuModel::M68040: m68k_set_fpu_model(M68K_FPU_MODEL_68040); break;
+    }
+}
+
 void M68kCpuCore::setExternal68851(bool enabled)
 {
     activeCpu = this;

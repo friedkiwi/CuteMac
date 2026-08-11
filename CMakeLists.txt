@@ -182,6 +182,7 @@ add_library(CuteMacCore
     src/core/SessionRunner.cpp
     src/devices/cuda/CudaController.cpp
     src/cpu/m68k/M68kCpuCore.cpp
+    src/cpu/m68k/M68kFpuDiagnostics.cpp
     src/cpu/m68k/engine/m68kcpu.c
     src/cpu/m68k/engine/m68kdasm.c
     src/cpu/m68k/engine/m68kops.c
@@ -561,6 +562,11 @@ if(BUILD_TESTING)
     add_executable(CuteMacPhysicalMemoryMapTests tests/physical_memory_map_tests.cpp)
     target_link_libraries(CuteMacPhysicalMemoryMapTests PRIVATE CuteMacCore)
     add_test(NAME physical-memory-map COMMAND CuteMacPhysicalMemoryMapTests)
+
+    add_executable(CuteMacM68kFpuTests tests/m68k_fpu_tests.cpp)
+    target_include_directories(CuteMacM68kFpuTests PRIVATE src/cpu/m68k/engine)
+    target_link_libraries(CuteMacM68kFpuTests PRIVATE CuteMacCore Qt6::Core)
+    add_test(NAME m68k-fpu COMMAND CuteMacM68kFpuTests)
 
     add_executable(CuteMacM68kMmuCacheTests tests/m68k_mmu_cache_tests.cpp)
     target_include_directories(CuteMacM68kMmuCacheTests PRIVATE src/cpu/m68k/engine)
