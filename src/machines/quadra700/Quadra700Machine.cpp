@@ -710,6 +710,10 @@ debug::MachineSnapshot Quadra700Machine::debugSnapshot() const
     rom.kind = QStringLiteral("rom");
     rom.base = romBase;
     rom.length = static_cast<std::uint32_t>(m_rom.size());
+    // ROM answers across the whole mirrored window (see mapReadOnlyMirrored),
+    // and the reset vector and ROMBase both point above the first copy, so a
+    // dump that mapped only one copy cannot disassemble at the captured PC.
+    rom.decodeLength = 0x10000000U;
     rom.contentsMember = QStringLiteral("mem/rom.bin");
     rom.contents = m_rom;
     snapshot.memory.append(rom);

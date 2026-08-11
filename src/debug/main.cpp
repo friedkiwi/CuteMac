@@ -785,7 +785,7 @@ private:
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
         m_out << "  serial-debug attach [0|1|a|b] | serial-debug send <text> | serial-debug send-line <text> | serial-debug send-hex <hex> | serial-debug read|clear|status\n";
         m_out << "  trace [category on|off|dump|clear|save <file>] | pc-trace|trap-trace|irq-trace|driver-trace|timeline [count]\n";
-        m_out << "  panic open <archive> | panic close | panic info | panic extract <dir> | panic write [note]\n";
+        m_out << "  panic open <archive> | panic close | panic info | panic analyze | panic extract <dir> | panic write [note]\n";
         m_out << "  sadmac arm|run [max-cycles]|status|report|save <prefix>|clear\n";
         m_out << "  bootblock verify | floppy last-window | floppy export-window <file>\n";
         m_out << "  gdb [enable|disable|port N|start|stop|status]\n";
@@ -982,7 +982,9 @@ private:
     [[nodiscard]] std::uint8_t debugRead8(std::uint32_t address) const
     {
         if (m_cpuDebug) return m_cpuDebug->debugRead8(address);
-        return m_machine != nullptr ? m_machine->debugRead8(address) : m_iicxMachine->read8(address);
+        if (m_machine != nullptr) return m_machine->debugRead8(address);
+        if (m_iicxMachine != nullptr) return m_iicxMachine->read8(address);
+        return 0xff;
     }
 
     [[nodiscard]] std::uint16_t debugRead16(std::uint32_t address) const
@@ -1207,7 +1209,7 @@ private:
         for (std::uint32_t address = start; address + static_cast<std::uint32_t>(needle.size()) <= start + length; ++address) {
             bool match = true;
             for (qsizetype i = 0; i < needle.size(); ++i) {
-                if (m_machine->debugRead8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(needle[i])) {
+                if (debugRead8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(needle[i])) {
                     match = false;
                     break;
                 }
@@ -1240,7 +1242,7 @@ private:
         QByteArray bytes;
         bytes.resize(static_cast<qsizetype>(*length));
         for (std::uint32_t i = 0; i < *length; ++i) {
-            bytes[static_cast<qsizetype>(i)] = static_cast<char>(m_machine->debugRead8(*address + i));
+            bytes[static_cast<qsizetype>(i)] = static_cast<char>(debugRead8(*address + i));
         }
         m_memorySnapshots[parts[1]] = { *address, bytes };
         m_out << "snapshot " << parts[1] << " bytes=" << bytes.size() << '\n';
@@ -1255,7 +1257,7 @@ private:
         const auto snapshot = m_memorySnapshots[parts[1]];
         int changes = 0;
         for (qsizetype i = 0; i < snapshot.bytes.size(); ++i) {
-            const auto now = m_machine->debugRead8(snapshot.address + static_cast<std::uint32_t>(i));
+            const auto now = debugRead8(snapshot.address + static_cast<std::uint32_t>(i));
             const auto was = static_cast<std::uint8_t>(snapshot.bytes[i]);
             if (now != was) {
                 m_out << hexValue(snapshot.address + static_cast<std::uint32_t>(i)) << ' '
@@ -1662,7 +1664,7 @@ private:
     void printVectors()
     {
         for (std::uint32_t address = 0; address < 0x40; address += 4) {
-            m_out << hexValue(address, 4) << " = " << hexValue(m_machine->debugRead32(address)) << '\n';
+            m_out << hexValue(address, 4) << " = " << hexValue(debugRead32(address)) << '\n';
         }
     }
 
@@ -1681,7 +1683,7 @@ private:
             { QStringLiteral("IWM"), 0x01e0 },
         };
         for (auto it = globals.cbegin(); it != globals.cend(); ++it) {
-            m_out << it.key() << " " << hexValue(it.value(), 4) << " = " << hexValue(m_machine->debugRead32(it.value())) << '\n';
+            m_out << it.key() << " " << hexValue(it.value(), 4) << " = " << hexValue(debugRead32(it.value())) << '\n';
         }
     }
 
@@ -2241,7 +2243,7 @@ private:
     {
         if (parts.size() == 1 || parts[1] == QStringLiteral("status")) {
             for (auto it = m_lowMemoryNames.cbegin(); it != m_lowMemoryNames.cend(); ++it) {
-                m_out << it.key() << ' ' << hexValue(it.value(), 4) << " = " << hexValue(m_machine->debugRead32(it.value())) << '\n';
+                m_out << it.key() << ' ' << hexValue(it.value(), 4) << " = " << hexValue(debugRead32(it.value())) << '\n';
             }
             m_out << '\n';
             return;
@@ -2252,7 +2254,7 @@ private:
                 m_out << "unknown lowmem name/address\n";
                 return;
             }
-            m_lowMemoryWatchValues[parts[2]] = m_machine->debugRead32(*address);
+            m_lowMemoryWatchValues[parts[2]] = debugRead32(*address);
             m_out << "lowmem watch " << parts[2] << '\n';
             return;
         }
@@ -2323,7 +2325,7 @@ private:
         for (std::uint32_t address = 0; address + static_cast<std::uint32_t>(needle.size()) <= length; ++address) {
             bool match = true;
             for (qsizetype i = 0; i < needle.size(); ++i) {
-                if (m_machine->debugRead8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(needle[i])) {
+                if (debugRead8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(needle[i])) {
                     match = false;
                     break;
                 }
@@ -2607,7 +2609,129 @@ private:
             printPanicInfo();
             return;
         }
-        m_out << "usage: panic open <archive> | panic close | panic info | panic extract <dir> | panic write [note]\n";
+        if (subcommand == QStringLiteral("analyze") || subcommand == QStringLiteral("analyse")) {
+            analyzePanic();
+            return;
+        }
+        m_out << "usage: panic open <archive> | panic close | panic info | panic analyze"
+              << " | panic extract <dir> | panic write [note]\n";
+    }
+
+    // The classic Mac system error IDs a user actually sees in the bomb box.
+    // The ID is what the guest reports, not what the host thinks happened, so
+    // it is the first thing worth naming in a post-mortem.
+    [[nodiscard]] static QString systemErrorName(int code)
+    {
+        switch (code) {
+        case 1: return QStringLiteral("bus error");
+        case 2: return QStringLiteral("address error");
+        case 3: return QStringLiteral("illegal instruction");
+        case 4: return QStringLiteral("zero divide");
+        case 5: return QStringLiteral("range check (CHK)");
+        case 6: return QStringLiteral("overflow (TRAPV)");
+        case 7: return QStringLiteral("privilege violation");
+        case 8: return QStringLiteral("trace");
+        case 9: return QStringLiteral("line 1010 (unimplemented A-trap)");
+        case 10: return QStringLiteral("line 1111 (unimplemented F-line: FPU or coprocessor opcode)");
+        case 11: return QStringLiteral("miscellaneous hardware exception");
+        case 12: return QStringLiteral("unimplemented core routine");
+        case 13: return QStringLiteral("uninstalled interrupt");
+        case 15: return QStringLiteral("segment loader error");
+        case 25: return QStringLiteral("out of memory");
+        case 28: return QStringLiteral("stack overflow");
+        case 33: return QStringLiteral("heap corrupted (bad block header)");
+        default: return QStringLiteral("unclassified");
+        }
+    }
+
+    // Reads the post-mortem out of the dump instead of leaving it to be dug out
+    // of the archive by hand. Everything here comes from captured RAM and the
+    // snapshot's own CPU state, so it works identically on a live machine.
+    void analyzePanic()
+    {
+        const auto sysVersion = debugRead16(0x015a);
+        const auto errorCode = static_cast<qint16>(debugRead16(0x0af0));
+        const auto cpuFlag = debugRead8(0x012f);
+        const auto mmu32Bit = debugRead8(0x0cb2);
+        const auto hwCfgFlags = debugRead16(0x0b22);
+        const auto romBase = debugRead32(0x02ae);
+
+        m_out << "== guest ==\n";
+        m_out << "system_version=" << QStringLiteral("%1.%2.%3")
+                     .arg((sysVersion >> 8) & 0xf).arg((sysVersion >> 4) & 0xf).arg(sysVersion & 0xf)
+              << " cpu_flag=" << cpuFlag << " (680" << (cpuFlag == 0 ? 0 : cpuFlag) << "0)"
+              << " addressing=" << (mmu32Bit != 0 ? "32-bit" : "24-bit") << '\n';
+        m_out << "rom_base=" << hexValue(romBase)
+              << " hw_cfg_flags=" << hexValue(hwCfgFlags, 4)
+              << " has_fpu=" << ((hwCfgFlags & 0x1000) != 0 ? "yes" : "no")
+              << " has_mmu=" << ((hwCfgFlags & 0x0800) != 0 ? "yes" : "no") << '\n';
+
+        m_out << "== failure ==\n";
+        if (errorCode == 0) {
+            m_out << "DSErrCode=0; the guest did not report a system error. If it was wedged rather\n"
+                  << "than bombed, look at the PC, the interrupt level and the device state below.\n";
+        } else {
+            m_out << "DSErrCode=" << errorCode << " (" << systemErrorName(errorCode) << ")\n";
+            if (errorCode == 10 && (hwCfgFlags & 0x1000) != 0) {
+                m_out << "the guest believes an FPU is fitted, so the trapping opcode is an F-line\n"
+                      << "encoding this build does not dispatch, not a missing coprocessor\n";
+            }
+        }
+
+        // A fatal vector still pointing at its ROM SysError stub means nothing
+        // caught the exception; a vector pointing into RAM means a patch did.
+        m_out << "== fatal vectors ==\n";
+        static const QVector<QPair<int, const char*>> vectors {
+            { 2, "bus error" }, { 3, "address error" }, { 4, "illegal instruction" },
+            { 8, "privilege violation" }, { 10, "line 1010" }, { 11, "line 1111" },
+        };
+        for (const auto& [number, name] : vectors) {
+            const auto handler = debugRead32(static_cast<std::uint32_t>(number) * 4);
+            m_out << "  vector " << number << " (" << name << ") -> " << hexValue(handler)
+                  << (handler >= romBase ? "  rom"
+                          : handler < 0x00010000U ? "  rom SysError stub (unhandled)"
+                                                  : "  patched into RAM")
+                  << '\n';
+        }
+
+        m_out << "== cpu ==\n";
+        const auto& cpu = currentCpuSnapshot();
+        m_out << "pc=" << hexValue(cpu.pc) << " sp=" << hexValue(cpu.stackPointer)
+              << " interrupt_level=" << cpu.interruptLevel
+              << " halted=" << (cpu.halted ? "yes" : "no")
+              << " stopped=" << (cpu.stopped ? "yes" : "no") << '\n';
+        if (!cpu.mmuRegisters.isEmpty()) {
+            const auto enabled = cpu.mmuRegisters.value(QStringLiteral("enabled"));
+            const auto mmusr = cpu.mmuRegisters.value(QStringLiteral("mmusr"));
+            const auto fault = cpu.mmuRegisters.value(QStringLiteral("fault_address"));
+            m_out << "mmu enabled=" << enabled << " mmusr=" << hexValue(static_cast<std::uint32_t>(mmusr), 4)
+                  << " fault_address=" << hexValue(static_cast<std::uint32_t>(fault))
+                  << (enabled != 0 && mmusr == 0 && fault == 0 ? "  (translating normally)" : "")
+                  << '\n';
+        }
+
+        m_out << "== capture gaps ==\n";
+        if (m_snapshot != nullptr && m_snapshot->snapshot().traces.isEmpty()) {
+            m_out << "no trace rings were captured, so the faulting PC and opcode cannot be\n"
+                  << "recovered from this dump: by the time a system error dialog is up, the\n"
+                  << "exception frame has already been unwound. Enable trace capture before\n"
+                  << "reproducing to identify the instruction.\n";
+        } else if (m_snapshot != nullptr) {
+            for (auto it = m_snapshot->snapshot().traces.cbegin(); it != m_snapshot->snapshot().traces.cend(); ++it) {
+                m_out << "trace ring '" << it.key() << "' records=" << it.value().size() << '\n';
+            }
+        }
+        if (m_snapshot != nullptr && m_snapshot->unmappedReads() > 0) {
+            m_out << "unmapped reads so far=" << m_snapshot->unmappedReads()
+                  << " (addresses outside every captured region read as open bus)\n";
+        }
+        m_out.flush();
+    }
+
+    [[nodiscard]] const cutemac::debug::CpuSnapshot& currentCpuSnapshot() const
+    {
+        static const cutemac::debug::CpuSnapshot empty;
+        return m_snapshot != nullptr ? m_snapshot->snapshot().cpu : empty;
     }
 
     void openPanicArchive(const QString& path)

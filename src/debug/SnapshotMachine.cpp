@@ -56,9 +56,13 @@ public:
             if (!region.readable || region.contents.isEmpty()) continue;
             if (address < region.base) continue;
             const auto offset = address - region.base;
-            if (offset >= region.length) continue;
-            if (offset >= static_cast<std::uint32_t>(region.contents.size())) continue;
-            return static_cast<std::uint8_t>(region.contents.at(static_cast<qsizetype>(offset)));
+            const auto window = region.decodeLength != 0 ? region.decodeLength : region.length;
+            if (offset >= window) continue;
+            const auto captured = static_cast<std::uint32_t>(region.contents.size());
+            if (captured == 0) continue;
+            // Mirrored regions repeat their contents across the decode window,
+            // matching how the machine's address decoder answers.
+            return static_cast<std::uint8_t>(region.contents.at(static_cast<qsizetype>(offset % captured)));
         }
         ++m_unmappedReads;
         return 0xff;

@@ -25,6 +25,11 @@ struct MemoryRegion {
     QString kind;                 // ram | rom | vram | io | mirror | open-bus
     std::uint32_t base = 0;
     std::uint32_t length = 0;
+    // Width of the address window that decodes to this region, when the machine
+    // mirrors it. ROM answers across a whole 256 MB window on the II family, so
+    // a dump that only mapped `length` bytes leaves the PC reading open bus.
+    // Zero means the region decodes exactly its own length.
+    std::uint32_t decodeLength = 0;
     bool readable = true;
     bool writable = false;
     // Archive member holding the bytes, empty when the region is described but

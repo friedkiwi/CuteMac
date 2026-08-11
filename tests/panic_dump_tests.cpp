@@ -218,6 +218,92 @@ void testFileNaming()
     check(name.endsWith(QStringLiteral(".cutemacpanic")), "file name carries the archive extension");
 }
 
+// A machine that mirrors its ROM must stay disassemblable at the captured PC.
+// The IIcx reset vector and ROMBase both point above the first copy of the
+// image, so a dump that maps one copy reads open bus exactly where a reader
+// needs instructions.
+void testMirroredRomIsReadableAtPc(const QString& directory)
+{
+    using namespace cutemac::debug;
+
+    MachineSnapshot snapshot = makeSnapshot();
+    snapshot.machineId = QStringLiteral("mac-iicx");
+    snapshot.cpu.architecture = QStringLiteral("m68k:68030");
+    snapshot.cpu.pc = 0x40802436;
+    snapshot.memory.clear();
+
+    MemoryRegion rom;
+    rom.name = QStringLiteral("rom");
+    rom.kind = QStringLiteral("rom");
+    rom.base = 0x40000000;
+    rom.length = 0x40000;
+    rom.decodeLength = 0x10000000;
+    rom.contentsMember = QStringLiteral("mem/rom.bin");
+    rom.contents = QByteArray(0x40000, '\0');
+    rom.contents[0x2436] = static_cast<char>(0x4e);
+    rom.contents[0x2437] = static_cast<char>(0x75); // rts
+    snapshot.memory.append(rom);
+
+    SnapshotMachine mirrored(snapshot);
+    check(mirrored.debugRead16(0x40802436) == 0x4e75,
+        "a mirrored rom region answers at the captured pc, not just at its base");
+    check(mirrored.debugRead16(0x40002436) == 0x4e75,
+        "a mirrored rom region still answers at its base copy");
+    check(mirrored.unmappedReads() == 0, "reads inside the mirror window are not open bus");
+
+    PanicDumpRequest request;
+    request.directory = directory;
+    const auto written = writePanicDump(snapshot, request);
+    check(written.ok, "a snapshot with a mirrored region writes");
+
+    QString error;
+    const auto reloaded = loadPanicDump(written.path, error);
+    check(reloaded.has_value(), "a mirrored region survives the archive round trip");
+    if (reloaded.has_value()) {
+        SnapshotMachine restored(*reloaded);
+        check(restored.debugRead16(0x40802436) == 0x4e75,
+            "the mirror width round-trips through the archive");
+    }
+
+    // Schema-1 archives predate the mirror width. Loading one must still put
+    // instructions under the captured pc rather than leaving it open bus.
+    auto legacy = snapshot;
+    legacy.memory[0].decodeLength = 0;
+    SnapshotMachine narrow(legacy);
+    check(narrow.debugRead16(0x40802436) == 0xffff,
+        "without a mirror width the captured pc reads open bus");
+}
+
+// Every reader command has to work against a dump. These used to dereference
+// the live machine pointer and crash the debug session outright.
+void testSnapshotServesLowMemoryAndVectors()
+{
+    using namespace cutemac::debug;
+
+    MachineSnapshot snapshot = makeSnapshot();
+    snapshot.memory.clear();
+
+    MemoryRegion ram;
+    ram.name = QStringLiteral("ram");
+    ram.kind = QStringLiteral("ram");
+    ram.base = 0;
+    ram.length = 0x10000;
+    ram.writable = true;
+    ram.contentsMember = QStringLiteral("mem/ram.bin");
+    ram.contents = QByteArray(0x10000, '\0');
+    ram.contents[0x0af0] = static_cast<char>(0x00);
+    ram.contents[0x0af1] = static_cast<char>(0x0a); // DSErrCode = 10
+    ram.contents[0x002c] = static_cast<char>(0x00);
+    ram.contents[0x002d] = static_cast<char>(0x00);
+    ram.contents[0x002e] = static_cast<char>(0x42);
+    ram.contents[0x002f] = static_cast<char>(0x64); // line 1111 vector
+    snapshot.memory.append(ram);
+
+    SnapshotMachine machine(snapshot);
+    check(machine.debugRead16(0x0af0) == 10, "DSErrCode is readable from a dump");
+    check(machine.debugRead32(0x2c) == 0x00004264, "the vector table is readable from a dump");
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -235,6 +321,8 @@ int main(int argc, char* argv[])
     testFileNaming();
     testRoundTrip(directory.path());
     testDegradedCapture(directory.path());
+    testMirroredRomIsReadableAtPc(directory.path());
+    testSnapshotServesLowMemoryAndVectors();
 
     if (failures != 0) {
         std::cerr << failures << " panic dump check(s) failed\n";

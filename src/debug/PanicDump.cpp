@@ -238,6 +238,10 @@ QByteArray serializeSnapshot(const MachineSnapshot& snapshot)
         entry.insert(QStringLiteral("kind"), region.kind);
         entry.insert(QStringLiteral("base"), QStringLiteral("0x%1").arg(region.base, 8, 16, QLatin1Char('0')));
         entry.insert(QStringLiteral("length"), QStringLiteral("0x%1").arg(region.length, 8, 16, QLatin1Char('0')));
+        if (region.decodeLength != 0 && region.decodeLength != region.length) {
+            entry.insert(QStringLiteral("decode_length"),
+                QStringLiteral("0x%1").arg(region.decodeLength, 8, 16, QLatin1Char('0')));
+        }
         entry.insert(QStringLiteral("readable"), region.readable);
         entry.insert(QStringLiteral("writable"), region.writable);
         entry.insert(QStringLiteral("contents_member"), region.contentsMember);
@@ -299,6 +303,7 @@ std::optional<MachineSnapshot> deserializeSnapshot(const QByteArray& json)
         region.kind = object.value(QStringLiteral("kind")).toString();
         region.base = parseHex32(object.value(QStringLiteral("base")).toString());
         region.length = parseHex32(object.value(QStringLiteral("length")).toString());
+        region.decodeLength = parseHex32(object.value(QStringLiteral("decode_length")).toString());
         region.readable = object.value(QStringLiteral("readable")).toBool();
         region.writable = object.value(QStringLiteral("writable")).toBool();
         region.contentsMember = object.value(QStringLiteral("contents_member")).toString();
@@ -480,6 +485,44 @@ PanicDumpResult capturePanicDump(core::IDebugMachineAccess& access, const PanicD
     return result;
 }
 
+namespace {
+
+// Schema-1 archives recorded a ROM region as one copy of the image, without
+// saying that the machine mirrors it across a much wider window. On the II
+// family the reset vector and ROMBase both point above that first copy, so the
+// captured PC read as open bus and disassembly came back as `dc.w $ffff`.
+// Newer dumps carry decodeLength; for older ones, widen a ROM region only when
+// its contents would in fact cover an otherwise unreadable PC, and say so.
+void widenMirroredRomForCapturedPc(MachineSnapshot& snapshot)
+{
+    const auto pc = snapshot.cpu.pc;
+    const auto covered = [&](const MemoryRegion& region) {
+        if (!region.readable || region.contents.isEmpty()) return false;
+        const auto window = region.decodeLength != 0 ? region.decodeLength : region.length;
+        return pc >= region.base && pc - region.base < window;
+    };
+    for (const auto& region : snapshot.memory) {
+        if (covered(region)) return;
+    }
+    for (auto& region : snapshot.memory) {
+        if (region.kind != QStringLiteral("rom") || region.contents.isEmpty()) continue;
+        if (region.decodeLength != 0 || pc < region.base) continue;
+        const auto offset = pc - region.base;
+        // Only mirroring can explain the PC, and only if the image repeats.
+        if (offset % static_cast<std::uint32_t>(region.contents.size()) >= static_cast<std::uint32_t>(region.contents.size())) continue;
+        region.decodeLength = offset + static_cast<std::uint32_t>(region.contents.size());
+        snapshot.notes.append(QStringLiteral(
+            "memory region %1 was recorded without a mirror width; widened to %2 bytes so the "
+            "captured pc %3 is readable")
+                .arg(region.name)
+                .arg(region.decodeLength)
+                .arg(QStringLiteral("0x%1").arg(pc, 8, 16, QLatin1Char('0'))));
+        return;
+    }
+}
+
+} // namespace
+
 std::optional<MachineSnapshot> loadPanicDump(const QString& path, QString& error)
 {
     PanicArchiveReader reader(path);
@@ -509,6 +552,7 @@ std::optional<MachineSnapshot> loadPanicDump(const QString& path, QString& error
                 QStringLiteral("memory region %1 has no contents in the archive").arg(region.name));
         }
     }
+    widenMirroredRomForCapturedPc(*snapshot);
     return snapshot;
 }
 
