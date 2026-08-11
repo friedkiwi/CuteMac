@@ -182,7 +182,7 @@ add_library(CuteMacCore
     src/core/SessionRunner.cpp
     src/devices/cuda/CudaController.cpp
     src/cpu/m68k/M68kCpuCore.cpp
-    src/cpu/m68k/M68kFpuDiagnostics.cpp
+    src/cpu/m68k/M68kCoprocessorDiagnostics.cpp
     src/cpu/m68k/engine/m68kcpu.c
     src/cpu/m68k/engine/m68kdasm.c
     src/cpu/m68k/engine/m68kops.c

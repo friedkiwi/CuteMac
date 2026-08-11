@@ -14,7 +14,7 @@
 
 #include "cutemac/cpu/m68k/M68kBus.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
-#include "cutemac/cpu/m68k/M68kFpuDiagnostics.h"
+#include "cutemac/cpu/m68k/M68kCoprocessorDiagnostics.h"
 
 namespace {
 
@@ -88,7 +88,7 @@ public:
         m_bus.write16(line1111Handler, 0x4e72); // stop #imm
         m_bus.write16(line1111Handler + 2, 0x2700);
         m_cpu.reset();
-        cutemac::cpu::m68k::clearFpuDiagnostics();
+        cutemac::cpu::m68k::clearCoprocessorDiagnostics();
     }
 
     // Assembles one instruction at codeBase and runs it. Returns the pc.
@@ -149,7 +149,7 @@ void testUnimplementedEncodingRaisesLine1111()
     // FMOVE.X with an opmode that is not a defined 68881 operation.
     machine.run({ 0xf200, 0x007b });
     expect(machine.tookLine1111(), "an undefined opmode raises line 1111 rather than exiting");
-    const auto records = cutemac::cpu::m68k::fpuDiagnosticRecords();
+    const auto records = cutemac::cpu::m68k::coprocessorDiagnosticRecords();
     expect(!records.isEmpty(), "a refused encoding is recorded for the panic dump");
     if (!records.isEmpty()) {
         expect(records.first().pc == codeBase, "the record names the faulting instruction");
@@ -170,7 +170,7 @@ void testDiagnosticsRingIsBounded()
             machine.run({ 0xf200, static_cast<std::uint16_t>((dst << 7) | opmode) });
         }
     }
-    const auto records = cutemac::cpu::m68k::fpuDiagnosticRecords();
+    const auto records = cutemac::cpu::m68k::coprocessorDiagnosticRecords();
     expect(!records.isEmpty(), "the diagnostics ring keeps records");
     expect(records.size() <= 64, "the diagnostics ring stays bounded");
 }
@@ -251,7 +251,7 @@ void testTranscendentals()
                       << test.expected << '\n';
             ++failures;
         }
-        expect(cutemac::cpu::m68k::fpuDiagnosticRecords().isEmpty(),
+        expect(cutemac::cpu::m68k::coprocessorDiagnosticRecords().isEmpty(),
             "a defined 68881 operation must not be refused");
     }
 }
@@ -264,7 +264,7 @@ void testExactOperations()
     Machine machine;
     expect(closeEnough(runUnary(machine, 0x1f, 12.0), 1.5), "FGETMAN returns the mantissa in [1,2)");
     expect(closeEnough(runUnary(machine, 0x1e, 12.0), 3.0), "FGETEXP returns the unbiased exponent");
-    expect(cutemac::cpu::m68k::fpuDiagnosticRecords().isEmpty(),
+    expect(cutemac::cpu::m68k::coprocessorDiagnosticRecords().isEmpty(),
         "the exact operations are implemented");
 }
 
@@ -273,7 +273,7 @@ void testDomainErrorsSetOperr()
     Machine machine;
     const auto result = runUnary(machine, 0x14, -1.0); // FLOGN(-1)
     expect(std::isnan(result), "a domain error returns a NaN rather than refusing the instruction");
-    expect(cutemac::cpu::m68k::fpuDiagnosticRecords().isEmpty(),
+    expect(cutemac::cpu::m68k::coprocessorDiagnosticRecords().isEmpty(),
         "a domain error is not a refused encoding");
 }
 
@@ -371,6 +371,37 @@ void testNoFpuRaisesLine1111()
     machine.cpu().setFpuModel(cutemac::cpu::m68k::M68kCpuCore::FpuModel::M68882);
 }
 
+// The PMMU refuses encodings too, and used to do it without a trace. A guest
+// bombing with system error 10 and an empty ring is indistinguishable from one
+// that never reached a coprocessor at all, which is exactly the ambiguity that
+// cost a diagnosis.
+void testPmmuRefusalsAreRecorded()
+{
+    Machine machine;
+    // PMOVE to MMU register 1: a 68851 register the 68030 decoder does not
+    // implement. Extension selects PMOVE (bits 15-13 = 010) with register 1.
+    machine.run({ 0xf039, 0x4400, 0x0000, 0x4000 });
+    const auto records = cutemac::cpu::m68k::coprocessorDiagnosticRecords();
+    expect(!records.isEmpty(), "a refused PMMU encoding is recorded");
+    if (!records.isEmpty()) {
+        expect(records.first().unit == QStringLiteral("pmmu"),
+            "a PMMU refusal is labelled as the PMMU, not the FPU");
+        expect(records.first().extension != 0,
+            "a PMMU refusal carries the extension word that selected the register");
+    }
+    expect(machine.tookLine1111(), "a refused PMMU encoding still raises line 1111");
+}
+
+// Both units share one ring, so a reader can tell which refused what.
+void testUnitsAreDistinguished()
+{
+    Machine machine;
+    machine.run({ 0xf200, 0x007b });          // undefined FPU opmode
+    const auto records = cutemac::cpu::m68k::coprocessorDiagnosticRecords();
+    expect(!records.isEmpty() && records.first().unit == QStringLiteral("fpu"),
+        "an FPU refusal is labelled as the FPU");
+}
+
 } // namespace
 
 int main()
@@ -385,6 +416,8 @@ int main()
     testFpiarTracksTheInstruction();
     testStateFrameFormatFollowsTheModel();
     testNoFpuRaisesLine1111();
+    testPmmuRefusalsAreRecorded();
+    testUnitsAreDistinguished();
 
     if (failures != 0) {
         std::cerr << failures << " FPU check(s) failed\n";

@@ -1,4 +1,4 @@
-#include "cutemac/cpu/m68k/M68kFpuDiagnostics.h"
+#include "cutemac/cpu/m68k/M68kCoprocessorDiagnostics.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/debug/SnapshotBuilder.h"
 #include "cutemac/rom/RomPatcher.h"
@@ -1251,12 +1251,12 @@ debug::MachineSnapshot MacPlusMachine::debugSnapshot() const
 
     snapshot.frame = videoFrame();
     snapshot.schedulerEvents = m_scheduler.pendingEvents();
-    // Floating-point encodings the FPU refused. A guest that bombs with system
-    // error 10 leaves no exception frame behind by the time the dialog is up,
-    // so without this a dump cannot name the instruction that did it.
-    const auto fpuDiagnostics = cpu::m68k::fpuDiagnosticLines();
-    if (!fpuDiagnostics.isEmpty()) {
-        snapshot.traces.insert(QStringLiteral("fpu-refused"), fpuDiagnostics);
+    // F-line coprocessor encodings the FPU or PMMU refused. A guest that bombs
+    // with system error 10 leaves no exception frame behind by the time the
+    // dialog is up, so without this a dump cannot name the instruction.
+    const auto coprocessorDiagnostics = cpu::m68k::coprocessorDiagnosticLines();
+    if (!coprocessorDiagnostics.isEmpty()) {
+        snapshot.traces.insert(QStringLiteral("fline-refused"), coprocessorDiagnostics);
     }
     if (!m_eventLog.isEmpty()) {
         QStringList events;

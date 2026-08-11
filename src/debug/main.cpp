@@ -2676,10 +2676,10 @@ private:
                 m_out << "the guest believes an FPU is fitted, so the trapping opcode is an F-line\n"
                       << "encoding this build does not dispatch, not a missing coprocessor\n";
                 if (m_snapshot != nullptr
-                    && m_snapshot->snapshot().traces.value(QStringLiteral("fpu-refused")).isEmpty()) {
-                    m_out << "this dump carries no fpu-refused record: either the encoding was not a\n"
+                    && m_snapshot->snapshot().traces.value(QStringLiteral("fline-refused")).isEmpty()) {
+                    m_out << "this dump carries no fline-refused record: either the encoding was not a\n"
                           << "coprocessor opcode (look outside the 0xF000-0xF3FF range the FPU and PMMU\n"
-                          << "decode), or the dump predates FPU refusal tracking\n";
+                          << "decode), or the dump predates coprocessor refusal tracking\n";
                 }
             }
         }
@@ -2724,14 +2724,14 @@ private:
                   << "reproducing to identify the instruction.\n";
         } else if (m_snapshot != nullptr) {
             const auto& traces = m_snapshot->snapshot().traces;
-            const auto refused = traces.value(QStringLiteral("fpu-refused"));
+            const auto refused = traces.value(QStringLiteral("fline-refused"));
             if (!refused.isEmpty()) {
-                m_out << "the FPU refused " << refused.size()
+                m_out << "the FPU or PMMU refused " << refused.size()
                       << " encoding(s); the earliest is the one to look at first:\n";
                 for (const auto& line : refused) m_out << "  " << line << '\n';
             }
             for (auto it = traces.cbegin(); it != traces.cend(); ++it) {
-                if (it.key() == QStringLiteral("fpu-refused")) continue;
+                if (it.key() == QStringLiteral("fline-refused")) continue;
                 m_out << "trace ring '" << it.key() << "' records=" << it.value().size() << '\n';
             }
         }

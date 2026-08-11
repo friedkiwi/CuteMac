@@ -29,7 +29,8 @@ changing code in that subsystem.
 ### Floating point
 
 - The Macintosh IIcx shipped with a 68882 and the Quadra 700's FPU is on the 68040 die, so both machines call `setFpuModel()` after `setModel()`. A machine that fits no coprocessor must select `FpuModel::None`, which sends cpid-1 F-line opcodes to the exception vector the way a 68020 without a 68881 does.
-- F-line dispatch: `0xF000`-`0xF1FF` is the PMMU, `0xF200`-`0xF2FF` and `0xF300`-`0xF3FF` are the FPU, and everything else falls to the generic handler and raises line-1111. A guest bombing with system error 10 and nothing in the `fpu-refused` ring therefore executed an F-line outside the coprocessor range.
+- F-line dispatch: `0xF000`-`0xF1FF` is the PMMU, `0xF200`-`0xF2FF` and `0xF300`-`0xF3FF` are the FPU, and everything else falls to the generic handler and raises line-1111. Both units record what they refuse into the `fline-refused` trace ring, tagged `fpu` or `pmmu`, so a guest bombing with system error 10 and an empty ring executed an F-line outside the coprocessor range entirely.
+- The PMMU refuses more than the 68040 native instructions: `PVALID`, the `PBcc`/`PDBcc`/`PScc`/`PTRAPcc` conditional forms, transparent-translation registers other than TT0 and TT1, and `PMOVE` to or from any MMU register other than TC, SRP and CRP. MODE32 and the 68030 ROM exercise this decoder heavily, so these are worth checking first when a 32-bit-addressing guest bombs with error 10.
 - Opmodes `0x40`-`0x7f` are the 68040 rounding-precision variants (`FSxxx`/`FDxxx`), masked down to their base operation before dispatch; they are not undefined encodings. When an instruction encodes no precision, FPCR bits 7-6 select it.
 - `FSAVE`/`FRESTORE` carry the coprocessor's internal state, not FP0-FP7 — those travel separately through `FMOVEM`. A non-NULL frame on restore therefore only means "the FPU was in use"; there is nothing to load back into the register file.
 

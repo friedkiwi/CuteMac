@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include "m68kcpu.h"
-#include "cutemac/cpu/m68k/M68kFpuDiagnostics.h"
+#include "cutemac/cpu/m68k/M68kCoprocessorDiagnostics.h"
 
 /* An encoding the FPU cannot execute must never end the host process. Both
    helpers below record what happened and raise a line-1111 exception, which is
@@ -18,15 +18,42 @@
    fpu_unimplemented() marks a CuteMac limitation, so a panic dump distinguishes
    "the guest is wrong" from "we are". */
 
-static void fpu_report(int limitation, const char *format, va_list ap)
+/* Shared by the FPU below and the PMMU in m68kmmu.h, which is included into the
+   same translation unit after this file. */
+static void coproc_report(const char *unit, uint16_t extension, int limitation,
+	const char *format, va_list ap)
 {
 	char detail[192];
 	vsnprintf(detail, sizeof(detail), format, ap);
-	/* The extension word is not reachable from every call site; the pc and the
-	   opcode identify the instruction, and a reader can disassemble for the
-	   rest. */
-	cutemac_m68k_fpu_report(ADDRESS_68K(REG_PPC), (uint16_t)REG_IR, 0, detail, limitation);
+	cutemac_m68k_coprocessor_report(ADDRESS_68K(REG_PPC), (uint16_t)REG_IR, extension,
+		unit, detail, limitation);
 	m68ki_exception_1111();
+}
+
+static void fpu_report(int limitation, const char *format, va_list ap)
+{
+	/* The extension word is not reachable from every FPU call site; the pc and
+	   the opcode identify the instruction, and a reader can disassemble for the
+	   rest. The PMMU sites below do pass theirs. */
+	coproc_report("fpu", 0, limitation, format, ap);
+}
+
+/* The PMMU refuses encodings too, and used to do it silently: the guest bombed
+   with system error 10 and nothing recorded which instruction did it. */
+static void pmmu_illegal(uint16_t extension, const char *format, ...)
+{
+	va_list ap;
+	va_start(ap, format);
+	coproc_report("pmmu", extension, 0, format, ap);
+	va_end(ap);
+}
+
+static void pmmu_unimplemented(uint16_t extension, const char *format, ...)
+{
+	va_list ap;
+	va_start(ap, format);
+	coproc_report("pmmu", extension, 1, format, ap);
+	va_end(ap);
 }
 
 static void fatalerror(const char *format, ...) {

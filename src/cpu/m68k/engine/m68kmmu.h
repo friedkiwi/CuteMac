@@ -126,7 +126,7 @@ static int pmmu_decode_ea(uint ea, uint *address)
 				case 1: *address = EA_AL_32(); return 1;
 			}
 	}
-	m68ki_exception_1111();
+	pmmu_illegal(0, "PMMU addressing mode %d reg %d has no effective address", (REG_IR >> 3) & 7, REG_IR & 7);
 	return 0;
 }
 
@@ -476,17 +476,17 @@ void m68881_mmu_ops(void)
 	 * for the future native 68040 implementation. */
 	if (m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040)
 	{
-		m68ki_exception_1111();
+		pmmu_unimplemented(0, "68040 native MMU instruction; only the 68851/68030 decoder is implemented");
 		return;
 	}
 	if ((REG_IR & 0xffc0) == 0xf0c0 || (REG_IR & 0xffc0) == 0xf080)
 	{
-		m68ki_exception_1111();
+		pmmu_unimplemented(0, "PBcc/PDBcc/PScc/PTRAPcc conditional form");
 		return;
 	}
 	if (((REG_IR >> 9) & 7) != 0)
 	{
-		m68ki_exception_1111();
+		pmmu_illegal(0, "coprocessor id %d is not the PMMU", (REG_IR >> 9) & 7);
 		return;
 	}
 	modes = OPER_I_16();
@@ -516,7 +516,7 @@ void m68881_mmu_ops(void)
 		pmmu_translation_result result;
 		if (m68ki_cpu.mmu_kind == M68K_MMU_KIND_68030 && level == 0 && (modes & 0x100))
 		{
-			m68ki_exception_1111();
+			pmmu_illegal((uint16_t)modes, "PTEST level 0 with an A register is invalid on the 68030");
 			return;
 		}
 		if (!pmmu_decode_ea(ea, &address)) return;
@@ -529,7 +529,7 @@ void m68881_mmu_ops(void)
 	}
 	if (modes == 0x2800 || (modes & 0xfff8) == 0x2c00) /* PVALID */
 	{
-		m68ki_exception_1111();
+		pmmu_unimplemented((uint16_t)modes, "PVALID is a 68851 instruction");
 		return;
 	}
 
@@ -538,7 +538,10 @@ void m68881_mmu_ops(void)
 		case 0: /* TT0/TT1 */
 		{
 			const uint reg = (modes >> 10) & 7;
-			if (reg != 2 && reg != 3) { m68ki_exception_1111(); return; }
+			if (reg != 2 && reg != 3) {
+				pmmu_unimplemented((uint16_t)modes, "PMOVE transparent translation register %d (only TT0 and TT1 exist)", reg);
+				return;
+			}
 			if (modes & 0x200)
 				WRITE_EA_32(ea, reg == 2 ? m68ki_cpu.mmu_tt0 : m68ki_cpu.mmu_tt1);
 			else
@@ -557,7 +560,9 @@ void m68881_mmu_ops(void)
 				if (reg == 0) WRITE_EA_32(ea, m68ki_cpu.mmu_tc);
 				else if (reg == 2) WRITE_EA_64(ea, (uint64)m68ki_cpu.mmu_srp_limit << 32 | m68ki_cpu.mmu_srp_aptr);
 				else if (reg == 3) WRITE_EA_64(ea, (uint64)m68ki_cpu.mmu_crp_limit << 32 | m68ki_cpu.mmu_crp_aptr);
-				else m68ki_exception_1111();
+				else {
+					pmmu_unimplemented((uint16_t)modes, "PMOVE from MMU register %d (TC, SRP and CRP are implemented)", reg);
+				}
 				return;
 			}
 			if (reg == 0)
@@ -584,7 +589,10 @@ void m68881_mmu_ops(void)
 				m68ki_cpu.mmu_crp_limit = (uint)(temp64 >> 32);
 				m68ki_cpu.mmu_crp_aptr = (uint)temp64;
 			}
-			else { m68ki_exception_1111(); return; }
+			else {
+				pmmu_unimplemented((uint16_t)modes, "PMOVE to MMU register %d (TC, SRP and CRP are implemented)", reg);
+				return;
+			}
 			if (!(modes & 0x100)) pmmu_atc_flush();
 			return;
 		}
@@ -593,5 +601,5 @@ void m68881_mmu_ops(void)
 			else m68ki_cpu.mmu_sr = (uint16)READ_EA_16(ea);
 			return;
 	}
-	m68ki_exception_1111();
+	pmmu_unimplemented((uint16_t)modes, "unhandled PMMU encoding");
 }

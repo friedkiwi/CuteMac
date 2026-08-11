@@ -1,13 +1,14 @@
 #pragma once
 
-// Reporting boundary for floating-point encodings the FPU cannot execute.
+// Reporting boundary for F-line coprocessor encodings the CPU cannot execute.
 //
-// The Musashi-derived FPU used to call a local fatalerror() that ran exit(1),
-// so a single guest instruction could terminate CuteMac with one line on
-// stderr: no dialog, no panic dump, nothing to diagnose from. Every one of
-// those sites now reports through here and raises a line-1111 exception, which
-// is what the hardware does for an encoding it cannot execute. The guest sees
-// system error 10 and the emulator stays up.
+// Both F-line units report here: the FPU (coprocessor id 1) and the PMMU
+// (coprocessor id 0). The FPU used to call a local fatalerror() that ran
+// exit(1), so a single guest instruction could terminate CuteMac; the PMMU
+// raised line-1111 silently, which is just as hard to diagnose because the
+// guest bombs with system error 10 and nothing records why. Every site now
+// reports through here and raises line-1111, which is what the hardware does
+// for an encoding it cannot execute.
 //
 // The C engine calls the extern "C" entry point; the ring behind it is bounded
 // and lives on the emulation thread, and is published through the debug
@@ -24,10 +25,11 @@
 
 namespace cutemac::cpu::m68k {
 
-struct FpuDiagnosticRecord {
+struct CoprocessorDiagnosticRecord {
     std::uint32_t pc = 0;       // instruction that could not be executed
     std::uint16_t opcode = 0;   // first word
     std::uint16_t extension = 0; // second word, 0 when the form has none
+    QString unit;               // "fpu" or "pmmu"
     // "unimplemented opmode $10 (FETOX)", "FSAVE addressing mode 7"
     QString detail;
     // False for encodings the hardware would also refuse. True marks a CuteMac
@@ -36,9 +38,9 @@ struct FpuDiagnosticRecord {
 };
 
 // Bounded ring, oldest dropped. Cleared on CPU reset.
-[[nodiscard]] QVector<FpuDiagnosticRecord> fpuDiagnosticRecords();
-[[nodiscard]] QStringList fpuDiagnosticLines();
-void clearFpuDiagnostics();
+[[nodiscard]] QVector<CoprocessorDiagnosticRecord> coprocessorDiagnosticRecords();
+[[nodiscard]] QStringList coprocessorDiagnosticLines();
+void clearCoprocessorDiagnostics();
 
 } // namespace cutemac::cpu::m68k
 
@@ -49,8 +51,8 @@ extern "C" {
 
 // `limitation` is non-zero when CuteMac is what cannot execute the encoding,
 // zero when the hardware would refuse it too.
-void cutemac_m68k_fpu_report(uint32_t pc, uint16_t opcode, uint16_t extension,
-    const char* detail, int limitation);
+void cutemac_m68k_coprocessor_report(uint32_t pc, uint16_t opcode, uint16_t extension,
+    const char* unit, const char* detail, int limitation);
 
 #ifdef __cplusplus
 }
