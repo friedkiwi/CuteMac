@@ -80,6 +80,7 @@ public:
     void debugWrite8(std::uint32_t address, std::uint8_t value) override;
     void debugWrite16(std::uint32_t address, std::uint16_t value) override;
     void debugWrite32(std::uint32_t address, std::uint32_t value) override;
+    [[nodiscard]] debug::MachineSnapshot debugSnapshot() const override;
 
 private:
     [[nodiscard]] bool isIo(std::uint32_t address) const;

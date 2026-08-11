@@ -1,4 +1,5 @@
 #include "cutemac/machines/quadra700/Quadra700Machine.h"
+#include "cutemac/debug/SnapshotBuilder.h"
 
 #include <algorithm>
 
@@ -298,7 +299,7 @@ devices::video::VideoFrame Quadra700Machine::videoFrame() const
 
 void Quadra700Machine::queueInput(const core::GuestInputEvent& event, std::uint64_t cycle)
 {
-    m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); });
+    m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); }, "guest-input");
 }
 
 std::uint8_t Quadra700Machine::read8(std::uint32_t address)
@@ -676,6 +677,73 @@ void Quadra700Machine::advanceDevices(int cpuCycles)
     }
     m_nubus.tick(static_cast<std::uint64_t>(cpuCycles));
     updateInterrupts();
+}
+
+
+debug::MachineSnapshot Quadra700Machine::debugSnapshot() const
+{
+    debug::MachineSnapshot snapshot;
+    snapshot.machineId = machineId();
+    snapshot.cycle = cycleCount();
+    snapshot.overlayEnabled = m_overlay;
+    snapshot.romLoaded = m_romLoaded;
+
+    const debug::MemoryReader read8 = [this](std::uint32_t address) { return debugRead8(address); };
+    const debug::Disassembler disassemble = [this](std::uint32_t address) {
+        return qMakePair(this->disassemble(address), disassembleBytes(address));
+    };
+    snapshot.cpu = debug::buildCpuSnapshot(cpuRegisters(), debugCpuArchitecture(), read8, disassemble);
+
+    debug::MemoryRegion ram;
+    ram.name = QStringLiteral("ram");
+    ram.kind = QStringLiteral("ram");
+    ram.base = 0;
+    ram.length = static_cast<std::uint32_t>(m_ram.size());
+    ram.writable = true;
+    ram.contentsMember = QStringLiteral("mem/ram.bin");
+    ram.contents = QByteArray(reinterpret_cast<const char*>(m_ram.constData()),
+        static_cast<qsizetype>(m_ram.size()));
+    snapshot.memory.append(ram);
+
+    debug::MemoryRegion rom;
+    rom.name = QStringLiteral("rom");
+    rom.kind = QStringLiteral("rom");
+    rom.base = romBase;
+    rom.length = static_cast<std::uint32_t>(m_rom.size());
+    rom.contentsMember = QStringLiteral("mem/rom.bin");
+    rom.contents = m_rom;
+    snapshot.memory.append(rom);
+
+    debug::MemoryRegion vram;
+    vram.name = QStringLiteral("vram-dafb");
+    vram.kind = QStringLiteral("vram");
+    vram.base = dafbVramBase;
+    vram.length = dafbVramSize;
+    vram.writable = true;
+    vram.contentsMember = QStringLiteral("mem/vram-dafb.bin");
+    vram.contents = m_dafb.vramBytes();
+    snapshot.memory.append(vram);
+
+    snapshot.devices.append(debug::viaSnapshot(QStringLiteral("via1"), m_via1.debugState()));
+    snapshot.devices.append(debug::viaSnapshot(QStringLiteral("via2"), m_via2.debugState()));
+    snapshot.devices.append(debug::scsiSnapshot(QStringLiteral("scsi"), m_scsi.debugState()));
+    snapshot.devices.append(debug::iwmSnapshot(QStringLiteral("swim"), m_swim.debugState()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-a"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::A), m_scc.interruptActive()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-b"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::B), m_scc.interruptActive()));
+    snapshot.devices.append(debug::adbSnapshot(QStringLiteral("adb"), m_adbTransceiver.debugState()));
+    snapshot.devices.append(debug::rtcSnapshot(QStringLiteral("rtc"), m_rtc));
+    snapshot.devices.append(debug::makeVideoSnapshot(QStringLiteral("dafb"),
+        QStringLiteral("dafb-video"), m_dafb.videoFrame(), {}));
+    snapshot.devices.append(debug::lowMemorySnapshot(read8));
+    snapshot.devices.append(debug::nubusSnapshots(m_nubus));
+
+    snapshot.frame = videoFrame();
+    snapshot.schedulerEvents = m_scheduler.pendingEvents();
+    const auto swimTrace = m_swim.traceEvents();
+    if (!swimTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("swim"), swimTrace);
+    return snapshot;
 }
 
 } // namespace cutemac::machines::quadra700

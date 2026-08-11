@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -63,12 +64,15 @@ public:
 
     [[nodiscard]] void* debugMachine(const QString& machineId) override;
     [[nodiscard]] IDebugCpuAccess* debugCpuAccess() override;
+    [[nodiscard]] debug::MachineSnapshot debugSnapshot(std::chrono::milliseconds lockTimeout) override;
 
 private:
     [[nodiscard]] static std::unique_ptr<IMachine> createMachine(const config::Configuration& configuration);
     void queueInput(GuestInputEvent event);
 
-    mutable std::mutex m_mutex;
+    // Timed so panic capture can bound its wait instead of blocking forever on
+    // a wedged emulation thread.
+    mutable std::timed_mutex m_mutex;
     config::Configuration m_configuration;
     std::unique_ptr<IMachine> m_machine;
     bool m_romLoaded = false;

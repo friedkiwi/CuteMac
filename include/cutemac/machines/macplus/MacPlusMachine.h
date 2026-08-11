@@ -142,6 +142,7 @@ public:
     [[nodiscard]] QStringList iwmTraceEvents() const;
     [[nodiscard]] QByteArray iwmLastNibblesForDebug() const;
     [[nodiscard]] devices::via6522::Via6522::DebugState viaDebugState() const;
+    [[nodiscard]] debug::MachineSnapshot debugSnapshot() const override;
 
     void setMousePosition(std::int16_t x, std::int16_t y);
     void moveMouse(std::int16_t dx, std::int16_t dy);

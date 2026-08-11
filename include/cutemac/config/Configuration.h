@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QDir>
 #include <QString>
 #include <QStringList>
@@ -160,6 +161,9 @@ public:
 
     [[nodiscard]] std::optional<Configuration> loadTomlFile(const QString& path) const;
     [[nodiscard]] bool saveTomlFile(const QString& path, const Configuration& configuration) const;
+    // The serialized profile without touching the filesystem, so a panic dump
+    // carries byte-identical TOML to what the profile writer would produce.
+    [[nodiscard]] std::optional<QByteArray> toTomlBytes(const Configuration& configuration) const;
 };
 
 } // namespace cutemac::config

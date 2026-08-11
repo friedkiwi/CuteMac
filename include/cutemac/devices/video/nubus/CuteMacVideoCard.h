@@ -23,6 +23,7 @@ public:
     [[nodiscard]] std::uint8_t read8(std::uint32_t offset) override;
     void write8(std::uint32_t offset, std::uint8_t value) override;
     [[nodiscard]] VideoFrame videoFrame() const override;
+    [[nodiscard]] debug::DeviceSnapshot debugSnapshot() const override;
     [[nodiscard]] core::GuestPowerRequest takePowerRequest() override;
     [[nodiscard]] const QByteArray& declarationRom() const { return m_declarationRom; }
     [[nodiscard]] bool absolutePointerEnabled() const { return m_absolutePointer; }

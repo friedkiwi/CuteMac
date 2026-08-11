@@ -460,4 +460,32 @@ IDebugCpuAccess* EmulationSession::debugCpuAccess()
     return dynamic_cast<IDebugCpuAccess*>(m_machine.get());
 }
 
+debug::MachineSnapshot EmulationSession::debugSnapshot(std::chrono::milliseconds lockTimeout)
+{
+    std::unique_lock lock(m_mutex, std::defer_lock);
+    const bool locked = lock.try_lock_for(lockTimeout);
+
+    if (!m_machine) {
+        debug::MachineSnapshot snapshot;
+        snapshot.machineId = m_configuration.machineId;
+        snapshot.notes.append(QStringLiteral("no machine instance; configuration only"));
+        return snapshot;
+    }
+
+    // Capture proceeds either way. An unreachable lock means the emulation
+    // thread is mid-quantum, which is exactly the situation worth dumping.
+    auto snapshot = m_machine->debugSnapshot();
+    if (snapshot.machineId.isEmpty()) {
+        snapshot.machineId = m_configuration.machineId;
+        snapshot.notes.append(QStringLiteral("machine does not implement debugSnapshot()"));
+    }
+    snapshot.romLoaded = m_romLoaded;
+    if (!locked) {
+        snapshot.notes.append(QStringLiteral(
+            "degraded: session lock not acquired within %1 ms; state may be torn")
+                .arg(static_cast<qint64>(lockTimeout.count())));
+    }
+    return snapshot;
+}
+
 } // namespace cutemac::core

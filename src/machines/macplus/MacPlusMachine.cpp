@@ -1,4 +1,5 @@
 #include "cutemac/machines/macplus/MacPlusMachine.h"
+#include "cutemac/debug/SnapshotBuilder.h"
 #include "cutemac/rom/RomPatcher.h"
 
 #include <QFile>
@@ -414,7 +415,7 @@ void MacPlusMachine::queueInput(const core::GuestInputEvent& event, std::uint64_
         deliveryCycle = std::max(deliveryCycle, m_lastMouseButtonCycle + inputDebounceCycles);
         m_lastMouseButtonCycle = deliveryCycle;
     }
-    m_scheduler.schedule(deliveryCycle, [this, event]() { applyInput(event); });
+    m_scheduler.schedule(deliveryCycle, [this, event]() { applyInput(event); }, "guest-input");
 }
 
 void MacPlusMachine::applyInput(const core::GuestInputEvent& event)
@@ -1174,6 +1175,88 @@ std::uint32_t MacPlusMachine::readRom32Direct(std::uint32_t offset) const
         | (static_cast<std::uint32_t>(m_rom[(offset + 1) % m_rom.size()]) << 16)
         | (static_cast<std::uint32_t>(m_rom[(offset + 2) % m_rom.size()]) << 8)
         | static_cast<std::uint32_t>(m_rom[(offset + 3) % m_rom.size()]);
+}
+
+
+debug::MachineSnapshot MacPlusMachine::debugSnapshot() const
+{
+    debug::MachineSnapshot snapshot;
+    snapshot.machineId = machineId();
+    snapshot.cycle = cycleCount();
+    snapshot.overlayEnabled = m_overlayEnabled;
+    snapshot.romLoaded = m_romLoaded;
+
+    const debug::MemoryReader read8 = [this](std::uint32_t address) { return debugRead8(address); };
+    const debug::Disassembler disassemble = [this](std::uint32_t address) {
+        return qMakePair(this->disassemble(address), disassembleBytes(address));
+    };
+    snapshot.cpu = debug::buildCpuSnapshot(cpuRegisters(), debugCpuArchitecture(), read8, disassemble);
+
+    debug::MemoryRegion ram;
+    ram.name = QStringLiteral("ram");
+    ram.kind = QStringLiteral("ram");
+    ram.base = ramBase;
+    ram.length = static_cast<std::uint32_t>(m_ram.size());
+    ram.writable = true;
+    ram.contentsMember = QStringLiteral("mem/ram.bin");
+    ram.contents = QByteArray(reinterpret_cast<const char*>(m_ram.constData()),
+        static_cast<qsizetype>(m_ram.size()));
+    snapshot.memory.append(ram);
+
+    debug::MemoryRegion rom;
+    rom.name = QStringLiteral("rom");
+    rom.kind = QStringLiteral("rom");
+    rom.base = romBase;
+    rom.length = static_cast<std::uint32_t>(m_rom.size());
+    rom.contentsMember = QStringLiteral("mem/rom.bin");
+    rom.contents = QByteArray(reinterpret_cast<const char*>(m_rom.constData()),
+        static_cast<qsizetype>(m_rom.size()));
+    snapshot.memory.append(rom);
+
+    snapshot.devices.append(debug::viaSnapshot(QStringLiteral("via"), m_via.debugState()));
+    snapshot.devices.append(debug::scsiSnapshot(QStringLiteral("scsi"), m_scsi.debugState()));
+    snapshot.devices.append(debug::iwmSnapshot(QStringLiteral("iwm"), m_iwm.debugState()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-a"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::A), m_scc.interruptActive()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-b"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::B), m_scc.interruptActive()));
+    snapshot.devices.append(debug::rtcSnapshot(QStringLiteral("rtc"), m_rtc));
+    snapshot.devices.append(debug::lowMemorySnapshot(read8));
+
+    debug::DeviceSnapshot romDevice;
+    romDevice.id = QStringLiteral("rom-image");
+    romDevice.kind = QStringLiteral("rom");
+    const auto info = romInfo();
+    romDevice.fields.insert(QStringLiteral("path"), info.path);
+    romDevice.fields.insert(QStringLiteral("sha256"), info.sha256);
+    romDevice.fields.insert(QStringLiteral("size"), QString::number(info.size));
+    romDevice.fields.insert(QStringLiteral("checksum"),
+        QStringLiteral("0x%1").arg(info.checksum, 8, 16, QLatin1Char('0')));
+    romDevice.fields.insert(QStringLiteral("applied_patches"), info.appliedPatches.join(QLatin1Char(',')));
+    romDevice.fields.insert(QStringLiteral("patch_error"), info.patchError);
+    snapshot.devices.append(romDevice);
+
+    debug::DeviceSnapshot bus;
+    bus.id = QStringLiteral("bus-summary");
+    bus.kind = QStringLiteral("access-summary");
+    bus.fields.insert(QStringLiteral("ram_reads"), QString::number(static_cast<qulonglong>(m_accessSummary.ramReads)));
+    bus.fields.insert(QStringLiteral("ram_writes"), QString::number(static_cast<qulonglong>(m_accessSummary.ramWrites)));
+    bus.fields.insert(QStringLiteral("rom_reads"), QString::number(static_cast<qulonglong>(m_accessSummary.romReads)));
+    bus.fields.insert(QStringLiteral("unmapped_reads"),
+        QString::number(static_cast<qulonglong>(m_accessSummary.unmappedReads)));
+    bus.fields.insert(QStringLiteral("unmapped_writes"),
+        QString::number(static_cast<qulonglong>(m_accessSummary.unmappedWrites)));
+    snapshot.devices.append(bus);
+
+    snapshot.frame = videoFrame();
+    snapshot.schedulerEvents = m_scheduler.pendingEvents();
+    if (!m_eventLog.isEmpty()) {
+        QStringList events;
+        events.reserve(m_eventLog.size());
+        for (const auto& entry : m_eventLog) events.append(entry);
+        snapshot.traces.insert(QStringLiteral("events"), events);
+    }
+    return snapshot;
 }
 
 } // namespace cutemac::machines::macplus

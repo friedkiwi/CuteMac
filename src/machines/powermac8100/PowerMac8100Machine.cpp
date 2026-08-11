@@ -1,4 +1,5 @@
 #include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
+#include "cutemac/debug/SnapshotBuilder.h"
 
 #include <algorithm>
 
@@ -834,5 +835,85 @@ std::uint32_t PowerMac8100Machine::debugRead32(std::uint32_t address) const
 void PowerMac8100Machine::setBusTraceEnabled(bool enabled) { m_busTraceEnabled = enabled; if (!enabled) m_busTrace.clear(); }
 void PowerMac8100Machine::setCpuTraceEnabled(bool enabled)
 { m_cpuTraceEnabled = enabled; m_cpuTraceFrozen = false; if (!enabled) m_cpuTrace.clear(); }
+
+
+debug::MachineSnapshot PowerMac8100Machine::debugSnapshot() const
+{
+    debug::MachineSnapshot snapshot;
+    snapshot.machineId = machineId();
+    snapshot.cycle = cycleCount();
+    snapshot.romLoaded = !m_rom.isEmpty();
+
+    const debug::MemoryReader read8 = [this](std::uint32_t address) { return debugRead8(address); };
+    const debug::Disassembler disassemble = [this](std::uint32_t address) {
+        return qMakePair(this->disassemble(address), 4);
+    };
+    snapshot.cpu = debug::buildCpuSnapshot(m_cpu.registers(), read8, disassemble);
+
+    debug::MemoryRegion ram;
+    ram.name = QStringLiteral("ram");
+    ram.kind = QStringLiteral("ram");
+    ram.base = 0;
+    ram.length = static_cast<std::uint32_t>(m_ram.size());
+    ram.writable = true;
+    ram.contentsMember = QStringLiteral("mem/ram.bin");
+    ram.contents = QByteArray(reinterpret_cast<const char*>(m_ram.constData()),
+        static_cast<qsizetype>(m_ram.size()));
+    snapshot.memory.append(ram);
+
+    debug::MemoryRegion rom;
+    rom.name = QStringLiteral("rom");
+    rom.kind = QStringLiteral("rom");
+    rom.base = romBase;
+    rom.length = static_cast<std::uint32_t>(m_rom.size());
+    rom.contentsMember = QStringLiteral("mem/rom.bin");
+    rom.contents = m_rom;
+    snapshot.memory.append(rom);
+
+    debug::MemoryRegion vram;
+    vram.name = QStringLiteral("vram");
+    vram.kind = QStringLiteral("vram");
+    vram.base = 0;
+    vram.length = static_cast<std::uint32_t>(m_videoRam.size());
+    vram.writable = true;
+    vram.contentsMember = QStringLiteral("mem/vram.bin");
+    vram.contents = QByteArray(reinterpret_cast<const char*>(m_videoRam.constData()),
+        static_cast<qsizetype>(m_videoRam.size()));
+    snapshot.memory.append(vram);
+
+    snapshot.devices.append(debug::viaSnapshot(QStringLiteral("via1"), m_via1.debugState()));
+    snapshot.devices.append(debug::cudaSnapshot(QStringLiteral("cuda"), m_cuda.debugState()));
+    snapshot.devices.append(debug::scsiSnapshot(QStringLiteral("scsi-external"), m_scsi.debugState()));
+    snapshot.devices.append(debug::scsiSnapshot(QStringLiteral("scsi-internal"), m_scsiB.debugState()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-a"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::A), m_scc.interruptActive()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-b"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::B), m_scc.interruptActive()));
+    snapshot.devices.append(debug::nubusSnapshots(m_nubus));
+
+    debug::DeviceSnapshot interrupts;
+    interrupts.id = QStringLiteral("interrupts");
+    interrupts.kind = QStringLiteral("amic");
+    const auto irq = interruptDebugState();
+    interrupts.fields.insert(QStringLiteral("irq_control"),
+        QStringLiteral("0x%1").arg(irq[0], 2, 16, QLatin1Char('0')));
+    interrupts.fields.insert(QStringLiteral("via2_ifr"),
+        QStringLiteral("0x%1").arg(irq[1], 2, 16, QLatin1Char('0')));
+    interrupts.fields.insert(QStringLiteral("via2_ier"),
+        QStringLiteral("0x%1").arg(irq[2], 2, 16, QLatin1Char('0')));
+    interrupts.fields.insert(QStringLiteral("via2_slot_ifr"),
+        QStringLiteral("0x%1").arg(irq[3], 2, 16, QLatin1Char('0')));
+    interrupts.fields.insert(QStringLiteral("via2_slot_ier"),
+        QStringLiteral("0x%1").arg(irq[4], 2, 16, QLatin1Char('0')));
+    interrupts.fields.insert(QStringLiteral("hmc_control"),
+        QStringLiteral("0x%1").arg(static_cast<qulonglong>(m_hmcControl), 16, 16, QLatin1Char('0')));
+    interrupts.fields.insert(QStringLiteral("unmapped_accesses"),
+        QString::number(static_cast<qulonglong>(m_unmappedAccessCount)));
+    snapshot.devices.append(interrupts);
+
+    snapshot.frame = videoFrame();
+    snapshot.schedulerEvents = m_scheduler.pendingEvents();
+    return snapshot;
+}
 
 } // namespace cutemac::machines::powermac8100

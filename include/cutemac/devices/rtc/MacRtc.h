@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <QByteArray>
 #include <QString>
 
 namespace cutemac::devices::rtc {
@@ -15,6 +16,13 @@ public:
     [[nodiscard]] bool dataLine() const;
     [[nodiscard]] bool setNvramImagePath(const QString& path);
     [[nodiscard]] QString nvramImagePath() const;
+    // Whole parameter RAM, for panic dumps: a corrupt PRAM explains a great
+    // many strange boots and is cheap to carry.
+    [[nodiscard]] QByteArray parameterRamBytes() const
+    {
+        return QByteArray(reinterpret_cast<const char*>(m_parameterRam.data()),
+            static_cast<qsizetype>(m_parameterRam.size()));
+    }
 
 private:
     void receiveByte(std::uint8_t value);

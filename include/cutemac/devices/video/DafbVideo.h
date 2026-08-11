@@ -76,6 +76,7 @@ public:
     [[nodiscard]] std::uint32_t config() const { return m_config; }
     [[nodiscard]] std::uint32_t testRegister() const { return m_test; }
     [[nodiscard]] std::size_t vramSize() const { return static_cast<std::size_t>(m_vram.size()); }
+    [[nodiscard]] const QByteArray& vramBytes() const { return m_vram; }
 
 private:
     struct MonitorInfo {

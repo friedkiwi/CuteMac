@@ -126,6 +126,14 @@ void CuteMacAcceleratedVideoCard::write32(std::uint32_t offset, std::uint32_t va
     write16(offset, static_cast<std::uint16_t>(value >> 16));
     write16(offset + 2, static_cast<std::uint16_t>(value));
 }
+debug::DeviceSnapshot CuteMacAcceleratedVideoCard::debugSnapshot() const
+{
+    auto snapshot = m_compatibleCard.debugSnapshot();
+    snapshot.id = id();
+    snapshot.kind = QStringLiteral("cutemac-video-accelerated");
+    return snapshot;
+}
+
 VideoFrame CuteMacAcceleratedVideoCard::videoFrame() const { return m_compatibleCard.videoFrame(); }
 core::GuestPowerRequest CuteMacAcceleratedVideoCard::takePowerRequest() { return m_compatibleCard.takePowerRequest(); }
 const QByteArray& CuteMacAcceleratedVideoCard::declarationRom() const { return m_declarationRom; }

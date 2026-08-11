@@ -5,12 +5,19 @@
 
 #include <memory>
 
+#if CUTEMAC_ENABLE_PANIC_DUMP
+#include "cutemac/debug/HostLogRing.h"
+#endif
 #include "cutemac/config/ProfileResolver.h"
 #include "cutemac/session/SessionWindowManager.h"
 #include "cutemac/ui/ProfileManagerWindow.h"
 
 int main(int argc, char* argv[])
 {
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    // Before the QApplication so startup warnings are captured too.
+    cutemac::debug::HostLogRing::install();
+#endif
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("friedkiwi"));
     QCoreApplication::setApplicationName(QStringLiteral("CuteMac"));

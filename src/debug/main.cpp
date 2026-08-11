@@ -1,7 +1,10 @@
 #include <readline/history.h>
 #include <readline/readline.h>
 
+#include <QBuffer>
 #include <QCommandLineOption>
+#include <QDir>
+#include <QSet>
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QFile>
@@ -27,6 +30,11 @@
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/debug/SadMacDetector.h"
+#if CUTEMAC_ENABLE_PANIC_DUMP
+#include "cutemac/debug/PanicArchive.h"
+#include "cutemac/debug/PanicDump.h"
+#include "cutemac/debug/SnapshotMachine.h"
+#endif
 #include "cutemac/devices/serial/SerialEndpoint.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
@@ -448,6 +456,12 @@ public:
         reloadMachine();
     }
 
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    // Entry point for --panic, so a dump can be opened without first bringing
+    // up the live machine the profile describes.
+    void openPanicArchiveAtStartup(const QString& path) { openPanicArchive(path); }
+#endif
+
     int run()
     {
         installCompletion();
@@ -537,6 +551,8 @@ private:
             QStringLiteral("floppy"), QStringLiteral("mouse"), QStringLiteral("key"),
             QStringLiteral("serial-debug"),
             QStringLiteral("sadmac"), QStringLiteral("arm"), QStringLiteral("report"),
+            QStringLiteral("panic"), QStringLiteral("open"), QStringLiteral("close"),
+            QStringLiteral("info"), QStringLiteral("extract"),
             QStringLiteral("trace"), QStringLiteral("pc-trace"), QStringLiteral("trap-trace"),
             QStringLiteral("irq-trace"), QStringLiteral("driver-trace"), QStringLiteral("timeline"),
             QStringLiteral("bootblock"), QStringLiteral("gdb"), QStringLiteral("script"),
@@ -593,10 +609,19 @@ private:
             QStringLiteral("help"), QStringLiteral("profile"), QStringLiteral("load"), QStringLiteral("reset"),
             QStringLiteral("run"), QStringLiteral("step"), QStringLiteral("run-until"), QStringLiteral("state"),
             QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"), QStringLiteral("screen"), QStringLiteral("devices"),
+            QStringLiteral("panic"),
             QStringLiteral("write8"), QStringLiteral("write16"), QStringLiteral("write32"),
             QStringLiteral("mouse"), QStringLiteral("key"), QStringLiteral("serial-debug"), QStringLiteral("interrupt"),
             QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
         };
+#if CUTEMAC_ENABLE_PANIC_DUMP
+        if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
+            m_out << command << " needs a live machine; a loaded panic snapshot is read-only"
+                  << " (use 'panic close' to return to the live session)\n";
+            m_out.flush();
+            return true;
+        }
+#endif
         if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
             m_out << command << " is not yet available for mac-iicx; common run/register/memory/video commands are available\n";
             m_out.flush();
@@ -694,6 +719,12 @@ private:
             configureGdb(parts);
         } else if (command == QStringLiteral("rom-symbols")) {
             handleSymbols(parts);
+        } else if (command == QStringLiteral("panic")) {
+#if CUTEMAC_ENABLE_PANIC_DUMP
+            handlePanic(parts);
+#else
+            m_out << "panic dumps are not built into this configuration\n";
+#endif
         } else if (command == QStringLiteral("paths")) {
             printPaths();
         } else {
@@ -754,6 +785,7 @@ private:
         m_out << "  key status | key down <mac-code> | key up <mac-code> | key reset\n";
         m_out << "  serial-debug attach [0|1|a|b] | serial-debug send <text> | serial-debug send-line <text> | serial-debug send-hex <hex> | serial-debug read|clear|status\n";
         m_out << "  trace [category on|off|dump|clear|save <file>] | pc-trace|trap-trace|irq-trace|driver-trace|timeline [count]\n";
+        m_out << "  panic open <archive> | panic close | panic info | panic extract <dir> | panic write [note]\n";
         m_out << "  sadmac arm|run [max-cycles]|status|report|save <prefix>|clear\n";
         m_out << "  bootblock verify | floppy last-window | floppy export-window <file>\n";
         m_out << "  gdb [enable|disable|port N|start|stop|status]\n";
@@ -1057,6 +1089,25 @@ private:
 
     void printState()
     {
+#if CUTEMAC_ENABLE_PANIC_DUMP
+        if (m_snapshot != nullptr) {
+            const auto& snapshot = m_snapshot->snapshot();
+            m_out << "source=panic-snapshot path=" << m_snapshotPath << '\n';
+            m_out << "machine=" << snapshot.machineId << " architecture=" << snapshot.cpu.architecture << '\n';
+            m_out << "pc=" << hexValue(snapshot.cpu.pc) << '\n';
+            m_out << "cycles=" << snapshot.cycle << '\n';
+            m_out << "overlay=" << (snapshot.overlayEnabled ? "on" : "off") << '\n';
+            m_out << "rom_loaded=" << (snapshot.romLoaded ? "yes" : "no") << '\n';
+            m_out << "unmapped_reads=" << m_snapshot->unmappedReads() << '\n';
+            for (const auto& region : snapshot.memory) {
+                m_out << "region " << region.name << " kind=" << region.kind
+                      << " base=" << hexValue(region.base) << " length=" << hexValue(region.length)
+                      << " captured=" << (region.contents.isEmpty() ? "no" : "yes") << '\n';
+            }
+            for (const auto& note : snapshot.notes) m_out << "note: " << note << '\n';
+            return;
+        }
+#endif
         if (m_iicxMachine != nullptr) {
             const auto state = m_session->status();
             const auto io = m_iicxMachine->ioStatistics();
@@ -1368,6 +1419,23 @@ private:
 
     void printDevices(const QStringList& parts)
     {
+#if CUTEMAC_ENABLE_PANIC_DUMP
+        if (m_snapshot != nullptr) {
+            const auto filter = parts.size() >= 2 ? parts[1] : QString {};
+            for (const auto& device : m_snapshot->snapshot().devices) {
+                if (!filter.isEmpty() && !device.id.contains(filter, Qt::CaseInsensitive)
+                    && !device.kind.contains(filter, Qt::CaseInsensitive)) {
+                    continue;
+                }
+                m_out << "device " << device.id << " kind=" << device.kind << '\n';
+                for (const auto& line : device.stateLines) m_out << "  " << line << '\n';
+                for (auto field = device.fields.constBegin(); field != device.fields.constEnd(); ++field) {
+                    m_out << "  " << field.key() << '=' << field.value() << '\n';
+                }
+            }
+            return;
+        }
+#endif
         if (m_powerMac8100Machine != nullptr) {
             const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
             if (device.isEmpty() || device == QStringLiteral("scsi")) {
@@ -1617,9 +1685,17 @@ private:
         }
     }
 
+    [[nodiscard]] cutemac::devices::video::VideoFrame currentVideoFrame() const
+    {
+#if CUTEMAC_ENABLE_PANIC_DUMP
+        if (m_snapshot != nullptr) return m_snapshot->snapshot().frame;
+#endif
+        return m_session->videoFrame();
+    }
+
     void handleScreen(const QStringList& parts)
     {
-        const auto frame = m_session->videoFrame();
+        const auto frame = currentVideoFrame();
         const auto bytes = frame.pixels;
         std::uint32_t hash = 2166136261U;
         for (const auto byte : bytes) {
@@ -1673,7 +1749,7 @@ private:
 
     void exportScreen(const QString& path)
     {
-        const auto image = cutemac::session::FramebufferRenderer::render(m_session->videoFrame());
+        const auto image = cutemac::session::FramebufferRenderer::render(currentVideoFrame());
         m_out << (image.save(path) ? "saved " : "failed ") << path << '\n';
     }
 
@@ -2473,6 +2549,189 @@ private:
         m_out << "disk_images=" << cutemac::config::ConfigurationManager::diskImageDirectoryPath() << '\n';
     }
 
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    [[nodiscard]] static const QSet<QString>& snapshotSafeCommands()
+    {
+        // Everything that reads. Execution, writes, media, and the GDB stub all
+        // need a live machine and are refused rather than silently no-oped.
+        static const QSet<QString> commands {
+            QStringLiteral("help"), QStringLiteral("panic"), QStringLiteral("exit"), QStringLiteral("quit"),
+            QStringLiteral("state"), QStringLiteral("regs"), QStringLiteral("disasm"), QStringLiteral("mem"),
+            QStringLiteral("mem-find"), QStringLiteral("mem-snapshot"), QStringLiteral("memory-diff"),
+            QStringLiteral("devices"), QStringLiteral("vectors"), QStringLiteral("globals"),
+            QStringLiteral("lowmem"), QStringLiteral("screen"), QStringLiteral("sadmac"),
+            QStringLiteral("paths"), QStringLiteral("breaks"), QStringLiteral("rom-symbols"),
+            QStringLiteral("bootblock"),
+        };
+        return commands;
+    }
+
+    void handlePanic(const QStringList& parts)
+    {
+        const auto subcommand = parts.size() >= 2 ? parts[1] : QStringLiteral("info");
+
+        if (subcommand == QStringLiteral("open")) {
+            if (parts.size() < 3) {
+                m_out << "usage: panic open <archive>\n";
+                return;
+            }
+            openPanicArchive(parts[2]);
+            return;
+        }
+        if (subcommand == QStringLiteral("close")) {
+            if (m_snapshot == nullptr) {
+                m_out << "no panic snapshot is open\n";
+                return;
+            }
+            m_snapshot.reset();
+            m_snapshotPath.clear();
+            // Rebinding the live machine also reclaims the disassembler globals
+            // the snapshot core took over.
+            reloadMachine();
+            m_out << "panic snapshot closed; live machine restored\n";
+            return;
+        }
+        if (subcommand == QStringLiteral("extract")) {
+            if (parts.size() < 3) {
+                m_out << "usage: panic extract <directory>\n";
+                return;
+            }
+            extractPanicArchive(parts[2]);
+            return;
+        }
+        if (subcommand == QStringLiteral("write")) {
+            writePanicFromSession(parts.mid(2).join(QLatin1Char(' ')));
+            return;
+        }
+        if (subcommand == QStringLiteral("info")) {
+            printPanicInfo();
+            return;
+        }
+        m_out << "usage: panic open <archive> | panic close | panic info | panic extract <dir> | panic write [note]\n";
+    }
+
+    void openPanicArchive(const QString& path)
+    {
+        QString error;
+        auto snapshot = cutemac::debug::loadPanicDump(path, error);
+        if (!snapshot.has_value()) {
+            m_out << "cannot open panic archive: " << error << '\n';
+            return;
+        }
+        // Tear the live machine down first. Musashi resolves disassembly through
+        // one file-scope active-CPU pointer, so a live core and a snapshot core
+        // cannot both be bound at once.
+        m_gdbStub.reset();
+        m_gdbEnabled = false;
+        m_machine = nullptr;
+        m_iicxMachine = nullptr;
+        m_powerMac8100Machine = nullptr;
+        m_session.reset();
+
+        m_snapshot = std::make_unique<cutemac::debug::SnapshotMachine>(std::move(*snapshot));
+        m_snapshotPath = QFileInfo(path).absoluteFilePath();
+        m_cpuDebug = m_snapshot.get();
+        m_romLoaded = true;
+        m_breakpoints.clear();
+
+        const auto& loaded = m_snapshot->snapshot();
+        m_out << "panic snapshot opened: " << m_snapshotPath << '\n';
+        m_out << "machine=" << loaded.machineId << " architecture=" << loaded.cpu.architecture
+              << " pc=" << hexValue(loaded.cpu.pc) << " cycles=" << loaded.cycle << '\n';
+        m_out << "memory regions=" << loaded.memory.size() << " devices=" << loaded.devices.size() << '\n';
+        for (const auto& note : loaded.notes) m_out << "note: " << note << '\n';
+        m_out << "read-only: run, step, and write commands are unavailable\n";
+    }
+
+    void extractPanicArchive(const QString& directory)
+    {
+        if (m_snapshotPath.isEmpty()) {
+            m_out << "no panic snapshot is open\n";
+            return;
+        }
+        cutemac::debug::PanicArchiveReader reader(m_snapshotPath);
+        if (!reader.open()) {
+            m_out << "cannot reopen archive: " << reader.error() << '\n';
+            return;
+        }
+        QDir target(directory);
+        if (!target.exists() && !QDir().mkpath(directory)) {
+            m_out << "cannot create " << directory << '\n';
+            return;
+        }
+        int written = 0;
+        for (const auto& name : reader.memberNames()) {
+            const auto contents = reader.read(name);
+            if (!contents.has_value()) {
+                m_out << "skipped " << name << ": " << reader.error() << '\n';
+                continue;
+            }
+            const auto destination = target.filePath(name);
+            (void)QDir().mkpath(QFileInfo(destination).absolutePath());
+            QSaveFile file(destination);
+            if (!file.open(QIODevice::WriteOnly) || file.write(*contents) != contents->size() || !file.commit()) {
+                m_out << "failed to write " << destination << '\n';
+                continue;
+            }
+            ++written;
+        }
+        m_out << "extracted " << written << " members to " << target.absolutePath() << '\n';
+    }
+
+    void printPanicInfo()
+    {
+        if (m_snapshot == nullptr) {
+            m_out << "no panic snapshot is open; dumps are written to "
+                  << cutemac::debug::panicDumpDirectory() << '\n';
+            return;
+        }
+        const auto& loaded = m_snapshot->snapshot();
+        m_out << "path=" << m_snapshotPath << '\n';
+        m_out << "schema_version=" << loaded.schemaVersion << '\n';
+        m_out << "machine=" << loaded.machineId << '\n';
+        m_out << "cycle=" << loaded.cycle << " pc=" << hexValue(loaded.cpu.pc) << '\n';
+        m_out << "unmapped_reads=" << m_snapshot->unmappedReads() << '\n';
+        for (const auto& line : loaded.cpu.backtrace) m_out << "backtrace " << line << '\n';
+        for (const auto& event : loaded.schedulerEvents) m_out << "scheduler " << event << '\n';
+        for (auto trace = loaded.traces.constBegin(); trace != loaded.traces.constEnd(); ++trace) {
+            m_out << "trace " << trace.key() << " records=" << trace.value().size() << '\n';
+        }
+        for (const auto& note : loaded.notes) m_out << "note: " << note << '\n';
+    }
+
+    void writePanicFromSession(const QString& note)
+    {
+        if (m_session == nullptr) {
+            m_out << "no live session to capture\n";
+            return;
+        }
+        cutemac::debug::PanicDumpRequest request;
+        request.startupConfiguration = m_configuration;
+        request.runtimeConfiguration = m_session->configuration();
+        request.note = note;
+        const auto frame = m_session->videoFrame();
+        if (frame.valid()) {
+            const auto image = cutemac::session::FramebufferRenderer::render(frame);
+            if (!image.isNull()) {
+                QBuffer buffer(&request.screenshotPng);
+                if (buffer.open(QIODevice::WriteOnly)) (void)image.save(&buffer, "PNG");
+            }
+        }
+        auto snapshot = m_session->debugSnapshot(cutemac::debug::defaultPanicLockTimeout);
+        // The console owns these rings: they are filled by its own stepping
+        // loop, not by the machine, so the machine snapshot cannot carry them.
+        if (!m_pcTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("pc"), m_pcTrace);
+        if (!m_irqTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("irq"), m_irqTrace);
+        if (!m_trapTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("trap"), m_trapTrace);
+        if (!m_driverTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("driver"), m_driverTrace);
+        if (!m_timeline.isEmpty()) snapshot.traces.insert(QStringLiteral("timeline"), m_timeline);
+
+        const auto result = cutemac::debug::writePanicDump(snapshot, request);
+        m_out << (result.ok ? "panic dump written: " : "panic dump failed: ") << result.path << '\n';
+        for (const auto& warning : result.warnings) m_out << "  warning: " << warning << '\n';
+    }
+#endif // CUTEMAC_ENABLE_PANIC_DUMP
+
     [[nodiscard]] bool requireRom()
     {
         if (m_romLoaded) {
@@ -2624,6 +2883,10 @@ private:
     cutemac::machines::macplus::MacPlusMachine* m_machine = nullptr;
     cutemac::machines::maciicx::MacIIcxMachine* m_iicxMachine = nullptr;
     cutemac::machines::powermac8100::PowerMac8100Machine* m_powerMac8100Machine = nullptr;
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    std::unique_ptr<cutemac::debug::SnapshotMachine> m_snapshot;
+    QString m_snapshotPath;
+#endif
     std::unique_ptr<GdbStub> m_gdbStub;
     QTextStream m_out { stdout };
     bool m_romLoaded = false;
@@ -2695,6 +2958,12 @@ int main(int argc, char* argv[])
     parser.addHelpOption();
     const QCommandLineOption profileOption(QStringLiteral("profile"), QStringLiteral("Path to a CuteMac TOML profile."), QStringLiteral("path"));
     parser.addOption(profileOption);
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    const QCommandLineOption panicOption(QStringLiteral("panic"),
+        QStringLiteral("Open a panic archive read-only instead of starting a live machine."),
+        QStringLiteral("archive"));
+    parser.addOption(panicOption);
+#endif
     parser.process(app);
 
     cutemac::config::ConfigurationManager manager;
@@ -2707,5 +2976,10 @@ int main(int argc, char* argv[])
     }
 
     DebugConsole console(configuration);
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    if (parser.isSet(panicOption)) {
+        console.openPanicArchiveAtStartup(parser.value(panicOption));
+    }
+#endif
     return console.run();
 }

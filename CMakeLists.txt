@@ -30,10 +30,42 @@ find_package(tomlplusplus CONFIG REQUIRED)
 find_package(Readline)
 
 option(CUTEMAC_ENABLE_SLIRP "Build SLIP/PPP guest networking through libslirp" ON)
+option(CUTEMAC_ENABLE_PANIC_DUMP "Build panic-dump capture and archive loading" ON)
 
 if(EMSCRIPTEN AND CUTEMAC_ENABLE_SLIRP)
     message(STATUS "CuteMac: libslirp networking disabled; browsers have no raw sockets")
     set(CUTEMAC_ENABLE_SLIRP OFF CACHE BOOL "" FORCE)
+endif()
+
+if(EMSCRIPTEN AND CUTEMAC_ENABLE_PANIC_DUMP)
+    message(STATUS "CuteMac: panic dumps disabled; the browser has no debug_dumps directory")
+    set(CUTEMAC_ENABLE_PANIC_DUMP OFF CACHE BOOL "" FORCE)
+endif()
+
+if(CUTEMAC_ENABLE_PANIC_DUMP)
+    # Declared in vcpkg.json. A missing optional dependency has to fail loudly
+    # rather than silently dropping a shipped feature.
+    find_package(libzip CONFIG REQUIRED)
+    message(STATUS "CuteMac: panic dumps enabled for Debug configurations (libzip ${libzip_VERSION})")
+else()
+    message(STATUS "CuteMac: panic dumps disabled")
+endif()
+
+# Build provenance for panic-dump manifests. A dump that cannot name the commit
+# it came from is not much use a week later.
+find_package(Git QUIET)
+set(CUTEMAC_GIT_SHA "unknown")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE CUTEMAC_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(CUTEMAC_GIT_SHA STREQUAL "")
+        set(CUTEMAC_GIT_SHA "unknown")
+    endif()
 endif()
 
 if(CUTEMAC_ENABLE_SLIRP)
@@ -184,6 +216,7 @@ add_library(CuteMacCore
     src/devices/video/nubus/CuteMacVideoCard.cpp
     src/devices/video/nubus/MacintoshIIVideoCard.cpp
     src/debug/SadMacDetector.cpp
+    src/debug/SnapshotBuilder.cpp
     src/machines/MachineCatalog.cpp
     src/machines/macplus/MacPlusMachine.cpp
     src/machines/maciicx/MacIIcxMachine.cpp
@@ -228,6 +261,27 @@ if(CUTEMAC_ENABLE_SLIRP)
 else()
     target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_HAS_LIBSLIRP=0)
 endif()
+
+# Panic dumps live in CuteMacCore so the frontend writes them and the debug
+# session reads them back without a second copy of the format. Debug
+# configurations only, through generator expressions so the multi-config CI
+# generator resolves per configuration -- a Release artifact must not carry
+# libzip or the button.
+if(CUTEMAC_ENABLE_PANIC_DUMP)
+    target_sources(CuteMacCore
+        PRIVATE
+            "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/debug/HostLogRing.cpp>"
+            "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/debug/PanicArchive.cpp>"
+            "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/debug/PanicDump.cpp>"
+            "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/debug/SnapshotMachine.cpp>"
+    )
+    target_link_libraries(CuteMacCore PRIVATE "$<$<CONFIG:Debug>:libzip::zip>")
+    target_compile_definitions(CuteMacCore PUBLIC CUTEMAC_ENABLE_PANIC_DUMP=$<IF:$<CONFIG:Debug>,1,0>)
+else()
+    target_compile_definitions(CuteMacCore PUBLIC CUTEMAC_ENABLE_PANIC_DUMP=0)
+endif()
+
+target_compile_definitions(CuteMacCore PRIVATE CUTEMAC_GIT_SHA="${CUTEMAC_GIT_SHA}")
 
 add_library(CuteMacWidgets
     src/ui/ConfigurationDialog.cpp
@@ -296,8 +350,11 @@ target_link_libraries(CuteMac
 
 target_compile_definitions(CuteMac PRIVATE CUTEMAC_VERSION="${PROJECT_VERSION}")
 
+# Debug builds keep a Windows console: the panic dump announces itself on
+# stdout, and a GUI-subsystem binary has nowhere to print it. Release artifacts
+# stay windowed.
 set_target_properties(CuteMac PROPERTIES
-    WIN32_EXECUTABLE TRUE
+    WIN32_EXECUTABLE $<NOT:$<CONFIG:Debug>>
     MACOSX_BUNDLE TRUE
 )
 
@@ -493,6 +550,12 @@ if(BUILD_TESTING)
     add_executable(CuteMacSchedulerTests tests/scheduler_tests.cpp)
     target_link_libraries(CuteMacSchedulerTests PRIVATE CuteMacCore)
     add_test(NAME machine-scheduler COMMAND CuteMacSchedulerTests)
+
+    if(CUTEMAC_ENABLE_PANIC_DUMP)
+        add_executable(CuteMacPanicDumpTests tests/panic_dump_tests.cpp)
+        target_link_libraries(CuteMacPanicDumpTests PRIVATE CuteMacCore)
+        add_test(NAME panic-dump COMMAND CuteMacPanicDumpTests)
+    endif()
 
     add_executable(CuteMacPhysicalMemoryMapTests tests/physical_memory_map_tests.cpp)
     target_link_libraries(CuteMacPhysicalMemoryMapTests PRIVATE CuteMacCore)

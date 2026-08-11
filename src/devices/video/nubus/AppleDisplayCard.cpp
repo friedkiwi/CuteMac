@@ -281,6 +281,19 @@ void AppleDisplayCard::write32(std::uint32_t offset, std::uint32_t value)
     }
 }
 
+debug::DeviceSnapshot AppleDisplayCard::debugSnapshot() const
+{
+    auto snapshot = debug::makeVideoSnapshot(id(), QStringLiteral("apple-display-card"), videoFrame(), m_vram);
+    snapshot.fields.insert(QStringLiteral("vram_bytes"), QString::number(m_vram.size()));
+    snapshot.fields.insert(QStringLiteral("control"),
+        QStringLiteral("0x%1").arg(m_control, 4, 16, QLatin1Char('0')));
+    snapshot.fields.insert(QStringLiteral("ramdac_mode"),
+        QStringLiteral("0x%1").arg(m_ramdacMode, 2, 16, QLatin1Char('0')));
+    snapshot.fields.insert(QStringLiteral("unsupported_interlace_selections"),
+        QString::number(m_unsupportedInterlaceSelections));
+    return snapshot;
+}
+
 VideoFrame AppleDisplayCard::videoFrame() const
 {
     if (unsupportedInterlacedMode()) return {};

@@ -298,6 +298,20 @@ core::GuestPowerRequest CuteMacVideoCard::takePowerRequest()
     return request;
 }
 
+debug::DeviceSnapshot CuteMacVideoCard::debugSnapshot() const
+{
+    auto snapshot = debug::makeVideoSnapshot(id(), QStringLiteral("cutemac-video"), videoFrame(), m_vram);
+    snapshot.fields.insert(QStringLiteral("acceleration"),
+        m_acceleration ? QStringLiteral("yes") : QStringLiteral("no"));
+    snapshot.fields.insert(QStringLiteral("absolute_pointer"),
+        m_absolutePointer ? QStringLiteral("yes") : QStringLiteral("no"));
+    snapshot.fields.insert(QStringLiteral("vbl_enabled"),
+        m_vblEnabled ? QStringLiteral("yes") : QStringLiteral("no"));
+    snapshot.fields.insert(QStringLiteral("maximum_depth"), QString::number(m_maximumDepth));
+    snapshot.fields.insert(QStringLiteral("vram_bytes"), QString::number(m_vram.size()));
+    return snapshot;
+}
+
 VideoFrame CuteMacVideoCard::videoFrame() const
 {
     const auto stride = strideBytes();

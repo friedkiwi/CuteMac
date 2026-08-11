@@ -7,6 +7,10 @@
 
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/SessionRunner.h"
+#if CUTEMAC_ENABLE_PANIC_DUMP
+#include "cutemac/debug/HostLogRing.h"
+#include "cutemac/debug/PanicDump.h"
+#endif
 
 namespace cutemac::session {
 
@@ -70,6 +74,31 @@ void SessionControlServer::processLine(QTcpSocket& socket, const QByteArray& lin
             static_cast<std::int16_t>(document.object().value(QStringLiteral("y")).toInt()));
     } else if (command == QStringLiteral("mouse_button")) {
         m_session.queueMouseButton(document.object().value(QStringLiteral("pressed")).toBool());
+    } else if (command == QStringLiteral("panic")) {
+#if CUTEMAC_ENABLE_PANIC_DUMP
+        // Headless trigger, so CI smoke runs can leave a postmortem behind
+        // instead of only a failed exit code.
+        m_runner.setPaused(true);
+        debug::PanicDumpRequest request;
+        request.startupConfiguration = m_session.configuration();
+        request.runtimeConfiguration = m_session.configuration();
+        request.note = document.object().value(QStringLiteral("note")).toString();
+        request.hostLog = debug::HostLogRing::entries();
+        const auto result = debug::capturePanicDump(m_session, request);
+        QJsonObject response { { QStringLiteral("ok"), result.ok },
+            { QStringLiteral("path"), result.path },
+            { QStringLiteral("degraded"), result.degraded } };
+        if (!result.warnings.isEmpty()) {
+            response.insert(QStringLiteral("warnings"), result.warnings.join(QLatin1Char('\n')));
+        }
+        socket.write(QJsonDocument(response).toJson(QJsonDocument::Compact) + '\n');
+        return;
+#else
+        socket.write(QJsonDocument(QJsonObject { { QStringLiteral("ok"), false },
+            { QStringLiteral("error"), QStringLiteral("panic dumps are not built into this binary") } })
+                .toJson(QJsonDocument::Compact) + '\n');
+        return;
+#endif
     } else if (command == QStringLiteral("key")) {
         m_session.queueKey(static_cast<std::uint8_t>(document.object().value(QStringLiteral("code")).toInt()),
             document.object().value(QStringLiteral("pressed")).toBool());

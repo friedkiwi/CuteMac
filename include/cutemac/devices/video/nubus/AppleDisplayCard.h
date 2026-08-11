@@ -52,6 +52,7 @@ public:
     void write16(std::uint32_t offset, std::uint16_t value) override;
     void write32(std::uint32_t offset, std::uint32_t value) override;
     [[nodiscard]] VideoFrame videoFrame() const override;
+    [[nodiscard]] debug::DeviceSnapshot debugSnapshot() const override;
 
     [[nodiscard]] int vramBytes() const { return m_vram.size(); }
     [[nodiscard]] std::uint16_t control() const { return m_control; }

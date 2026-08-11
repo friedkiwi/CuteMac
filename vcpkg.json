@@ -31,6 +31,11 @@
       "host": true,
       "platform": "!emscripten",
       "$comment": "libslirp ships only pkg-config metadata and the vcpkg toolchain does not provide pkg-config."
+    },
+    {
+      "name": "libzip",
+      "platform": "!emscripten",
+      "$comment": "Panic-dump archives, written by the app and read back by CuteMacDebugSession. Debug-build only; wasm has no debug_dumps target."
     }
   ]
 }

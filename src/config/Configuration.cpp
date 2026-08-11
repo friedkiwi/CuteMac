@@ -462,22 +462,18 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     return configuration;
 }
 
-bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration& configuration) const
+// Serialization split out from saveTomlFile so panic dumps can carry the exact
+// same TOML the profile writer produces, without a temporary file.
+std::optional<QByteArray> ConfigurationManager::toTomlBytes(const Configuration& configuration) const
 {
     if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
-        return false;
+        return std::nullopt;
     }
     for (const auto& device : configuration.nubusDevices) {
-        if (!isValidNuBusDeviceConfiguration(device)) return false;
+        if (!isValidNuBusDeviceConfiguration(device)) return std::nullopt;
     }
     for (const auto& device : configuration.serialDevices) {
-        if (!isValidSerialDeviceConfiguration(device)) return false;
-    }
-    (void)ensureDirectories();
-
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-        return false;
+        if (!isValidSerialDeviceConfiguration(device)) return std::nullopt;
     }
 
     toml::array iwmDevices;
@@ -584,7 +580,20 @@ bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration
     std::ostringstream stream;
     stream << document;
     const auto serialized = stream.str();
-    return file.write(serialized.data(), static_cast<qint64>(serialized.size())) == static_cast<qint64>(serialized.size());
+    return QByteArray(serialized.data(), static_cast<qsizetype>(serialized.size()));
+}
+
+bool ConfigurationManager::saveTomlFile(const QString& path, const Configuration& configuration) const
+{
+    const auto serialized = toTomlBytes(configuration);
+    if (!serialized) return false;
+    (void)ensureDirectories();
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        return false;
+    }
+    return file.write(*serialized) == serialized->size();
 }
 
 } // namespace cutemac::config

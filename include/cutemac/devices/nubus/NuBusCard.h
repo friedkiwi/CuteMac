@@ -6,6 +6,7 @@
 #include <QString>
 
 #include "cutemac/core/GuestPowerRequest.h"
+#include "cutemac/debug/MachineSnapshot.h"
 #include "cutemac/devices/video/VideoFrame.h"
 
 namespace cutemac::devices::nubus {
@@ -41,6 +42,21 @@ public:
     }
     [[nodiscard]] virtual video::VideoFrame videoFrame() const { return {}; }
     [[nodiscard]] virtual core::GuestPowerRequest takePowerRequest() { return core::GuestPowerRequest::None; }
+
+    // Card state for panic dumps. Cards are held behind this interface, so
+    // without a hook here a dump can name the slot but say nothing about what
+    // is in it. Video cards override to add VRAM and control registers.
+    [[nodiscard]] virtual debug::DeviceSnapshot debugSnapshot() const
+    {
+        debug::DeviceSnapshot snapshot;
+        snapshot.id = id();
+        snapshot.kind = QStringLiteral("nubus-card");
+        snapshot.fields.insert(QStringLiteral("irq_asserted"),
+            m_irqAsserted ? QStringLiteral("yes") : QStringLiteral("no"));
+        return snapshot;
+    }
+
+    [[nodiscard]] bool irqAsserted() const { return m_irqAsserted; }
 
     void setIrqCallback(IrqCallback callback) { m_irqCallback = std::move(callback); }
 

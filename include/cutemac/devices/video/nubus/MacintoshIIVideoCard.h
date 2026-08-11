@@ -27,6 +27,7 @@ public:
     void write8(std::uint32_t offset, std::uint8_t value) override;
     void write32(std::uint32_t offset, std::uint32_t value) override;
     [[nodiscard]] VideoFrame videoFrame() const override;
+    [[nodiscard]] debug::DeviceSnapshot debugSnapshot() const override;
     [[nodiscard]] const std::array<std::uint8_t, 16>& timingRegisters() const { return m_tfbRegisters; }
     [[nodiscard]] bool vblEnabled() const { return m_vblEnabled; }
     [[nodiscard]] std::uint64_t vblStatusReads() const { return m_vblStatusReads; }

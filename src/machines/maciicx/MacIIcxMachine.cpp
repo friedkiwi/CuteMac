@@ -1,4 +1,5 @@
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
+#include "cutemac/debug/SnapshotBuilder.h"
 #include "cutemac/devices/video/nubus/CuteMacAcceleratedVideoCard.h"
 #include "cutemac/devices/video/nubus/CuteMacVideoCard.h"
 #include "cutemac/rom/RomPatcher.h"
@@ -294,7 +295,7 @@ core::GuestPowerRequest MacIIcxMachine::takePowerRequest()
 
 void MacIIcxMachine::queueInput(const core::GuestInputEvent& event, std::uint64_t cycle)
 {
-    m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); });
+    m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); }, "guest-input");
 }
 
 std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
@@ -731,6 +732,90 @@ void MacIIcxMachine::advanceDevices(int cpuCycles)
     }
     m_nubus.tick(static_cast<std::uint64_t>(cpuCycles));
     updateInterrupts();
+}
+
+
+debug::MachineSnapshot MacIIcxMachine::debugSnapshot() const
+{
+    debug::MachineSnapshot snapshot;
+    snapshot.machineId = machineId();
+    snapshot.cycle = cycleCount();
+    snapshot.overlayEnabled = m_overlay;
+    snapshot.romLoaded = m_romLoaded;
+
+    const debug::MemoryReader read8 = [this](std::uint32_t address) { return debugRead8(address); };
+    const debug::Disassembler disassemble = [this](std::uint32_t address) {
+        return qMakePair(this->disassemble(address), disassembleBytes(address));
+    };
+    snapshot.cpu = debug::buildCpuSnapshot(cpuRegisters(), debugCpuArchitecture(), read8, disassemble);
+
+    debug::MemoryRegion ram;
+    ram.name = QStringLiteral("ram");
+    ram.kind = QStringLiteral("ram");
+    ram.base = 0;
+    ram.length = static_cast<std::uint32_t>(m_ram.size());
+    ram.writable = true;
+    ram.contentsMember = QStringLiteral("mem/ram.bin");
+    ram.contents = QByteArray(reinterpret_cast<const char*>(m_ram.constData()),
+        static_cast<qsizetype>(m_ram.size()));
+    snapshot.memory.append(ram);
+
+    debug::MemoryRegion rom;
+    rom.name = QStringLiteral("rom");
+    rom.kind = QStringLiteral("rom");
+    rom.base = romBase;
+    rom.length = static_cast<std::uint32_t>(m_rom.size());
+    rom.contentsMember = QStringLiteral("mem/rom.bin");
+    rom.contents = QByteArray(reinterpret_cast<const char*>(m_rom.data()),
+        static_cast<qsizetype>(m_rom.size()));
+    snapshot.memory.append(rom);
+
+    debug::MemoryRegion io;
+    io.name = QStringLiteral("io");
+    io.kind = QStringLiteral("io");
+    io.base = ioBase;
+    io.length = 0x01000000;
+    io.readable = false;
+    snapshot.memory.append(io);
+
+    snapshot.devices.append(debug::viaSnapshot(QStringLiteral("via1"), m_via1.debugState()));
+    snapshot.devices.append(debug::viaSnapshot(QStringLiteral("via2"), m_via2.debugState()));
+    snapshot.devices.append(debug::scsiSnapshot(QStringLiteral("scsi"), m_scsi.debugState()));
+    snapshot.devices.append(debug::iwmSnapshot(QStringLiteral("swim"), m_swim.debugState()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-a"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::A), m_scc.interruptActive()));
+    snapshot.devices.append(debug::sccSnapshot(QStringLiteral("scc-b"),
+        m_scc.debugState(devices::scc::Z8530Scc::Channel::B), m_scc.interruptActive()));
+    snapshot.devices.append(debug::adbSnapshot(QStringLiteral("adb"), m_adbTransceiver.debugState()));
+    snapshot.devices.append(debug::rtcSnapshot(QStringLiteral("rtc"), m_rtc));
+    snapshot.devices.append(debug::lowMemorySnapshot(read8));
+    snapshot.devices.append(debug::nubusSnapshots(m_nubus));
+
+    debug::DeviceSnapshot ioSummary;
+    ioSummary.id = QStringLiteral("io-summary");
+    ioSummary.kind = QStringLiteral("access-summary");
+    ioSummary.fields.insert(QStringLiteral("scsi_reads"),
+        QString::number(static_cast<qulonglong>(m_ioStatistics.scsiReads)));
+    ioSummary.fields.insert(QStringLiteral("scsi_writes"),
+        QString::number(static_cast<qulonglong>(m_ioStatistics.scsiWrites)));
+    ioSummary.fields.insert(QStringLiteral("swim_reads"),
+        QString::number(static_cast<qulonglong>(m_ioStatistics.swimReads)));
+    ioSummary.fields.insert(QStringLiteral("swim_writes"),
+        QString::number(static_cast<qulonglong>(m_ioStatistics.swimWrites)));
+    ioSummary.fields.insert(QStringLiteral("nubus_reads"),
+        QString::number(static_cast<qulonglong>(m_ioStatistics.nubusReads)));
+    ioSummary.fields.insert(QStringLiteral("nubus_writes"),
+        QString::number(static_cast<qulonglong>(m_ioStatistics.nubusWrites)));
+    ioSummary.fields.insert(QStringLiteral("nubus_irq_state"),
+        QStringLiteral("0x%1").arg(m_nubusIrqState, 2, 16, QLatin1Char('0')));
+    ioSummary.fields.insert(QStringLiteral("rom_path"), m_romPath);
+    snapshot.devices.append(ioSummary);
+
+    snapshot.frame = videoFrame();
+    snapshot.schedulerEvents = m_scheduler.pendingEvents();
+    const auto swimTrace = m_swim.traceEvents();
+    if (!swimTrace.isEmpty()) snapshot.traces.insert(QStringLiteral("swim"), swimTrace);
+    return snapshot;
 }
 
 } // namespace cutemac::machines::maciicx

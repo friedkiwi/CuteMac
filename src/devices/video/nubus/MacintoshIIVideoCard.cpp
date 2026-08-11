@@ -196,6 +196,22 @@ void MacintoshIIVideoCard::write32(std::uint32_t offset, std::uint32_t value)
     }
 }
 
+debug::DeviceSnapshot MacintoshIIVideoCard::debugSnapshot() const
+{
+    auto snapshot = debug::makeVideoSnapshot(id(), QStringLiteral("macintosh-ii-video"), videoFrame(), m_vram);
+    snapshot.fields.insert(QStringLiteral("mode"), QString::number(m_mode));
+    snapshot.fields.insert(QStringLiteral("vbl_enabled"),
+        m_vblEnabled ? QStringLiteral("yes") : QStringLiteral("no"));
+    snapshot.fields.insert(QStringLiteral("vbl_assertions"), QString::number(m_vblAssertions));
+    snapshot.fields.insert(QStringLiteral("vbl_acks"), QString::number(m_vblAcks));
+    snapshot.fields.insert(QStringLiteral("declaration_rom_loaded"),
+        declarationRomLoaded() ? QStringLiteral("yes") : QStringLiteral("no"));
+    QByteArray timing(reinterpret_cast<const char*>(m_tfbRegisters.data()),
+        static_cast<qsizetype>(m_tfbRegisters.size()));
+    snapshot.blobs.append({ QStringLiteral("tfb-registers"), timing });
+    return snapshot;
+}
+
 VideoFrame MacintoshIIVideoCard::videoFrame() const
 {
     const auto stride = strideForMode(m_mode);

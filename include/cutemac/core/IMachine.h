@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 
@@ -9,6 +10,7 @@
 
 #include "cutemac/core/GuestInput.h"
 #include "cutemac/core/GuestPowerRequest.h"
+#include "cutemac/debug/MachineSnapshot.h"
 #include "cutemac/devices/audio/AudioFrame.h"
 #include "cutemac/devices/video/VideoFrame.h"
 #include "cutemac/devices/serial/SerialEndpoint.h"
@@ -47,6 +49,11 @@ public:
     [[nodiscard]] virtual GuestPowerRequest takePowerRequest() { return GuestPowerRequest::None; }
     virtual void queueInput(const GuestInputEvent& event, std::uint64_t cycle) = 0;
     virtual void attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint) = 0;
+
+    // Machine-neutral state capture for panic dumps. The default returns an
+    // empty snapshot so a machine that has not been migrated still compiles;
+    // MachineSnapshot::valid() reports whether anything was captured.
+    [[nodiscard]] virtual debug::MachineSnapshot debugSnapshot() const { return {}; }
 };
 
 class IDebugMachineAccess {
@@ -54,6 +61,12 @@ public:
     virtual ~IDebugMachineAccess() = default;
     [[nodiscard]] virtual void* debugMachine(const QString& machineId) = 0;
     [[nodiscard]] virtual IDebugCpuAccess* debugCpuAccess() = 0;
+
+    // Capture under a bounded wait on the session lock. A capture that cannot
+    // take the lock still returns a snapshot built from whatever is reachable,
+    // with the reason recorded in MachineSnapshot::notes -- a panic button that
+    // deadlocks on the hang being investigated is worse than no button.
+    [[nodiscard]] virtual debug::MachineSnapshot debugSnapshot(std::chrono::milliseconds lockTimeout) = 0;
 };
 
 } // namespace cutemac::core

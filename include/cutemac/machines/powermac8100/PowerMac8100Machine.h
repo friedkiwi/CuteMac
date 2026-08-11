@@ -110,6 +110,7 @@ public:
     [[nodiscard]] std::array<std::uint32_t, 4> scsiDmaDebugState() const
     { return { m_dmaBase, m_scsiDmaAddress, m_scsiDmaOffset, m_scsiDmaControl }; }
     [[nodiscard]] cpu::ppc::PowerPc601Core::RegisterSnapshot cpuRegisters() const { return m_cpu.registers(); }
+    [[nodiscard]] debug::MachineSnapshot debugSnapshot() const override;
 
 private:
     [[nodiscard]] BusRegion regionFor(std::uint32_t address) const;

@@ -1,5 +1,11 @@
 #include <QApplication>
 #include <QActionGroup>
+#include <QBuffer>
+#include <QClipboard>
+#include <QDesktopServices>
+#include <QFileInfo>
+#include <QInputDialog>
+#include <QUrl>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCursor>
@@ -43,6 +49,10 @@
 #include "cutemac/config/Configuration.h"
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/SessionRunner.h"
+#if CUTEMAC_ENABLE_PANIC_DUMP
+#include "cutemac/debug/HostLogRing.h"
+#include "cutemac/debug/PanicDump.h"
+#endif
 #include "cutemac/session/AudioOutput.h"
 #include "cutemac/session/FramebufferRenderer.h"
 #include "cutemac/session/HostInputMapper.h"
@@ -717,6 +727,7 @@ private:
 
 EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QString profilePath, QWidget* profileManagerWindow)
     : m_configuration(std::move(configuration))
+    , m_startupConfiguration(m_configuration)
     , m_profilePath(std::move(profilePath))
     , m_profileManagerWindow(profileManagerWindow)
     , m_session(m_configuration)
@@ -856,6 +867,12 @@ void EmulatorWindow::buildMenus()
     connect(m_unlimitedSpeedAction, &QAction::triggered, this, [this]() { setRuntimeSpeed(cutemac::config::RuntimeSpeed::Unlimited); });
     updateSpeedActions();
     machineMenu->addSeparator();
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    auto* panicAction = machineMenu->addAction(QStringLiteral("Panic Dump..."), this,
+        [this]() { triggerPanicDump(); });
+    panicAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P));
+    machineMenu->addSeparator();
+#endif
     if (!m_profileManagerWindow.isNull()) {
         machineMenu->addAction(QStringLiteral("Session Manager"), this, [this]() { showProfileManager(); });
     }
@@ -944,6 +961,11 @@ void EmulatorWindow::buildToolbar()
             statusBar()->showMessage(QStringLiteral("Programmer interrupt is unsupported for this machine"), 4000);
         }
     });
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    auto* panic = m_toolbar->addAction(style()->standardIcon(QStyle::SP_MessageBoxCritical), QStringLiteral("Panic!"));
+    panic->setToolTip(QStringLiteral("Pause and write a full state dump to the debug_dumps folder"));
+    connect(panic, &QAction::triggered, this, [this]() { triggerPanicDump(); });
+#endif
     m_toolbar->addSeparator();
 
     if (!m_configuration.iwmDevices.isEmpty()) {
@@ -1289,6 +1311,88 @@ void EmulatorWindow::setPaused(bool paused)
     }
     updateStatus();
 }
+
+#if CUTEMAC_ENABLE_PANIC_DUMP
+void EmulatorWindow::triggerPanicDump()
+{
+    // Pause before capture so the snapshot is coherent, and release any grab
+    // before the modal prompt.
+    const bool wasRunning = !m_paused;
+    setPaused(true);
+    m_display->releaseMouseCapture();
+
+    bool accepted = false;
+    const auto note = QInputDialog::getMultiLineText(this, QStringLiteral("Panic Dump"),
+        QStringLiteral("What were you doing? (optional, but one sentence now is worth\n"
+                       "more than any register when you read this back later)"),
+        QString {}, &accepted);
+    if (!accepted) {
+        if (wasRunning) setPaused(false);
+        return;
+    }
+
+    debug::PanicDumpRequest request;
+    request.startupConfiguration = m_startupConfiguration;
+    request.runtimeConfiguration = m_session.configuration();
+    request.profilePath = m_profilePath;
+    request.note = note;
+    request.hostLog = debug::HostLogRing::entries();
+
+    // Framebuffer conversion stays in the frontend, so the PNG is rendered here
+    // and handed to the core writer.
+    const auto frame = m_session.videoFrame();
+    if (frame.valid()) {
+        const auto image = FramebufferRenderer::render(frame);
+        if (!image.isNull()) {
+            QBuffer buffer(&request.screenshotPng);
+            if (buffer.open(QIODevice::WriteOnly)) (void)image.save(&buffer, "PNG");
+        }
+    }
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const auto result = debug::capturePanicDump(m_session, request);
+    QApplication::restoreOverrideCursor();
+
+    if (!result.ok) {
+        QMessageBox::warning(this, QStringLiteral("Panic Dump Failed"),
+            QStringLiteral("Could not write the dump.\n\n%1").arg(result.warnings.join(QLatin1Char('\n'))));
+        if (wasRunning) setPaused(false);
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(result.degraded ? QMessageBox::Warning : QMessageBox::Information);
+    box.setWindowTitle(QStringLiteral("Panic Dump Written"));
+    box.setText(QStringLiteral("%1\n\n%2 members, %3 MiB")
+                    .arg(result.path)
+                    .arg(result.memberCount)
+                    .arg(static_cast<double>(result.sizeBytes) / (1024.0 * 1024.0), 0, 'f', 1));
+    if (!result.warnings.isEmpty()) box.setDetailedText(result.warnings.join(QLatin1Char('\n')));
+    auto* copyButton = box.addButton(QStringLiteral("Copy Path"), QMessageBox::ActionRole);
+    auto* revealButton = box.addButton(QStringLiteral("Reveal in Folder"), QMessageBox::ActionRole);
+    auto* resumeButton = box.addButton(wasRunning ? QStringLiteral("Resume") : QStringLiteral("Close"),
+        QMessageBox::AcceptRole);
+    box.setDefaultButton(resumeButton);
+
+    // Copy and Reveal must not dismiss the dialog, so the box is re-shown until
+    // the operator picks the accept button.
+    while (true) {
+        box.exec();
+        if (box.clickedButton() == copyButton) {
+            QApplication::clipboard()->setText(result.path);
+            continue;
+        }
+        if (box.clickedButton() == revealButton) {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(result.path).absolutePath()));
+            continue;
+        }
+        break;
+    }
+
+    statusBar()->showMessage(QStringLiteral("Panic dump written to %1").arg(result.path), 8000);
+    if (wasRunning) setPaused(false);
+}
+#endif
 
 void EmulatorWindow::runFrame()
 {

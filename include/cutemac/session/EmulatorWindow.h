@@ -70,11 +70,18 @@ private:
     void configureMachine();
     void saveConfiguration();
     void setPaused(bool paused);
+#if CUTEMAC_ENABLE_PANIC_DUMP
+    void triggerPanicDump();
+#endif
     void runFrame();
     void updateStatus();
     void showProfileManager();
 
     config::Configuration m_configuration;
+    // The profile exactly as it was loaded. Panic dumps carry both this and the
+    // live configuration, which drift apart as media is inserted and speed
+    // changes during a session.
+    config::Configuration m_startupConfiguration;
     QString m_profilePath;
     QPointer<QWidget> m_profileManagerWindow;
     core::EmulationSession m_session;

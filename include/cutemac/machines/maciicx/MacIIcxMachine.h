@@ -103,6 +103,7 @@ public:
         std::uint64_t nubusWrites = 0;
     };
     [[nodiscard]] IoStatistics ioStatistics() const { return m_ioStatistics; }
+    [[nodiscard]] debug::MachineSnapshot debugSnapshot() const override;
 
 private:
     [[nodiscard]] bool isIo(std::uint32_t address) const;
