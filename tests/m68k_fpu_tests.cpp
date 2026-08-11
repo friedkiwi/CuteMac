@@ -402,6 +402,21 @@ void testUnitsAreDistinguished()
         "an FPU refusal is labelled as the FPU");
 }
 
+// The generic handler is the last place an F-line can be taken without leaving
+// a record. 0xFFFF is the encoding a guest hits when it runs off into filler.
+void testGenericFlineIsRecorded()
+{
+    Machine machine;
+    machine.run({ 0xffff });
+    const auto records = cutemac::cpu::m68k::coprocessorDiagnosticRecords();
+    expect(!records.isEmpty(), "an F-line no coprocessor decodes is recorded");
+    if (!records.isEmpty()) {
+        expect(records.first().unit == QStringLiteral("fline"), "it is attributed to neither unit");
+        expect(records.first().opcode == 0xffff, "the record carries the opcode");
+    }
+    expect(machine.tookLine1111(), "it still raises line 1111");
+}
+
 } // namespace
 
 int main()
@@ -418,6 +433,7 @@ int main()
     testNoFpuRaisesLine1111();
     testPmmuRefusalsAreRecorded();
     testUnitsAreDistinguished();
+    testGenericFlineIsRecorded();
 
     if (failures != 0) {
         std::cerr << failures << " FPU check(s) failed\n";

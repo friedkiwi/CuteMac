@@ -552,6 +552,20 @@ std::optional<MachineSnapshot> loadPanicDump(const QString& path, QString& error
                 QStringLiteral("memory region %1 has no contents in the archive").arg(region.name));
         }
     }
+    // Trace rings travel as their own archive members; snapshot.json carries
+    // only the member path. Without this the rings were written faithfully and
+    // silently dropped on load, so every dump read back as though nothing had
+    // been captured.
+    for (const auto& member : reader.memberNames()) {
+        if (!member.startsWith(QStringLiteral("trace/")) || !member.endsWith(QStringLiteral(".txt"))) continue;
+        const auto contents = reader.read(member);
+        if (!contents) continue;
+        const auto name = member.mid(6, member.size() - 6 - 4);
+        const auto text = QString::fromUtf8(*contents);
+        if (name.isEmpty()) continue;
+        snapshot->traces.insert(name,
+            text.isEmpty() ? QStringList() : text.split(QLatin1Char('\n')));
+    }
     widenMirroredRomForCapturedPc(*snapshot);
     return snapshot;
 }

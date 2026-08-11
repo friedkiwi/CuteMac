@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "m68kcpu.h"
+#include "cutemac/cpu/m68k/M68kCoprocessorDiagnostics.h"
 extern void m68040_fpu_op0(void);
 extern void m68040_fpu_op1(void);
 extern void m68881_mmu_ops(void);
@@ -17,6 +18,15 @@ static void m68k_op_1010(void)
 
 static void m68k_op_1111(void)
 {
+	/* No coprocessor decoder claimed this opcode: 0xF000-0xF1FF is the PMMU and
+	   0xF200-0xF3FF is the FPU, so anything here is outside both. On a 68030
+	   that is genuine hardware behaviour for the 68040-only instructions, but
+	   it is also the last place a guest can take a line-1111 without leaving a
+	   record, which makes an error-10 bomb undiagnosable. Note the A-line
+	   handler is deliberately not instrumented: it is the Mac trap mechanism
+	   and fires constantly. */
+	cutemac_m68k_coprocessor_report(ADDRESS_68K(REG_PPC), (uint16_t)REG_IR, 0, "fline",
+		"no coprocessor decodes this F-line opcode", 0);
 	m68ki_exception_1111();
 }
 

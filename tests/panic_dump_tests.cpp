@@ -304,6 +304,39 @@ void testSnapshotServesLowMemoryAndVectors()
     check(machine.debugRead32(0x2c) == 0x00004264, "the vector table is readable from a dump");
 }
 
+// Trace rings travel as their own archive members while snapshot.json carries
+// only their path, so a loader that restores memory but not traces reads every
+// dump back as though nothing was captured. That is indistinguishable from a
+// genuinely quiet run, which is the worst way for a diagnostic to fail.
+void testTraceRingsRoundTrip(const QString& directory)
+{
+    using namespace cutemac::debug;
+
+    auto snapshot = makeSnapshot();
+    snapshot.traces.insert(QStringLiteral("fline-refused"),
+        { QStringLiteral("fline pc=0x000cd07e opcode=0xffff ext=0x0000 no coprocessor decodes it"),
+            QStringLiteral("fpu pc=0x00001234 opcode=0xf200 ext=0x007b unimplemented opmode") });
+    snapshot.traces.insert(QStringLiteral("swim"), { QStringLiteral("one swim record") });
+
+    PanicDumpRequest request;
+    request.directory = directory;
+    const auto written = writePanicDump(snapshot, request);
+    check(written.ok, "a snapshot with trace rings writes");
+
+    QString error;
+    const auto reloaded = loadPanicDump(written.path, error);
+    check(reloaded.has_value(), "a dump with trace rings loads");
+    if (!reloaded.has_value()) return;
+
+    // makeSnapshot() already carries a "pc" ring, so three in total.
+    check(reloaded->traces.size() == 3, "every trace ring survives the round trip");
+    check(reloaded->traces.value(QStringLiteral("fline-refused")).size() == 2,
+        "a ring keeps all of its records");
+    check(reloaded->traces.value(QStringLiteral("fline-refused")).first().contains(QStringLiteral("0x000cd07e")),
+        "a ring keeps its record text");
+    check(reloaded->traces.value(QStringLiteral("swim")).size() == 1, "a second ring survives too");
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -323,6 +356,7 @@ int main(int argc, char* argv[])
     testDegradedCapture(directory.path());
     testMirroredRomIsReadableAtPc(directory.path());
     testSnapshotServesLowMemoryAndVectors();
+    testTraceRingsRoundTrip(directory.path());
 
     if (failures != 0) {
         std::cerr << failures << " panic dump check(s) failed\n";
