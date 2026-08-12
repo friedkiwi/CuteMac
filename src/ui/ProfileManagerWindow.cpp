@@ -1,5 +1,6 @@
 #include "cutemac/ui/ProfileManagerWindow.h"
 
+#include <QApplication>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QFile>
@@ -18,6 +19,7 @@
 
 #include "cutemac/rom/RomCatalog.h"
 #include "cutemac/session/SessionWindowManager.h"
+#include "cutemac/storage/DiskImageManager.h"
 #include "cutemac/session/WindowMenu.h"
 #include "cutemac/ui/ConfigurationDialog.h"
 #include "cutemac/ui/DiskImageWidgets.h"
@@ -151,7 +153,8 @@ void ProfileManagerWindow::buildUi()
     connect(m_editButton, &QPushButton::clicked, this, [this]() { editSelectedProfile(); });
     connect(m_cloneButton, &QPushButton::clicked, this, [this]() { cloneSelectedProfile(); });
     connect(m_deleteButton, &QPushButton::clicked, this, [this]() { deleteSelectedProfile(); });
-    connect(refreshButton, &QPushButton::clicked, this, [this]() { loadProfiles(); });
+    refreshButton->setToolTip(QStringLiteral("Rescan the profile, ROM, and disk image folders for changes made outside CuteMac."));
+    connect(refreshButton, &QPushButton::clicked, this, [this]() { rescanCatalogs(); });
     connect(m_table, &QTableWidget::cellDoubleClicked, this, [this](int, int) { startSelectedProfile(); });
     connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this,
         [this]() { updateActionsForSelection(); });
@@ -164,6 +167,18 @@ void ProfileManagerWindow::ensureDefaultProfile()
     }
     const auto configuration = config::ConfigurationManager::defaultMacPlusConfiguration();
     (void)m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration);
+}
+
+void ProfileManagerWindow::rescanCatalogs()
+{
+    // The only place the main window rebuilds cached ROM and disk image state.
+    // Both scans read whole directories, so they stay off every other path and
+    // happen when the user says something changed behind CuteMac's back.
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    rom::RomCatalog::shared().refresh();
+    (void)storage::DiskImageManager::shared().refresh();
+    QApplication::restoreOverrideCursor();
+    loadProfiles();
 }
 
 void ProfileManagerWindow::loadProfiles()
@@ -183,11 +198,12 @@ void ProfileManagerWindow::loadProfiles()
 
     m_table->setRowCount(m_profiles.size());
     int restoredRow = -1;
+    const auto& roms = rom::RomCatalog::shared();
     for (int row = 0; row < m_profiles.size(); ++row) {
         const auto& profile = m_profiles[row];
         setItem(row, NameColumn, profile.configuration.profileName);
         setItem(row, MachineColumn, profile.configuration.machineId);
-        const auto warning = rom::RomCatalog().warningForConfiguration(profile.configuration);
+        const auto warning = roms.warningForConfiguration(profile.configuration);
         setItem(row, RomStatusColumn, warning.isEmpty() ? QStringLiteral("Ready") : QStringLiteral("Needs attention"));
         m_table->item(row, RomStatusColumn)->setToolTip(warning);
         setItem(row, SessionColumn, m_sessions.isOpen(profile.path) ? QStringLiteral("Running") : QString());
@@ -335,7 +351,7 @@ void ProfileManagerWindow::startSelectedProfile()
         return;
     }
 
-    const auto romWarning = rom::RomCatalog().warningForConfiguration(configuration);
+    const auto romWarning = rom::RomCatalog::shared().warningForConfiguration(configuration);
     if (!romWarning.isEmpty()) {
         const auto response = QMessageBox::warning(this, QStringLiteral("ROM Warning"), romWarning
                 + QStringLiteral("\n\nThe machine may not start or some hardware may not work. Continue anyway?"),

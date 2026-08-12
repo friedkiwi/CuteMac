@@ -8,8 +8,11 @@
 #if CUTEMAC_ENABLE_PANIC_DUMP
 #include "cutemac/debug/HostLogRing.h"
 #endif
+#include "cutemac/config/Configuration.h"
 #include "cutemac/config/ProfileResolver.h"
+#include "cutemac/rom/RomCatalog.h"
 #include "cutemac/session/SessionWindowManager.h"
+#include "cutemac/storage/DiskImageManager.h"
 #include "cutemac/ui/ProfileManagerWindow.h"
 
 int main(int argc, char* argv[])
@@ -22,6 +25,14 @@ int main(int argc, char* argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("friedkiwi"));
     QCoreApplication::setApplicationName(QStringLiteral("CuteMac"));
     QCoreApplication::setApplicationVersion(QStringLiteral(CUTEMAC_VERSION));
+
+    // Both catalogs scan a whole user directory, so build them once here, after
+    // the application name has settled the standard paths they resolve. Windows
+    // and dialogs then read cached state and never scan on a button press; a
+    // Refresh button is what rebuilds them.
+    (void)cutemac::config::ConfigurationManager().ensureDirectories();
+    (void)cutemac::rom::RomCatalog::shared();
+    (void)cutemac::storage::DiskImageManager::shared();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral(

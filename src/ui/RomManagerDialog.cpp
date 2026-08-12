@@ -1,5 +1,6 @@
 #include "cutemac/ui/RomManagerDialog.h"
 
+#include <QApplication>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -37,18 +38,28 @@ RomManagerDialog::RomManagerDialog(QWidget* parent)
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(openFolder, &QPushButton::clicked, this, []() {
-        const auto path = rom::RomCatalog().directoryPath();
+        const auto path = rom::RomCatalog::shared().directoryPath();
         QDir().mkpath(path);
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     });
-    connect(refreshButton, &QPushButton::clicked, this, &RomManagerDialog::refresh);
-    refresh();
+    refreshButton->setToolTip(QStringLiteral("Rehash the ROM folder to pick up files added or removed outside CuteMac."));
+    connect(refreshButton, &QPushButton::clicked, this, &RomManagerDialog::rescan);
+    populate();
 }
 
-void RomManagerDialog::refresh()
+void RomManagerDialog::rescan()
 {
-    const rom::RomCatalog catalog;
-    const auto statuses = catalog.statuses();
+    // Opening this dialog shows what CuteMac already knows; rehashing the
+    // folder is what this button is for, and it is the only thing that asks.
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    rom::RomCatalog::shared().refresh();
+    QApplication::restoreOverrideCursor();
+    populate();
+}
+
+void RomManagerDialog::populate()
+{
+    const auto statuses = rom::RomCatalog::shared().statuses();
     m_table->setRowCount(statuses.size());
     for (int row = 0; row < statuses.size(); ++row) {
         const auto& status = statuses[row];

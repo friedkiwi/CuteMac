@@ -37,6 +37,13 @@ class RomCatalog {
 public:
     explicit RomCatalog(QString directoryPath = {});
 
+    // The process-wide catalog over the user's ROM directory. A scan reads and
+    // hashes every file there, so it runs once at startup and afterwards only
+    // when the user asks for it with a Refresh button. Everything else — table
+    // rows, configuration validation, session startup — reads this cache.
+    // Main-thread only: sessions resolve their ROMs before the runner starts.
+    static RomCatalog& shared();
+
     [[nodiscard]] static QVector<RomDefinition> definitions();
     [[nodiscard]] QString directoryPath() const;
     void refresh();

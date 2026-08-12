@@ -221,6 +221,12 @@ DiskImageManager::DiskImageManager(QString libraryPath)
     (void)refresh();
 }
 
+DiskImageManager& DiskImageManager::shared()
+{
+    static DiskImageManager manager;
+    return manager;
+}
+
 QString DiskImageManager::libraryPath() const { return m_libraryPath; }
 
 QVector<DiskImageEntry> DiskImageManager::images() const { return m_images; }

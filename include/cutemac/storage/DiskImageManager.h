@@ -23,6 +23,13 @@ class DiskImageManager {
 public:
     explicit DiskImageManager(QString libraryPath = {});
 
+    // The process-wide manager over the user's image library. A scan walks the
+    // library, probes every image for its volume identifier, and rewrites
+    // library.toml, so it runs once at startup and afterwards only when the
+    // user asks for it with a Refresh button. Sharing one instance also means
+    // an import or a newly created image is immediately visible everywhere.
+    static DiskImageManager& shared();
+
     [[nodiscard]] QString libraryPath() const;
     [[nodiscard]] QVector<DiskImageEntry> images() const;
     [[nodiscard]] QVector<DiskImageEntry> images(DiskImageType type) const;

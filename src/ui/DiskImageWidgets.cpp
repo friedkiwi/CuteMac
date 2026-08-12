@@ -1,5 +1,6 @@
 #include "cutemac/ui/DiskImageWidgets.h"
 
+#include <QApplication>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
@@ -212,7 +213,7 @@ public:
     QString createdPath() const { return m_createdPath; }
 private:
     storage::DiskImageType m_type;
-    storage::DiskImageManager m_manager;
+    storage::DiskImageManager& m_manager = storage::DiskImageManager::shared();
     QLineEdit* m_path = nullptr;
     QComboBox* m_preset = nullptr;
     QLineEdit* m_custom = nullptr;
@@ -224,7 +225,9 @@ private:
 
 class DiskImageManagerDialog::Impl {
 public:
-    storage::DiskImageManager manager;
+    // Shared, so an import here is visible in an already cached picker, and so
+    // opening this dialog costs no library scan.
+    storage::DiskImageManager& manager = storage::DiskImageManager::shared();
     QTreeWidget* tree = nullptr;
     QLineEdit* search = nullptr;
 };
@@ -256,17 +259,27 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
     auto* createFloppy = new QPushButton(QStringLiteral("New Floppy..."));
     auto* createHardDisk = new QPushButton(QStringLiteral("New Hard Disk..."));
     auto* openFolder = new QPushButton(QStringLiteral("Open Folder"));
+    auto* refreshButton = new QPushButton(QStringLiteral("Refresh"));
+    refreshButton->setToolTip(QStringLiteral("Rescan the library for images added or removed outside CuteMac."));
     for (auto* button : { import, newCollection, exportImage, createFloppy, createHardDisk }) controls->addWidget(button);
     controls->addStretch();
     controls->addWidget(openFolder);
+    controls->addWidget(refreshButton);
     layout->addLayout(controls);
     auto* close = new QDialogButtonBox(QDialogButtonBox::Close);
     layout->addWidget(close);
+    // reload() redraws from cached state after this dialog changed it itself;
+    // rescan() is the Refresh button, the only path that walks the library.
     const auto reload = [this]() {
-        (void)m_impl->manager.refresh();
         const auto images = m_impl->manager.images();
         populateImageTree(m_impl->tree, m_impl->manager, images, true);
         filterImageTree(m_impl->tree, m_impl->search->text());
+    };
+    const auto rescan = [this, reload]() {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        (void)m_impl->manager.refresh();
+        QApplication::restoreOverrideCursor();
+        reload();
     };
     connect(import, &QPushButton::clicked, this, [this, reload]() {
         if (importWithDialog(m_impl->manager, selectedCollection(m_impl->tree), this)) reload();
@@ -301,6 +314,7 @@ DiskImageManagerDialog::DiskImageManagerDialog(QWidget* parent) : QDialog(parent
     connect(createFloppy, &QPushButton::clicked, this, [this, reload]() { if (!createDiskImage(storage::DiskImageType::Floppy, this).isEmpty()) reload(); });
     connect(createHardDisk, &QPushButton::clicked, this, [this, reload]() { if (!createDiskImage(storage::DiskImageType::HardDisk, this).isEmpty()) reload(); });
     connect(openFolder, &QPushButton::clicked, this, [this]() { QDesktopServices::openUrl(QUrl::fromLocalFile(m_impl->manager.libraryPath())); });
+    connect(refreshButton, &QPushButton::clicked, this, rescan);
     connect(m_impl->search, &QLineEdit::textChanged, this, [this](const QString& text) { filterImageTree(m_impl->tree, text); });
     connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
     reload();
@@ -311,7 +325,7 @@ DiskImageManagerDialog::~DiskImageManagerDialog() = default;
 class DiskImagePickerDialog::Impl {
 public:
     storage::DiskImageType type;
-    storage::DiskImageManager manager;
+    storage::DiskImageManager& manager = storage::DiskImageManager::shared();
     QTreeWidget* tree = nullptr;
     QLineEdit* search = nullptr;
 };
@@ -338,8 +352,10 @@ DiskImagePickerDialog::DiskImagePickerDialog(storage::DiskImageType type, const 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel);
     auto* import = buttons->addButton(QStringLiteral("Import..."), QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
+    // Redraws from cached state. A picker is opened often enough that scanning
+    // the library here is exactly the stall this cache exists to remove; the
+    // Disk Image Manager's Refresh button is where a rescan belongs.
     const auto reload = [this]() {
-        (void)m_impl->manager.refresh();
         const auto images = m_impl->manager.images(m_impl->type);
         populateImageTree(m_impl->tree, m_impl->manager, images, false);
         filterImageTree(m_impl->tree, m_impl->search->text());

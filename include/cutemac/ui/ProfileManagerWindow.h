@@ -30,6 +30,7 @@ private:
     void buildUi();
     void ensureDefaultProfile();
     void loadProfiles();
+    void rescanCatalogs();
     void setItem(int row, int column, const QString& text);
     [[nodiscard]] QString compactPath(const QString& path) const;
     [[nodiscard]] QString compactFloppyPaths(const config::Configuration& configuration) const;

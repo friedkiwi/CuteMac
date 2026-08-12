@@ -16,6 +16,12 @@ RomCatalog::RomCatalog(QString directoryPath)
     refresh();
 }
 
+RomCatalog& RomCatalog::shared()
+{
+    static RomCatalog catalog;
+    return catalog;
+}
+
 QVector<RomDefinition> RomCatalog::definitions()
 {
     return {
@@ -49,14 +55,36 @@ void RomCatalog::refresh()
 
     const QDir directory(m_directoryPath);
     for (const auto& info : directory.entryInfoList(QDir::Files | QDir::Readable, QDir::Name)) {
+        // Only a definition of exactly this size can match, so decide what the
+        // file is worth reading before touching it. A ROM directory holds far
+        // more than the parts CuteMac knows, and hashing all of it is the
+        // difference between a scan that is felt and one that is not.
+        const auto size = info.size();
+        bool needsSha256 = false;
+        bool needsSha1 = false;
+        qint64 headerBytes = 0;
+        for (const auto& status : m_statuses) {
+            const auto& definition = status.definition;
+            if (status.found || definition.kind == RomKind::Embedded || definition.expectedSize != size) continue;
+            if (!definition.sha256.isEmpty()) needsSha256 = true;
+            else if (!definition.sha1.isEmpty()) needsSha1 = true;
+            else if (!definition.headerChecksum.isEmpty()) headerBytes = std::max<qint64>(headerBytes, definition.headerChecksum.size());
+        }
+        if (!needsSha256 && !needsSha1 && headerBytes == 0) continue;
+
         QFile file(info.absoluteFilePath());
         if (!file.open(QIODevice::ReadOnly)) continue;
-        const auto bytes = file.readAll();
-        const auto sha256 = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
-        const auto sha1 = QCryptographicHash::hash(bytes, QCryptographicHash::Sha1);
+        // Header-checksum parts are identified by their first few bytes, so a
+        // size whose only outstanding definitions match that way is never read
+        // in full and never hashed.
+        const bool wholeFile = needsSha256 || needsSha1;
+        const auto bytes = wholeFile ? file.readAll() : file.read(headerBytes);
+        if (wholeFile && bytes.size() != size) continue;
+        const auto sha256 = needsSha256 ? QCryptographicHash::hash(bytes, QCryptographicHash::Sha256) : QByteArray();
+        const auto sha1 = needsSha1 ? QCryptographicHash::hash(bytes, QCryptographicHash::Sha1) : QByteArray();
         for (auto& status : m_statuses) {
             const auto& definition = status.definition;
-            if (status.found || definition.kind == RomKind::Embedded || bytes.size() != definition.expectedSize) continue;
+            if (status.found || definition.kind == RomKind::Embedded || definition.expectedSize != size) continue;
             const bool shaMatch = !definition.sha256.isEmpty() && sha256 == definition.sha256;
             const bool sha1Match = definition.sha256.isEmpty() && !definition.sha1.isEmpty() && sha1 == definition.sha1;
             const bool headerMatch = definition.sha256.isEmpty() && definition.sha1.isEmpty() && !definition.headerChecksum.isEmpty()

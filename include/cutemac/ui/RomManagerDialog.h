@@ -11,7 +11,10 @@ public:
     explicit RomManagerDialog(QWidget* parent = nullptr);
 
 private:
-    void refresh();
+    // populate() fills the table from the cached catalog; rescan() is the
+    // Refresh button, and the only path that rehashes the ROM folder.
+    void populate();
+    void rescan();
     QTableWidget* m_table = nullptr;
 };
 

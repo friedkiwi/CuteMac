@@ -79,10 +79,11 @@ std::unique_ptr<devices::network::PacketNetworkBackend> makeNetworkBackend(
 template<typename Machine>
 void installConfiguredNuBusCards(Machine& machine, const QVector<config::NuBusDeviceConfiguration>& devices)
 {
+    const auto& roms = rom::RomCatalog::shared();
     for (const auto& device : devices) {
         if (device.type == config::NuBusDeviceType::MacintoshIIVideo) {
             auto card = std::make_shared<devices::video::nubus::MacintoshIIVideoCard>();
-            const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_m2_video"));
+            const auto path = roms.deviceRomPath(QStringLiteral("apple_m2_video"));
             if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
             (void)machine.installNuBusCard(device.slot, card);
         } else if (device.type == config::NuBusDeviceType::AppleDisplayCard824) {
@@ -90,13 +91,13 @@ void installConfiguredNuBusCards(Machine& machine, const QVector<config::NuBusDe
                 devices::video::nubus::AppleDisplayCard::Variant::MacintoshDisplayCard824,
                 device.vramKiB,
                 appleDisplayCardMonitor(device.monitor));
-            const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_display_card_824"));
+            const auto path = roms.deviceRomPath(QStringLiteral("apple_display_card_824"));
             if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
             (void)machine.installNuBusCard(device.slot, card);
         } else if (device.type == config::NuBusDeviceType::AppleNuBusEthernet) {
             auto card = std::make_shared<devices::network::nubus::AppleNuBusEthernetCard>(
                 ethernetMacAddress(device), makeNetworkBackend(device));
-            const auto path = rom::RomCatalog().deviceRomPath(QStringLiteral("apple_nubus_ethernet"));
+            const auto path = roms.deviceRomPath(QStringLiteral("apple_nubus_ethernet"));
             if (path.isEmpty() || !card->loadDeclarationRom(path)) continue;
             (void)machine.installNuBusCard(device.slot, card);
         } else if (device.type == config::NuBusDeviceType::CuteMacVideoAccelerated) {
@@ -181,7 +182,7 @@ bool EmulationSession::initialize()
     if (!m_machine) {
         return false;
     }
-    const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
+    const auto romPath = rom::RomCatalog::shared().preferredMachineRomPath(m_configuration.machineId);
     m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
         if (device.type == config::ScsiDeviceType::CdRom) (void)m_machine->loadScsiCdRom(device.id, device.imagePath);
@@ -218,7 +219,7 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
     if (!m_machine) {
         return false;
     }
-    const auto romPath = rom::RomCatalog().preferredMachineRomPath(m_configuration.machineId);
+    const auto romPath = rom::RomCatalog::shared().preferredMachineRomPath(m_configuration.machineId);
     m_romLoaded = !romPath.isEmpty() && m_machine->loadRomFile(romPath, m_configuration.enabledRomPatches());
     for (const auto& device : m_configuration.scsiDevices) {
         if (device.type == config::ScsiDeviceType::CdRom) (void)m_machine->loadScsiCdRom(device.id, device.imagePath);

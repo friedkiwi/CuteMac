@@ -969,7 +969,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             occupiedSlots.insert(slot);
         }
         auto prospective = this->configuration();
-        const auto romWarning = rom::RomCatalog().warningForConfiguration(prospective);
+        const auto romWarning = rom::RomCatalog::shared().warningForConfiguration(prospective);
         if (!romWarning.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("ROMs Missing or Discouraged"), romWarning
                 + QStringLiteral("\n\nYou can still save this profile. Add ROMs using Tools → ROM Manager."));
