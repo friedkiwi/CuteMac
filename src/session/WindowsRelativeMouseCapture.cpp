@@ -8,6 +8,7 @@
 
 #include <QByteArray>
 #include <QCoreApplication>
+#include <QDebug>
 #include <QAbstractNativeEventFilter>
 #include <QMetaObject>
 #include <QPoint>
@@ -30,6 +31,15 @@ constexpr USHORT kMouseUsage = 0x02;
 // The normalized coordinate space absolute-reporting devices use, per the
 // RAWMOUSE documentation.
 constexpr int kAbsoluteRange = 65535;
+
+// Opt-in: a raw input stream would otherwise flood the console. Debug Windows
+// builds keep a console, so CUTEMAC_DEBUG_MOUSE_CAPTURE=1 is readable without
+// attaching a debugger.
+bool captureTracingEnabled()
+{
+    static const bool enabled = qEnvironmentVariableIsSet("CUTEMAC_DEBUG_MOUSE_CAPTURE");
+    return enabled;
+}
 
 class WindowsRelativeMouseCapture final : public HostRelativeMouseCapture, public QAbstractNativeEventFilter {
 public:
@@ -55,7 +65,16 @@ public:
         // foreground, which is what INPUTSINK otherwise lets through.
         device.dwFlags = RIDEV_INPUTSINK;
         device.hwndTarget = hwnd;
-        if (RegisterRawInputDevices(&device, 1, sizeof(device)) == FALSE) return false;
+        if (RegisterRawInputDevices(&device, 1, sizeof(device)) == FALSE) {
+            if (captureTracingEnabled()) {
+                qWarning("mouse-capture: RegisterRawInputDevices failed, error %lu", GetLastError());
+            }
+            return false;
+        }
+        if (captureTracingEnabled()) {
+            qWarning("mouse-capture: registered hwnd=%p foreground=%p", static_cast<void*>(hwnd),
+                static_cast<void*>(GetForegroundWindow()));
+        }
 
         m_target = &target;
         m_hwnd = hwnd;
@@ -123,7 +142,7 @@ public:
             handleRawInput(reinterpret_cast<HRAWINPUT>(msg->lParam));
             break;
         case WM_ACTIVATEAPP:
-            if (msg->wParam == FALSE) notifyLost();
+            if (msg->wParam == FALSE) notifyLost("application deactivated");
             break;
         default:
             break;
@@ -137,7 +156,11 @@ private:
     void handleRawInput(HRAWINPUT handle)
     {
         if (GetForegroundWindow() != m_hwnd) {
-            notifyLost();
+            if (captureTracingEnabled()) {
+                qWarning("mouse-capture: foreground mismatch, ours=%p foreground=%p", static_cast<void*>(m_hwnd),
+                    static_cast<void*>(GetForegroundWindow()));
+            }
+            notifyLost("foreground mismatch");
             return;
         }
 
@@ -181,8 +204,13 @@ private:
         // strand the confinement rectangle where the display used to be.
         // applyCursorClip() only calls into the system when the rectangle
         // actually changes, so the common case is a comparison.
+        if (captureTracingEnabled()) {
+            qWarning("mouse-capture: raw flags=0x%04x dx=%d dy=%d delivered=%d", mouse.usFlags, dx, dy,
+                static_cast<int>(m_callbacks.delta != nullptr));
+        }
+
         if (!applyCursorClip()) {
-            notifyLost();
+            notifyLost("clip failed");
             return;
         }
         if ((dx != 0 || dy != 0) && m_callbacks.delta) m_callbacks.delta(dx, dy);
@@ -226,8 +254,25 @@ private:
         if (IntersectRect(&clip, &widget, &clientScreen) == FALSE) return false;
         if (clip.right <= clip.left || clip.bottom <= clip.top) return false;
 
-        if (std::memcmp(&clip, &m_clip, sizeof(RECT)) == 0) return true;
-        if (ClipCursor(&clip) == FALSE) return false;
+        // Caching the rectangle and skipping the call when it has not moved is
+        // wrong on its own: Windows drops the cursor clip behind our back on
+        // activation changes, display changes and desktop switches, and an
+        // activating click is exactly what starts a capture. Comparing against
+        // the clip the system actually holds re-applies it in those cases while
+        // still doing nothing in the common one.
+        RECT current {};
+        if (GetClipCursor(&current) != FALSE && std::memcmp(&clip, &current, sizeof(RECT)) == 0) {
+            m_clip = clip;
+            return true;
+        }
+        if (ClipCursor(&clip) == FALSE) {
+            if (captureTracingEnabled()) qWarning("mouse-capture: ClipCursor failed, error %lu", GetLastError());
+            return false;
+        }
+        if (captureTracingEnabled() && std::memcmp(&clip, &m_clip, sizeof(RECT)) != 0) {
+            qWarning("mouse-capture: clip %ld,%ld %ldx%ld", clip.left, clip.top, clip.right - clip.left,
+                clip.bottom - clip.top);
+        }
         m_clip = clip;
         return true;
     }
@@ -257,8 +302,13 @@ private:
     // Queued rather than called directly: the frontend responds by calling
     // stop(), which removes this native event filter, and the dispatcher is
     // still walking its filter list at this point.
-    void notifyLost()
+    void notifyLost(const char* reason)
     {
+        if (captureTracingEnabled()) {
+            qWarning("mouse-capture: lost (%s) active=%d pending=%d hasCallback=%d", reason,
+                static_cast<int>(m_active), static_cast<int>(m_lostPending),
+                static_cast<int>(m_callbacks.lost != nullptr));
+        }
         if (!m_active || m_lostPending || !m_callbacks.lost) return;
         m_lostPending = true;
         auto alive = m_alive;
