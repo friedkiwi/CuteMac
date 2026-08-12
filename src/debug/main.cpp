@@ -634,7 +634,8 @@ private:
             // The rings are filled by this console's own stepping loop, so
             // they are machine-neutral wherever run-until is.
             QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace"),
-            QStringLiteral("translate"), QStringLiteral("watch"), QStringLiteral("mem-find")
+            QStringLiteral("translate"), QStringLiteral("watch"), QStringLiteral("mem-find"),
+            QStringLiteral("run-until-reg")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -667,6 +668,8 @@ private:
             translateAddress(parts);
         } else if (command == QStringLiteral("run-until")) {
             runUntil(parts);
+        } else if (command == QStringLiteral("run-until-reg")) {
+            runUntilRegister(parts);
         } else if (command == QStringLiteral("run-until-event")) {
             runUntilEvent(parts);
         } else if (command == QStringLiteral("state")) {
@@ -1168,6 +1171,70 @@ private:
         }
         m_out << (debugProgramCounter() == *address ? "hit " : "timeout ") << hexValue(debugProgramCounter())
               << " hits=" << hits << '\n';
+    }
+
+    // Register lookup by the name the machine itself prints, so this works for
+    // any architecture without the console knowing its register file.
+    [[nodiscard]] std::optional<std::uint32_t> debugRegisterValue(const QString& name) const
+    {
+        if (m_cpuDebug == nullptr) return std::nullopt;
+        const auto needle = name.toUpper() + QStringLiteral("=");
+        for (const auto& line : m_cpuDebug->debugRegisterLines()) {
+            for (const auto& field : line.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+                if (!field.toUpper().startsWith(needle)) continue;
+                bool ok = false;
+                const auto value = field.mid(needle.size()).toUInt(&ok, 16);
+                if (ok) return value;
+            }
+        }
+        return std::nullopt;
+    }
+
+    // Stop at an address only when a register satisfies a condition. A routine
+    // reached hundreds of times is not isolated by an ordinal; what separates
+    // the interesting pass is usually machine state, such as running on a
+    // stack the guest has since relocated.
+    void runUntilRegister(const QStringList& parts)
+    {
+        if (!requireRom()) return;
+        if (parts.size() < 5) {
+            m_out << "usage: run-until-reg <addr> <reg> gt|lt|eq <value> [max-cycles]\n";
+            return;
+        }
+        const auto address = parseNumber(parts[1]);
+        const auto value = parseNumber(parts[4]);
+        if (!address.has_value() || !value.has_value()) {
+            m_out << "invalid address or value\n";
+            return;
+        }
+        const auto reg = parts[2];
+        const auto op = parts[3].toLower();
+        if (op != QStringLiteral("gt") && op != QStringLiteral("lt") && op != QStringLiteral("eq")) {
+            m_out << "condition must be gt, lt or eq\n";
+            return;
+        }
+        if (!debugRegisterValue(reg).has_value()) {
+            m_out << "unknown register: " << reg << '\n';
+            return;
+        }
+        const auto maxCycles = parts.size() >= 6 ? parts[5].toInt() : 200000000;
+        int cyclesUsed = 0;
+        int hits = 0;
+        bool stopped = false;
+        while (cyclesUsed < maxCycles) {
+            if (debugProgramCounter() == *address) {
+                ++hits;
+                const auto current = debugRegisterValue(reg).value_or(0);
+                const bool matched = op == QStringLiteral("gt") ? current > *value
+                    : op == QStringLiteral("lt") ? current < *value : current == *value;
+                if (matched) { stopped = true; break; }
+            }
+            sampleBeforeStep();
+            cyclesUsed += std::max(1, debugStepInstruction());
+            sampleAfterStep();
+        }
+        m_out << (stopped ? "hit " : "timeout ") << hexValue(debugProgramCounter())
+              << " hits=" << hits << " cycles=" << cyclesUsed << '\n';
     }
 
     void runUntilEvent(const QStringList& parts)
