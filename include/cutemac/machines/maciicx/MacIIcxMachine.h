@@ -93,10 +93,22 @@ public:
     [[nodiscard]] QByteArray floppyTrackBytesForDebug(int track, int side) const { return m_swim.trackBytesForDebug(track, side); }
     [[nodiscard]] QByteArray iwmLastNibblesForDebug() const { return m_swim.lastNibblesForDebug(); }
     [[nodiscard]] QString floppyImagePath() const { return m_floppyPaths[0]; }
-    [[nodiscard]] QString floppyImagePath(int drive) const
+
+    // Live media state for the frontend; see IMachine::tracksMediaState.
+    [[nodiscard]] bool tracksMediaState() const override { return true; }
+    [[nodiscard]] QString floppyImagePath(int drive) const override
     {
         return drive >= 0 && drive < static_cast<int>(m_floppyPaths.size()) ? m_floppyPaths[static_cast<std::size_t>(drive)] : QString();
     }
+    [[nodiscard]] QString scsiImagePath(int id) const override
+    {
+        if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return {};
+        const auto index = static_cast<std::size_t>(id);
+        if (m_scsiCdRoms[index]) return m_scsiCdRoms[index]->imagePath();
+        if (m_scsiDisks[index]) return m_scsiDisks[index]->imagePath();
+        return {};
+    }
+
     [[nodiscard]] bool sccInterruptActive() const { return m_scc.interruptActive(); }
     [[nodiscard]] devices::scc::Z8530Scc::DebugChannelState sccDebugState(devices::scc::Z8530Scc::Channel channel) const { return m_scc.debugState(channel); }
     [[nodiscard]] devices::adb::AdbTransceiver::DebugState adbDebugState() const { return m_adbTransceiver.debugState(); }

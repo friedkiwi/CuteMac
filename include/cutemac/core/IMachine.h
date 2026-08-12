@@ -41,6 +41,15 @@ public:
     [[nodiscard]] virtual std::uint64_t cycleCount() const = 0;
     [[nodiscard]] virtual std::uint32_t programCounter() const = 0;
     [[nodiscard]] virtual std::uint64_t diskActivityCounter() const { return 0; }
+
+    // Live media state, so a frontend can notice media the guest ejected
+    // itself -- dragging a disk to the Trash, or a CD eject command -- rather
+    // than going on showing what was inserted from the host. Machines that do
+    // not report it answer tracksMediaState() false and are left alone, since
+    // a default empty path is indistinguishable from an ejected drive.
+    [[nodiscard]] virtual bool tracksMediaState() const { return false; }
+    [[nodiscard]] virtual QString floppyImagePath(int drive) const { Q_UNUSED(drive); return {}; }
+    [[nodiscard]] virtual QString scsiImagePath(int id) const { Q_UNUSED(id); return {}; }
     [[nodiscard]] virtual bool overlayEnabled() const = 0;
     [[nodiscard]] virtual QByteArray framebufferBytes() const = 0;
     [[nodiscard]] virtual devices::video::VideoFrame videoFrame() const = 0;

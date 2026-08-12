@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -58,6 +59,18 @@ public:
     [[nodiscard]] bool insertScsiDevice(int id, config::ScsiDeviceType type, const QString& path, bool readOnly = false);
     void ejectScsiDevice(int id);
     [[nodiscard]] bool insertFloppy(const QString& path, bool readOnly = false);
+    // Media the machine actually has right now, which is not the same as what
+    // the host inserted: the guest can eject a disk itself. Reported in one
+    // locked call so a frontend polling it does not take the session lock once
+    // per drive. tracked is false for machines that do not report media state,
+    // and the frontend must then leave its own record alone.
+    struct MediaState {
+        bool tracked = false;
+        std::array<QString, 2> floppyPaths;
+        std::array<QString, 7> scsiPaths;
+    };
+    [[nodiscard]] MediaState mediaState() const;
+
     [[nodiscard]] bool insertFloppy(int drive, const QString& path, bool readOnly = false);
     void ejectFloppy();
     void ejectFloppy(int drive);

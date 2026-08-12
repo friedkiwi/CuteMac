@@ -413,6 +413,21 @@ void EmulationSession::ejectScsiDevice(int id)
     }
 }
 
+EmulationSession::MediaState EmulationSession::mediaState() const
+{
+    std::lock_guard lock(m_mutex);
+    MediaState state;
+    if (!m_machine || !m_machine->tracksMediaState()) return state;
+    state.tracked = true;
+    for (std::size_t drive = 0; drive < state.floppyPaths.size(); ++drive) {
+        state.floppyPaths[drive] = m_machine->floppyImagePath(static_cast<int>(drive));
+    }
+    for (std::size_t id = 0; id < state.scsiPaths.size(); ++id) {
+        state.scsiPaths[id] = m_machine->scsiImagePath(static_cast<int>(id));
+    }
+    return state;
+}
+
 bool EmulationSession::insertFloppy(const QString& path, bool readOnly)
 {
     return insertFloppy(0, path, readOnly);

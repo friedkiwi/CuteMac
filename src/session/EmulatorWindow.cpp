@@ -848,6 +848,41 @@ double EmulatorWindow::preferredInitialZoom() const
     return 1.0;
 }
 
+// The guest ejects media on its own: a disk dragged to the Trash, a CD eject
+// command. Nothing tells the frontend, so the toolbar and the profile would go
+// on advertising media that is no longer in the drive, and a later save would
+// write that stale path back to disk. Only clearing is mirrored here -- the
+// guest can remove media but never conjures any, so a path appearing where the
+// frontend has none would mean the two records had already diverged.
+void EmulatorWindow::reconcileGuestEjectedMedia()
+{
+    const auto media = m_session.mediaState();
+    if (!media.tracked) return;
+
+    bool changed = false;
+    for (int drive = 0; drive < m_configuration.iwmDevices.size() && drive < 2; ++drive) {
+        auto& configured = m_configuration.iwmDevices[drive];
+        if (configured.imagePath.isEmpty() || !media.floppyPaths[static_cast<std::size_t>(drive)].isEmpty()) continue;
+        configured.imagePath.clear();
+        if (drive == 0) m_configuration.floppyPath.clear();
+        changed = true;
+    }
+
+    for (auto& device : m_configuration.scsiDevices) {
+        if (device.imagePath.isEmpty() || device.id < 0 || device.id >= 7) continue;
+        if (!media.scsiPaths[static_cast<std::size_t>(device.id)].isEmpty()) continue;
+        // Only removable media leaves on its own; a hard disk reporting no
+        // image means something else went wrong and is not ours to erase.
+        if (device.type != cutemac::config::ScsiDeviceType::CdRom) continue;
+        device.imagePath.clear();
+        changed = true;
+    }
+
+    if (!changed) return;
+    saveConfiguration();
+    QTimer::singleShot(0, this, [this]() { buildToolbar(); });
+}
+
 void EmulatorWindow::beginMediaSettlingWindow()
 {
     m_runner.setInteractiveInputActive(true);
@@ -1475,6 +1510,7 @@ void EmulatorWindow::updateStatus()
 
     const auto state = m_session.status();
     updateSpeedActions();
+    reconcileGuestEjectedMedia();
 
     if (!m_diskActivityCounterInitialized) {
         m_lastDiskActivityCounter = state.diskActivityCounter;

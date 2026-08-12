@@ -102,6 +102,7 @@ public:
 
     [[nodiscard]] std::uint32_t programCounter() const override;
     [[nodiscard]] std::uint64_t diskActivityCounter() const override;
+
     [[nodiscard]] cpu::m68k::M68kCpuCore::RegisterSnapshot cpuRegisters() const;
     [[nodiscard]] QString disassemble(std::uint32_t address) const override;
     [[nodiscard]] int disassembleBytes(std::uint32_t address) const override;
@@ -133,7 +134,18 @@ public:
     [[nodiscard]] RomInfo romInfo() const;
     [[nodiscard]] QString diskImagePath() const;
     [[nodiscard]] QString floppyImagePath() const;
-    [[nodiscard]] QString floppyImagePath(int drive) const;
+    [[nodiscard]] QString floppyImagePath(int drive) const override;
+
+    // Live media state for the frontend; see IMachine::tracksMediaState.
+    [[nodiscard]] bool tracksMediaState() const override { return true; }
+    [[nodiscard]] QString scsiImagePath(int id) const override
+    {
+        if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return {};
+        const auto index = static_cast<std::size_t>(id);
+        if (m_scsiCdRoms[index]) return m_scsiCdRoms[index]->imagePath();
+        if (m_scsiDisks[index]) return m_scsiDisks[index]->imagePath();
+        return {};
+    }
     [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const;
     [[nodiscard]] devices::iwm::IwmController::DebugState iwmDebugState() const;
     [[nodiscard]] QByteArray floppyTrackBytesForDebug(int track, int side) const;

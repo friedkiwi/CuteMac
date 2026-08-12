@@ -56,6 +56,22 @@ public:
     [[nodiscard]] std::uint64_t cycleCount() const override;
     [[nodiscard]] std::uint32_t programCounter() const override;
     [[nodiscard]] std::uint64_t diskActivityCounter() const override;
+
+    // Live media state for the frontend; see IMachine::tracksMediaState.
+    [[nodiscard]] bool tracksMediaState() const override { return true; }
+    [[nodiscard]] QString floppyImagePath(int drive) const override
+    {
+        return drive >= 0 && drive < static_cast<int>(m_floppyPaths.size()) ? m_floppyPaths[static_cast<std::size_t>(drive)] : QString();
+    }
+    [[nodiscard]] QString scsiImagePath(int id) const override
+    {
+        if (id < 0 || id >= static_cast<int>(m_scsiDisks.size())) return {};
+        const auto index = static_cast<std::size_t>(id);
+        if (m_scsiCdRoms[index]) return m_scsiCdRoms[index]->imagePath();
+        if (m_scsiDisks[index]) return m_scsiDisks[index]->imagePath();
+        return {};
+    }
+
     [[nodiscard]] bool overlayEnabled() const override;
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;

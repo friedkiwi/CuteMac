@@ -50,6 +50,9 @@ private:
     // the host-time gap around one, so the disk-change signal the guest has a
     // bounded window to observe goes by before its driver ever polls for it.
     void beginMediaSettlingWindow();
+    // Mirrors media the guest ejected itself back into the frontend's own
+    // record, so the toolbar and profile stop advertising an empty drive.
+    void reconcileGuestEjectedMedia();
     void buildMenus();
     QAction* addZoomAction(QMenu* menu, QActionGroup* group, const QString& text, double factor);
     void setZoom(double factor);
