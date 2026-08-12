@@ -475,8 +475,7 @@ void IwmController::applyDriveStrobe()
         selectedDrive().setMotorOn(false);
         break;
     case 0x0d:
-        (void)selectedDrive().flushWrites();
-        selectedDrive().eject();
+        ejectSelectedDrive();
         break;
     default:
         break;
@@ -489,6 +488,11 @@ void IwmController::applySwimPhases(std::uint8_t phases)
     m_selectedDriveRegister = static_cast<std::uint8_t>((phases & 0x07) | (m_sideSelect ? 0x08 : 0x00));
     selectedDrive().setCurrentSide(m_sideSelect ? 1 : 0);
     if (strobe && !m_swimPhaseStrobe) {
+        appendTraceEvent(QStringLiteral("swim strobe phases=0x%1 ss=%2 reg=0x%3 drive=%4")
+                             .arg(phases, 2, 16, QLatin1Char('0'))
+                             .arg(m_sideSelect ? 1 : 0)
+                             .arg(m_selectedDriveRegister, 2, 16, QLatin1Char('0'))
+                             .arg(selectedDriveIndex()));
         switch (m_selectedDriveRegister) {
         case 0x00:
             m_stepTowardTrackZero = false;
@@ -508,8 +512,7 @@ void IwmController::applySwimPhases(std::uint8_t phases)
             selectedDrive().setMotorOn(false);
             break;
         case 0x07:
-            (void)selectedDrive().flushWrites();
-            selectedDrive().eject();
+            ejectSelectedDrive();
             break;
         case 0x09: // select MFM mode
             m_swimSetup = static_cast<std::uint8_t>(m_swimSetup & ~0x04);
@@ -591,6 +594,28 @@ bool IwmController::driveSenseHigh()
     default:
         return true;
     }
+}
+
+int IwmController::selectedDriveIndex() const
+{
+    return m_lines[SelectDrive] ? 1 : 0;
+}
+
+// The single guest-initiated eject path. Machines mirror what is in each drive,
+// so an eject that only clears the media leaves that mirror describing a disk
+// the guest has already thrown out.
+void IwmController::ejectSelectedDrive()
+{
+    const auto drive = selectedDriveIndex();
+    (void)selectedDrive().flushWrites();
+    selectedDrive().eject();
+    appendTraceEvent(QStringLiteral("drive %1 ejected by guest").arg(drive));
+    if (m_mediaEjectedCallback) m_mediaEjectedCallback(drive);
+}
+
+void IwmController::setMediaEjectedCallback(std::function<void(int drive)> callback)
+{
+    m_mediaEjectedCallback = std::move(callback);
 }
 
 floppy::FloppyDiskImage& IwmController::selectedDrive()

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 
 #include <QByteArray>
 #include <QString>
@@ -46,6 +47,11 @@ public:
     void ejectFloppyImage();
     void ejectFloppyImage(int drive);
     void setSideSelect(bool sideSelect);
+    // Raised when the guest ejects media through the drive-command strobe,
+    // rather than through the host-initiated eject API. Machines keep their own
+    // record of what is in each drive, and without this they never learn that
+    // the guest emptied it: the session then reports a disk that is gone.
+    void setMediaEjectedCallback(std::function<void(int drive)> callback);
     [[nodiscard]] QString floppyImagePath() const;
     [[nodiscard]] QString floppyImagePath(int drive) const;
     [[nodiscard]] bool floppyInserted() const;
@@ -89,6 +95,8 @@ private:
     [[nodiscard]] const floppy::FloppyDiskImage& selectedDrive() const;
     [[nodiscard]] floppy::FloppyDiskImage* driveByIndex(int drive);
     [[nodiscard]] const floppy::FloppyDiskImage* driveByIndex(int drive) const;
+    [[nodiscard]] int selectedDriveIndex() const;
+    void ejectSelectedDrive();
     void appendTraceEvent(const QString& event);
 
     std::array<bool, 8> m_lines {};
@@ -114,6 +122,7 @@ private:
     std::array<std::uint8_t, 16> m_swimParameters {};
     std::uint8_t m_swimParameterIndex = 0;
     std::uint8_t m_swimError = 0;
+    std::function<void(int drive)> m_mediaEjectedCallback;
     bool m_swimPhaseStrobe = false;
     int m_swimTraceBytesRemaining = 0;
 };

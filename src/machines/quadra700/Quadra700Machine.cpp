@@ -91,6 +91,11 @@ Quadra700Machine::Quadra700Machine(std::size_t ramSize, const QString& nvramPath
     m_via2.setPowerOnState(0, 0, 0, 0);
     m_via1.setAutomaticCa1Period(0);
     m_via2.setAutomaticCa1Period(0);
+    m_swim.setMediaEjectedCallback([this](int drive) {
+        if (drive >= 0 && drive < static_cast<int>(m_floppyPaths.size())) {
+            m_floppyPaths[static_cast<std::size_t>(drive)].clear();
+        }
+    });
     m_via1.setPortAChangedCallback([this](std::uint8_t value) {
         m_swim.setSideSelect((value & 0x20U) != 0);
     });

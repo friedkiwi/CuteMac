@@ -629,7 +629,7 @@ private:
             // Every machine with an IWM or SWIM shares the same floppy media
             // layer, and the IIcx is a SuperDrive machine, so gating these out
             // left its high-density media undiagnosable.
-            QStringLiteral("floppy"), QStringLiteral("run-until-event")
+            QStringLiteral("floppy"), QStringLiteral("run-until-event"), QStringLiteral("trace")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -1616,6 +1616,9 @@ private:
                           << " format=" << state.imageFormat
                           << " inserted=" << (state.diskInserted ? "yes" : "no") << '\n';
                 }
+                for (const auto& event : m_iicxMachine->swimTraceEvents()) {
+                    m_out << "swim_trace: " << event << '\n';
+                }
             }
             return;
         }
@@ -1926,6 +1929,15 @@ private:
         if (m_machine != nullptr) return m_machine->floppyTrackBytesForDebug(track, side);
         if (m_iicxMachine != nullptr) return m_iicxMachine->floppyTrackBytesForDebug(track, side);
         return {};
+    }
+
+    // The IIcx keeps its controller trace behind its own accessor, so routing
+    // this through one place is what lets trace iwm/floppy work on any machine
+    // with a drive instead of only the Mac Plus.
+    void setFloppyTraceEnabled(bool enabled)
+    {
+        if (m_machine != nullptr) m_machine->setIwmTraceEnabled(enabled);
+        if (m_iicxMachine != nullptr) m_iicxMachine->setSwimTraceEnabled(enabled);
     }
 
     [[nodiscard]] QString debugFloppyPath() const
@@ -2263,10 +2275,10 @@ private:
             m_trace.sound = enabled;
         } else if (category == QStringLiteral("iwm")) {
             m_trace.iwm = enabled;
-            m_machine->setIwmTraceEnabled(m_trace.iwm || m_trace.floppy);
+            setFloppyTraceEnabled(m_trace.iwm || m_trace.floppy);
         } else if (category == QStringLiteral("floppy")) {
             m_trace.floppy = enabled;
-            m_machine->setIwmTraceEnabled(m_trace.iwm || m_trace.floppy);
+            setFloppyTraceEnabled(m_trace.iwm || m_trace.floppy);
         } else if (category == QStringLiteral("timeline")) {
             m_trace.timeline = enabled;
         } else if (category == QStringLiteral("all")) {

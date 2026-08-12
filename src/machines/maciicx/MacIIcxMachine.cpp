@@ -51,6 +51,11 @@ MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     m_via2.setPowerOnState(0, 0, 0, 0);
     m_via1.setAutomaticCa1Period(viaVblPeriod);
     m_via2.setAutomaticCa1Period(0);
+    m_swim.setMediaEjectedCallback([this](int drive) {
+        if (drive >= 0 && drive < static_cast<int>(m_floppyPaths.size())) {
+            m_floppyPaths[static_cast<std::size_t>(drive)].clear();
+        }
+    });
     m_via1.setPortAChangedCallback([this](std::uint8_t value) {
         const auto overlay = (value & 0x10) != 0;
         if (m_overlay != overlay) {
