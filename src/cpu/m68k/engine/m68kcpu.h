@@ -2118,8 +2118,30 @@ static inline void m68ki_exception_address_error(void)
 	}
 	CPU_RUN_MODE = RUN_MODE_BERR_AERR_RESET_WSF;
 
-	/* Note: This is implemented for 68000 only! */
-	m68ki_stack_frame_buserr(sr);
+	/* The frame an address error pushes is not shared across the family, and
+	 * pushing the 68000's seven-word frame on a 68030 hands the guest's
+	 * handler a frame with no format word: it cannot parse it, and RTE cannot
+	 * tell how much to pop. Selection follows the bus-error path above and
+	 * MAME's m68ki_exception_address_error. */
+	if (CPU_TYPE_IS_000(CPU_TYPE))
+	{
+		m68ki_stack_frame_buserr(sr);
+	}
+	else if (CPU_TYPE_IS_010(CPU_TYPE))
+	{
+		m68ki_stack_frame_1000(REG_PPC, sr, EXCEPTION_ADDRESS_ERROR);
+	}
+	else
+	{
+		/* Address errors are raised for an instruction fetch at an odd
+		 * address, so the access is a supervisor/user program read. */
+		const uint ssw = 0x0100U | 0x0040U
+			| (uint)((m68ki_aerr_fc & 7U) ? (m68ki_aerr_fc & 7U) : FUNCTION_CODE_SUPERVISOR_PROGRAM);
+		if (m68ki_aerr_address == REG_PPC)
+			m68ki_stack_frame_1010(sr, EXCEPTION_ADDRESS_ERROR, REG_PPC, m68ki_aerr_address, ssw);
+		else
+			m68ki_stack_frame_1011(sr, EXCEPTION_ADDRESS_ERROR, REG_PPC, m68ki_aerr_address, ssw);
+	}
 
 	m68ki_jump_vector(EXCEPTION_ADDRESS_ERROR);
 
