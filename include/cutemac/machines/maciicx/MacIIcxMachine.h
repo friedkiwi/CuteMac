@@ -82,6 +82,11 @@ public:
     void debugWrite8(std::uint32_t address, std::uint8_t value) override;
     void debugWrite16(std::uint32_t address, std::uint16_t value) override;
     void debugWrite32(std::uint32_t address, std::uint32_t value) override;
+    [[nodiscard]] std::uint32_t debugTranslate(std::uint32_t logical) const override
+    {
+        return m_cpu.translateForDebug(logical);
+    }
+
     [[nodiscard]] devices::via6522::Via6522::DebugState via1DebugState() const { return m_via1.debugState(); }
     [[nodiscard]] devices::via6522::Via6522::DebugState via2DebugState() const { return m_via2.debugState(); }
     [[nodiscard]] devices::scsi::ncr5380::Ncr5380::DebugState scsiDebugState() const { return m_scsi.debugState(); }

@@ -113,6 +113,12 @@ void M68kCpuCore::setFpuModel(FpuModel model)
     }
 }
 
+std::uint32_t M68kCpuCore::translateForDebug(std::uint32_t logical) const
+{
+    activeCpu = const_cast<M68kCpuCore*>(this);
+    return m68k_translate_address(logical);
+}
+
 void M68kCpuCore::setExternal68851(bool enabled)
 {
     activeCpu = this;

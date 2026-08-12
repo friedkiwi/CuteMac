@@ -71,6 +71,10 @@ public:
     // shipped with it.
     void setFpuModel(FpuModel model);
     void setExternal68851(bool enabled);
+    // Side-effect-free logical-to-physical translation for debuggers: it
+    // walks the guest's tables without setting used/modified bits or
+    // touching the ATC, so inspecting an address cannot change the run.
+    [[nodiscard]] std::uint32_t translateForDebug(std::uint32_t logical) const;
     void setBus(M68kBus* bus);
     void setIrqLevel(unsigned int level);
 

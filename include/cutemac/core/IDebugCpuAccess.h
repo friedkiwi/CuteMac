@@ -24,6 +24,11 @@ public:
     virtual void debugWrite8(std::uint32_t address, std::uint8_t value) = 0;
     virtual void debugWrite16(std::uint32_t address, std::uint16_t value) = 0;
     virtual void debugWrite32(std::uint32_t address, std::uint32_t value) = 0;
+
+    // Logical to physical through the guest's own translation tables,
+    // without side effects. Machines with no MMU answer with the address
+    // unchanged, which is what their hardware does.
+    [[nodiscard]] virtual std::uint32_t debugTranslate(std::uint32_t logical) const { return logical; }
 };
 
 } // namespace cutemac::core

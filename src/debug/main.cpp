@@ -633,7 +633,8 @@ private:
             QStringLiteral("floppy"), QStringLiteral("run-until-event"), QStringLiteral("trace"),
             // The rings are filled by this console's own stepping loop, so
             // they are machine-neutral wherever run-until is.
-            QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace")
+            QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace"),
+            QStringLiteral("translate")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -662,6 +663,8 @@ private:
             runCycles(parts);
         } else if (command == QStringLiteral("step")) {
             stepInstructions(parts);
+        } else if (command == QStringLiteral("translate")) {
+            translateAddress(parts);
         } else if (command == QStringLiteral("run-until")) {
             runUntil(parts);
         } else if (command == QStringLiteral("run-until-event")) {
@@ -1061,6 +1064,77 @@ private:
             if (m_machine != nullptr) sampleAfterStep();
         }
         m_out << "pc=" << hexValue(debugProgramCounter()) << ' ' << debugDisassemble(debugProgramCounter()) << '\n';
+    }
+
+    // Compares the CPU's own translation against an independent walk of the
+    // guest's tables. Agreement means a wrong physical address came from a bad
+    // table, not from the walker; disagreement indicts the walker itself.
+    void translateAddress(const QStringList& parts)
+    {
+        if (!requireRom()) return;
+        if (parts.size() < 2) {
+            m_out << "usage: translate <addr>\n";
+            return;
+        }
+        const auto logical = parseNumber(parts[1]);
+        if (!logical.has_value()) {
+            m_out << "invalid address\n";
+            return;
+        }
+        if (m_cpuDebug == nullptr) {
+            m_out << "no cpu debug access\n";
+            return;
+        }
+        const auto physical = m_cpuDebug->debugTranslate(*logical);
+        m_out << "logical=" << hexValue(*logical) << " physical=" << hexValue(physical);
+
+        const auto lines = m_cpuDebug->debugRegisterLines();
+        std::uint32_t tc = 0, crp = 0;
+        for (const auto& line : lines) {
+            const auto tcIndex = line.indexOf(QStringLiteral("TC="));
+            if (tcIndex >= 0) tc = line.mid(tcIndex + 3, 8).toUInt(nullptr, 16);
+            if (line.startsWith(QStringLiteral("CRP="))) {
+                const auto colon = line.indexOf(QLatin1Char(':'));
+                if (colon > 0) crp = line.mid(colon + 1, 8).toUInt(nullptr, 16);
+            }
+        }
+        if ((tc & 0x80000000u) == 0) {
+            m_out << " (mmu off)\n";
+            return;
+        }
+        const auto pageShift = (tc >> 20) & 0xf;
+        const auto initialShift = (tc >> 16) & 0xf;
+        m_out << " tc=" << hexValue(tc) << " ps=" << pageShift << " is=" << initialShift << "\n";
+
+        // Independent walk: consume TIA..TID, four bits each, stopping at the
+        // first zero field, exactly as the architecture specifies.
+        std::uint32_t table = crp & 0xfffffff0u;
+        std::uint32_t work = *logical << initialShift;
+        std::uint32_t consumed = initialShift;
+        for (int nibble = 12; nibble >= 0; nibble -= 4) {
+            const auto indexBits = (tc >> nibble) & 0xf;
+            if (indexBits == 0) break;
+            const auto index = work >> (32 - indexBits);
+            const auto descriptorAddress = table + index * 4;
+            const auto descriptor = m_cpuDebug->debugRead32(descriptorAddress);
+            m_out << "  level ti=" << indexBits << " index=" << index
+                  << " descriptor@" << hexValue(descriptorAddress)
+                  << " = " << hexValue(descriptor)
+                  << " dt=" << (descriptor & 3) << "\n";
+            if ((descriptor & 3) == 0) { m_out << "  invalid descriptor\n"; return; }
+            if ((descriptor & 3) == 1) {
+                // Early termination: a page descriptor at an intermediate
+                // level still consumes this level's index bits, and only the
+                // bits below them pass through as the offset.
+                const auto offset = static_cast<std::uint32_t>(work << indexBits) >> (consumed + indexBits);
+                m_out << "  page: physical=" << hexValue((descriptor & (0xffffffffu << pageShift)) + offset) << "\n";
+                return;
+            }
+            table = descriptor & 0xfffffff0u;
+            work <<= indexBits;
+            consumed += indexBits;
+        }
+        m_out << "  walk did not reach a page descriptor\n";
     }
 
     void runUntil(const QStringList& parts)

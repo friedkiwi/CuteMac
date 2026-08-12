@@ -143,6 +143,11 @@ public:
     void debugWrite8(std::uint32_t address, std::uint8_t value) override;
     void debugWrite16(std::uint32_t address, std::uint16_t value) override;
     void debugWrite32(std::uint32_t address, std::uint32_t value) override;
+    [[nodiscard]] std::uint32_t debugTranslate(std::uint32_t logical) const override
+    {
+        return m_cpu.translateForDebug(logical);
+    }
+
 
     [[nodiscard]] QByteArray framebufferBytes() const override;
     [[nodiscard]] devices::video::VideoFrame videoFrame() const override;
