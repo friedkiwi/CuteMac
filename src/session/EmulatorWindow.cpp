@@ -786,6 +786,13 @@ EmulatorWindow::EmulatorWindow(cutemac::config::Configuration configuration, QSt
     m_mousePacingReleaseTimer.setInterval(QApplication::doubleClickInterval());
     connect(&m_mousePacingReleaseTimer, &QTimer::timeout, this, [this]() { updateInteractiveInputState(); });
 
+    // Long enough for the guest to poll the drive, latch the change, and read
+    // the volume header, which is several guest VBLs of driver work rather
+    // than a single poll.
+    m_mediaPacingReleaseTimer.setSingleShot(true);
+    m_mediaPacingReleaseTimer.setInterval(3000);
+    connect(&m_mediaPacingReleaseTimer, &QTimer::timeout, this, [this]() { updateInteractiveInputState(); });
+
     buildMenus();
     buildToolbar();
     buildStatusBar();
@@ -841,8 +848,21 @@ double EmulatorWindow::preferredInitialZoom() const
     return 1.0;
 }
 
+void EmulatorWindow::beginMediaSettlingWindow()
+{
+    m_runner.setInteractiveInputActive(true);
+    m_mediaPacingReleaseTimer.start();
+}
+
 void EmulatorWindow::updateInteractiveInputState(bool preserveDoubleClickWindow)
 {
+    // A media settling window outranks everything else here: releasing pacing
+    // early would drop the guest back to unlimited execution in the middle of
+    // the very transient it is meant to observe.
+    if (m_mediaPacingReleaseTimer.isActive()) {
+        m_runner.setInteractiveInputActive(true);
+        return;
+    }
     const bool inputHeld = m_mouseInputPressed || !m_pressedInputKeys.isEmpty();
     if (inputHeld) {
         m_mousePacingReleaseTimer.stop();
@@ -1069,6 +1089,7 @@ void EmulatorWindow::insertScsiPath(int id, cutemac::config::ScsiDeviceType type
     iterator->imagePath = path;
     iterator->readOnly = cdRom || iterator->readOnly;
     if (cdRom) rememberRecentImage(cutemac::storage::DiskImageType::CdRom, path);
+    beginMediaSettlingWindow();
     saveConfiguration();
     QTimer::singleShot(0, this, [this]() { buildToolbar(); });
     updateStatus();
@@ -1082,6 +1103,7 @@ void EmulatorWindow::ejectScsiFromToolbar(int id)
         || iterator->type != cutemac::config::ScsiDeviceType::CdRom) return;
     m_session.ejectScsiDevice(id);
     iterator->imagePath.clear();
+    beginMediaSettlingWindow();
     saveConfiguration();
     QTimer::singleShot(0, this, [this]() { buildToolbar(); });
     updateStatus();
@@ -1150,6 +1172,7 @@ void EmulatorWindow::insertFloppyPath(int drive, const QString& path)
         return;
     }
     rememberRecentImage(cutemac::storage::DiskImageType::Floppy, path);
+    beginMediaSettlingWindow();
     saveConfiguration();
     QTimer::singleShot(0, this, [this]() { buildToolbar(); });
     updateStatus();
@@ -1185,6 +1208,7 @@ void EmulatorWindow::ejectFloppy(int drive)
     m_configuration.iwmDevices[drive].imagePath.clear();
     if (drive == 0) m_configuration.floppyPath.clear();
     m_session.ejectFloppy(drive);
+    beginMediaSettlingWindow();
     saveConfiguration();
     QTimer::singleShot(0, this, [this]() { buildToolbar(); });
     updateStatus();

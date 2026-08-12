@@ -45,6 +45,11 @@ protected:
 private:
     [[nodiscard]] double preferredInitialZoom() const;
     void updateInteractiveInputState(bool preserveDoubleClickWindow = false);
+    // Media insertion and ejection are host-time events injected into guest
+    // time. Unlimited execution can advance the guest by many seconds across
+    // the host-time gap around one, so the disk-change signal the guest has a
+    // bounded window to observe goes by before its driver ever polls for it.
+    void beginMediaSettlingWindow();
     void buildMenus();
     QAction* addZoomAction(QMenu* menu, QActionGroup* group, const QString& text, double factor);
     void setZoom(double factor);
@@ -105,6 +110,7 @@ private:
     QSet<int> m_pressedInputKeys;
     bool m_mouseInputPressed = false;
     QTimer m_mousePacingReleaseTimer;
+    QTimer m_mediaPacingReleaseTimer;
     QTimer m_frameTimer;
     QToolBar* m_toolbar = nullptr;
     QAction* m_pauseAction = nullptr;
