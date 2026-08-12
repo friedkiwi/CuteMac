@@ -634,7 +634,7 @@ private:
             // The rings are filled by this console's own stepping loop, so
             // they are machine-neutral wherever run-until is.
             QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace"),
-            QStringLiteral("translate")
+            QStringLiteral("translate"), QStringLiteral("watch")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
