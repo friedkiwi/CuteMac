@@ -71,6 +71,7 @@ public:
             stop();
             return false;
         }
+        hideHostCursor();
         QCoreApplication::instance()->installNativeEventFilter(this);
         return true;
     }
@@ -83,6 +84,7 @@ public:
             *m_alive = false;
             m_alive.reset();
         }
+        showHostCursor();
         if (m_active) {
             QCoreApplication::instance()->removeNativeEventFilter(this);
 
@@ -198,22 +200,58 @@ private:
         // independent ones. Anchoring on the top-level window's client origin,
         // which the system reports in physical pixels, avoids having to
         // reconstruct a screen's physical origin from Qt's logical geometry.
-        POINT clientOrigin { 0, 0 };
+        RECT client {};
+        if (GetClientRect(m_hwnd, &client) == FALSE) return false;
+        POINT clientOrigin { client.left, client.top };
         if (ClientToScreen(m_hwnd, &clientOrigin) == FALSE) return false;
+        const RECT clientScreen { clientOrigin.x, clientOrigin.y,
+            clientOrigin.x + (client.right - client.left),
+            clientOrigin.y + (client.bottom - client.top) };
 
         const auto offset = m_target->mapTo(m_target->window(), QPoint(0, 0));
         const auto scale = m_target->devicePixelRatio();
+        RECT widget {};
+        widget.left = clientOrigin.x + static_cast<LONG>(std::lround(offset.x() * scale));
+        widget.top = clientOrigin.y + static_cast<LONG>(std::lround(offset.y() * scale));
+        widget.right = widget.left + static_cast<LONG>(std::lround(m_target->width() * scale));
+        widget.bottom = widget.top + static_cast<LONG>(std::lround(m_target->height() * scale));
+
+        // The near edges are anchored on a system-reported origin, but the far
+        // edges add an independently rounded scaled size, so under fractional
+        // display scaling this rectangle can overhang the window by a pixel at
+        // the right and bottom only -- never at the top or left. Intersecting
+        // with the client area bounds that error instead of letting the host
+        // pointer escape onto the desktop, where it becomes visible again.
         RECT clip {};
-        clip.left = clientOrigin.x + static_cast<LONG>(std::lround(offset.x() * scale));
-        clip.top = clientOrigin.y + static_cast<LONG>(std::lround(offset.y() * scale));
-        clip.right = clip.left + static_cast<LONG>(std::lround(m_target->width() * scale));
-        clip.bottom = clip.top + static_cast<LONG>(std::lround(m_target->height() * scale));
+        if (IntersectRect(&clip, &widget, &clientScreen) == FALSE) return false;
         if (clip.right <= clip.left || clip.bottom <= clip.top) return false;
 
         if (std::memcmp(&clip, &m_clip, sizeof(RECT)) == 0) return true;
         if (ClipCursor(&clip) == FALSE) return false;
         m_clip = clip;
         return true;
+    }
+
+    // The display widget carries a blank cursor, but that only applies while
+    // the pointer is over that one widget: on any other pixel the arrow comes
+    // straight back, which is what made it reappear at the confinement edges.
+    // macOS hides the cursor for the whole session with [NSCursor hide] and
+    // the warp fallback uses a Qt override cursor; this is the equivalent, and
+    // unlike the Qt override it also covers pixels the application does not own.
+    void hideHostCursor()
+    {
+        if (m_cursorHidden) return;
+        // ShowCursor maintains a counter, not a flag, so it has to be driven
+        // below zero and restored by the same number of steps.
+        while (ShowCursor(FALSE) >= 0) { }
+        m_cursorHidden = true;
+    }
+
+    void showHostCursor()
+    {
+        if (!m_cursorHidden) return;
+        while (ShowCursor(TRUE) < 0) { }
+        m_cursorHidden = false;
     }
 
     // Queued rather than called directly: the frontend responds by calling
@@ -244,6 +282,7 @@ private:
     int m_absoluteY = 0;
     bool m_absoluteValid = false;
     bool m_restoreCursorPosition = false;
+    bool m_cursorHidden = false;
     bool m_active = false;
     bool m_lostPending = false;
 };
