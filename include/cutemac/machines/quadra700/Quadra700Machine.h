@@ -32,7 +32,7 @@
 
 namespace cutemac::machines::quadra700 {
 
-class Quadra700Machine final : public core::IMachine, public core::IDebugCpuAccess, public cpu::m68k::M68kBus {
+class Quadra700Machine final : public core::IMachine, public core::IDebugCpuAccess, public core::IDebugDeviceAccess, public cpu::m68k::M68kBus {
 public:
     explicit Quadra700Machine(std::size_t ramSize, const QString& nvramPath = {});
 
@@ -56,6 +56,30 @@ public:
     [[nodiscard]] std::uint64_t cycleCount() const override;
     [[nodiscard]] std::uint32_t programCounter() const override;
     [[nodiscard]] std::uint64_t diskActivityCounter() const override;
+
+    // Machine-neutral device debug surface (core::IDebugDeviceAccess), so the
+    // debug console reaches the drive through one interface every machine
+    // implements instead of a per-machine special case.
+    [[nodiscard]] int floppyDriveCount() const override { return 2; }
+    [[nodiscard]] bool loadFloppy(int drive, const QString& path, bool readOnly) override
+    {
+        return loadFloppyImage(drive, path, readOnly);
+    }
+    void ejectFloppy(int drive) override { ejectFloppyImage(drive); }
+    [[nodiscard]] QString floppyPath(int drive) const override { return floppyImagePath(drive); }
+    [[nodiscard]] devices::iwm::IwmController::DebugState floppyState() const override { return m_swim.debugState(); }
+    [[nodiscard]] devices::iwm::IwmController::DebugState floppyState(int drive) const override
+    {
+        return m_swim.debugState(drive);
+    }
+    [[nodiscard]] QByteArray floppyTrackBytes(int track, int side) const override
+    {
+        return m_swim.trackBytesForDebug(track, side);
+    }
+    [[nodiscard]] QByteArray floppyLastWindow() const override { return m_swim.lastNibblesForDebug(); }
+    void setFloppyTraceEnabled(bool enabled) override { m_swim.setTraceEnabled(enabled); }
+    [[nodiscard]] QStringList floppyTraceEvents() const override { return m_swim.traceEvents(); }
+
 
     // Live media state for the frontend; see IMachine::tracksMediaState.
     [[nodiscard]] bool tracksMediaState() const override { return true; }

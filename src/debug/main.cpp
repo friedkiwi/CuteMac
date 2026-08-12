@@ -42,6 +42,7 @@
 #include "cutemac/config/Configuration.h"
 #include "cutemac/core/EmulationSession.h"
 #include "cutemac/core/IDebugCpuAccess.h"
+#include "cutemac/core/IDebugDeviceAccess.h"
 #include "cutemac/debug/SadMacDetector.h"
 #if CUTEMAC_ENABLE_PANIC_DUMP
 #include "cutemac/debug/PanicArchive.h"
@@ -629,7 +630,10 @@ private:
             // Every machine with an IWM or SWIM shares the same floppy media
             // layer, and the IIcx is a SuperDrive machine, so gating these out
             // left its high-density media undiagnosable.
-            QStringLiteral("floppy"), QStringLiteral("run-until-event"), QStringLiteral("trace")
+            QStringLiteral("floppy"), QStringLiteral("run-until-event"), QStringLiteral("trace"),
+            // The rings are filled by this console's own stepping loop, so
+            // they are machine-neutral wherever run-until is.
+            QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -932,6 +936,7 @@ private:
                 m_session->debugMachine(m_configuration.machineId));
         }
         m_iicxMachine = static_cast<cutemac::machines::maciicx::MacIIcxMachine*>(m_session->debugMachine(QStringLiteral("mac-iicx")));
+        m_deviceDebug = m_session->debugDeviceAccess();
         if (m_iicxMachine != nullptr) m_iicxMachine->setAdbTraceEnabled(true);
         m_powerMac8100Machine = static_cast<cutemac::machines::powermac8100::PowerMac8100Machine*>(
             m_session->debugMachine(QStringLiteral("powermac-8100")));
@@ -1075,7 +1080,12 @@ private:
         const auto maxCycles = parts.size() >= 3 ? parts[2].toInt() : 10000000;
         int cyclesUsed = 0;
         while (debugProgramCounter() != *address && cyclesUsed < maxCycles) {
+            // run-until has to feed the trace rings like every other stepping
+            // helper, or arriving at a breakpoint tells you nothing about how
+            // the guest got there.
+            sampleBeforeStep();
             cyclesUsed += std::max(1, debugStepInstruction());
+            sampleAfterStep();
         }
         m_out << (debugProgramCounter() == *address ? "hit " : "timeout ") << hexValue(debugProgramCounter()) << '\n';
     }
@@ -1901,57 +1911,47 @@ private:
         return QByteArray::fromHex(highDensity ? "4e4e4e" : "deaa");
     }
 
-    // Floppy debugging is not Mac Plus specific: every machine with an IWM or
-    // SWIM has the same media underneath it. These dispatch to whichever
-    // machine is live so the commands do not have to be gated by machine.
+    // Devices are reached through core::IDebugDeviceAccess, which every
+    // machine implements, rather than by branching on a concrete machine type.
+    // Adding a machine should not mean revisiting every command here.
     [[nodiscard]] bool debugLoadFloppy(const QString& path)
     {
-        if (m_machine != nullptr) return m_machine->loadFloppyImage(path);
-        if (m_iicxMachine != nullptr) return m_iicxMachine->loadFloppyImage(path, false);
-        return false;
+        return m_deviceDebug != nullptr && m_deviceDebug->loadFloppy(0, path, false);
     }
 
     void debugEjectFloppy()
     {
-        if (m_machine != nullptr) m_machine->ejectFloppyImage();
-        else if (m_iicxMachine != nullptr) m_iicxMachine->ejectFloppyImage();
+        if (m_deviceDebug != nullptr) m_deviceDebug->ejectFloppy(0);
     }
 
     [[nodiscard]] cutemac::devices::iwm::IwmController::DebugState debugIwmState() const
     {
-        if (m_machine != nullptr) return m_machine->iwmDebugState();
-        if (m_iicxMachine != nullptr) return m_iicxMachine->swimDebugState();
-        return {};
+        return m_deviceDebug != nullptr ? m_deviceDebug->floppyState() : cutemac::devices::iwm::IwmController::DebugState {};
     }
 
     [[nodiscard]] QByteArray debugFloppyTrack(int track, int side) const
     {
-        if (m_machine != nullptr) return m_machine->floppyTrackBytesForDebug(track, side);
-        if (m_iicxMachine != nullptr) return m_iicxMachine->floppyTrackBytesForDebug(track, side);
-        return {};
-    }
-
-    // The IIcx keeps its controller trace behind its own accessor, so routing
-    // this through one place is what lets trace iwm/floppy work on any machine
-    // with a drive instead of only the Mac Plus.
-    void setFloppyTraceEnabled(bool enabled)
-    {
-        if (m_machine != nullptr) m_machine->setIwmTraceEnabled(enabled);
-        if (m_iicxMachine != nullptr) m_iicxMachine->setSwimTraceEnabled(enabled);
+        return m_deviceDebug != nullptr ? m_deviceDebug->floppyTrackBytes(track, side) : QByteArray {};
     }
 
     [[nodiscard]] QString debugFloppyPath() const
     {
-        if (m_machine != nullptr) return m_machine->floppyImagePath();
-        if (m_iicxMachine != nullptr) return m_iicxMachine->floppyImagePath();
-        return {};
+        return m_deviceDebug != nullptr ? m_deviceDebug->floppyPath(0) : QString {};
     }
 
     [[nodiscard]] QByteArray debugFloppyWindow() const
     {
-        if (m_machine != nullptr) return m_machine->iwmLastNibblesForDebug();
-        if (m_iicxMachine != nullptr) return m_iicxMachine->iwmLastNibblesForDebug();
-        return {};
+        return m_deviceDebug != nullptr ? m_deviceDebug->floppyLastWindow() : QByteArray {};
+    }
+
+    [[nodiscard]] bool debugHasFloppy() const
+    {
+        return m_deviceDebug != nullptr && m_deviceDebug->floppyDriveCount() > 0;
+    }
+
+    void setFloppyTraceEnabled(bool enabled)
+    {
+        if (m_deviceDebug != nullptr) m_deviceDebug->setFloppyTraceEnabled(enabled);
     }
 
     void handleFloppy(const QStringList& parts)
@@ -3025,18 +3025,21 @@ private:
 
     void sampleBeforeStep()
     {
-        const auto pc = m_machine->programCounter();
+        // Machine-neutral: these rings are filled by this console's own
+        // stepping loop, and reading them through the Mac Plus pointer left
+        // them permanently empty on every other machine.
+        const auto pc = debugProgramCounter();
         if (m_trace.pc) {
             appendRing(m_pcTrace, QStringLiteral("%1 %2").arg(hexValue(pc), symbolFor(pc)));
         }
         if (m_trace.trap) {
-            const auto opcode = m_machine->debugRead16(pc);
+            const auto opcode = debugRead16(pc);
             if ((opcode & 0xf000) == 0xa000) {
                 appendRing(m_trapTrace, QStringLiteral("pc=%1 trap=0x%2").arg(hexValue(pc), QString::number(opcode, 16)));
                 appendTimeline(QStringLiteral("trap pc=%1 opcode=0x%2").arg(hexValue(pc), QString::number(opcode, 16)));
             }
         }
-        if (m_trace.driver) {
+        if (m_trace.driver && m_machine != nullptr) {
             if (m_sonyProbePcs.contains(pc)) {
                 const auto regs = m_machine->cpuRegisters();
                 QString event;
@@ -3123,6 +3126,7 @@ private:
     cutemac::config::Configuration m_configuration;
     std::unique_ptr<cutemac::core::EmulationSession> m_session;
     cutemac::core::IDebugCpuAccess* m_cpuDebug = nullptr;
+    cutemac::core::IDebugDeviceAccess* m_deviceDebug = nullptr;
     cutemac::machines::macplus::MacPlusMachine* m_machine = nullptr;
     cutemac::machines::maciicx::MacIIcxMachine* m_iicxMachine = nullptr;
     cutemac::machines::powermac8100::PowerMac8100Machine* m_powerMac8100Machine = nullptr;

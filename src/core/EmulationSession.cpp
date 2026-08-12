@@ -476,6 +476,12 @@ IDebugCpuAccess* EmulationSession::debugCpuAccess()
     return dynamic_cast<IDebugCpuAccess*>(m_machine.get());
 }
 
+IDebugDeviceAccess* EmulationSession::debugDeviceAccess()
+{
+    std::lock_guard lock(m_mutex);
+    return dynamic_cast<IDebugDeviceAccess*>(m_machine.get());
+}
+
 debug::MachineSnapshot EmulationSession::debugSnapshot(std::chrono::milliseconds lockTimeout)
 {
     std::unique_lock lock(m_mutex, std::defer_lock);

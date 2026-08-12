@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include "cutemac/core/GuestInput.h"
+#include "cutemac/core/IDebugDeviceAccess.h"
 #include "cutemac/core/GuestPowerRequest.h"
 #include "cutemac/debug/MachineSnapshot.h"
 #include "cutemac/devices/audio/AudioFrame.h"
@@ -70,6 +71,10 @@ public:
     virtual ~IDebugMachineAccess() = default;
     [[nodiscard]] virtual void* debugMachine(const QString& machineId) = 0;
     [[nodiscard]] virtual IDebugCpuAccess* debugCpuAccess() = 0;
+    // Devices, the counterpart to debugCpuAccess. Null for a machine that
+    // exposes no device debug surface, which a caller must handle rather
+    // than reaching for a concrete machine type instead.
+    [[nodiscard]] virtual IDebugDeviceAccess* debugDeviceAccess() = 0;
 
     // Capture under a bounded wait on the session lock. A capture that cannot
     // take the lock still returns a snapshot built from whatever is reachable,

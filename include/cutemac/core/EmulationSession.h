@@ -77,6 +77,7 @@ public:
 
     [[nodiscard]] void* debugMachine(const QString& machineId) override;
     [[nodiscard]] IDebugCpuAccess* debugCpuAccess() override;
+    [[nodiscard]] IDebugDeviceAccess* debugDeviceAccess() override;
     [[nodiscard]] debug::MachineSnapshot debugSnapshot(std::chrono::milliseconds lockTimeout) override;
 
 private:
