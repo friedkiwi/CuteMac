@@ -36,6 +36,11 @@
       "name": "libzip",
       "platform": "!emscripten",
       "$comment": "Panic-dump archives, written by the app and read back by CuteMacDebugSession. Debug-build only; wasm has no debug_dumps target."
+    },
+    {
+      "name": "readline",
+      "platform": "!emscripten",
+      "$comment": "History and tab completion for CuteMacDebugSession. The metaport resolves to readline-unix elsewhere and readline-win32 on Windows, which is what stopped the debug session from ever building there. GPL, so it must stay confined to that uninstalled development tool."
     }
   ]
 }

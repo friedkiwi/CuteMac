@@ -27,7 +27,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # back to system packages; that is what made the Windows libslirp gap invisible.
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Multimedia Network Widgets)
 find_package(tomlplusplus CONFIG REQUIRED)
-find_package(Readline)
+# Declared in the manifest for every non-wasm host, so a miss is a real failure
+# rather than a reason to quietly drop CuteMacDebugSession. Silently skipping it
+# is what left the debug session unbuildable on Windows without anyone noticing.
+if(NOT EMSCRIPTEN)
+    find_package(Readline REQUIRED)
+endif()
 
 option(CUTEMAC_ENABLE_SLIRP "Build SLIP/PPP guest networking through libslirp" ON)
 option(CUTEMAC_ENABLE_PANIC_DUMP "Build panic-dump capture and archive loading" ON)
@@ -499,7 +504,7 @@ target_link_libraries(CuteMacWrapHfsScsi PRIVATE Qt6::Core)
 add_executable(CuteMacFloppyProbe tools/floppy_probe.cpp)
 target_link_libraries(CuteMacFloppyProbe PRIVATE CuteMacCore)
 
-if(Readline_FOUND AND NOT EMSCRIPTEN)
+if(NOT EMSCRIPTEN)
     add_executable(CuteMacDebugSession
         src/debug/main.cpp
         src/session/FramebufferRenderer.cpp

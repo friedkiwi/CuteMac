@@ -1,3 +1,16 @@
+// readline's headers use FILE without declaring it. GNU readline picks it up
+// transitively from the system headers it pulls in; readline-win32 does not, so
+// stdio has to come first or every prototype mentioning FILE fails to parse.
+#include <cstdio>
+
+// chardefs.h defines isxdigit() itself unless the platform already has it as a
+// macro or HAVE_ISXDIGIT is set. glibc supplies the macro, so this never fires
+// on Unix; the MSVC CRT declares a function instead, and the resulting macro
+// then rewrites the ctype overloads inside <locale> into syntax errors.
+// readline's own config.h sets HAVE_ISXDIGIT but is internal and never reaches
+// a consumer, so the guard has to be satisfied here.
+#define HAVE_ISXDIGIT 1
+
 #include <readline/history.h>
 #include <readline/readline.h>
 
@@ -612,7 +625,11 @@ private:
             QStringLiteral("panic"),
             QStringLiteral("write8"), QStringLiteral("write16"), QStringLiteral("write32"),
             QStringLiteral("mouse"), QStringLiteral("key"), QStringLiteral("serial-debug"), QStringLiteral("interrupt"),
-            QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit")
+            QStringLiteral("sadmac"), QStringLiteral("paths"), QStringLiteral("quit"), QStringLiteral("exit"),
+            // Every machine with an IWM or SWIM shares the same floppy media
+            // layer, and the IIcx is a SuperDrive machine, so gating these out
+            // left its high-density media undiagnosable.
+            QStringLiteral("floppy")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -1850,21 +1867,79 @@ private:
         }
     }
 
+    // 400K/800K media is GCR and carries Apple's d5aa marks; 1.44 MB media is
+    // MFM and carries a1a1a1 sync bytes with an IBM address/data mark. Counting
+    // only the GCR patterns reported zero marks for every high-density track,
+    // which reads as unreadable media when the track is in fact well formed.
+    [[nodiscard]] static QByteArray addressMarkPattern(bool highDensity)
+    {
+        return QByteArray::fromHex(highDensity ? "a1a1a1fe" : "d5aa96");
+    }
+
+    [[nodiscard]] static QByteArray dataMarkPattern(bool highDensity)
+    {
+        return QByteArray::fromHex(highDensity ? "a1a1a1fb" : "d5aaad");
+    }
+
+    [[nodiscard]] static QByteArray trailerPattern(bool highDensity)
+    {
+        // MFM has no GCR-style trailer; the inter-sector gap byte is the
+        // closest equivalent landmark.
+        return QByteArray::fromHex(highDensity ? "4e4e4e" : "deaa");
+    }
+
+    // Floppy debugging is not Mac Plus specific: every machine with an IWM or
+    // SWIM has the same media underneath it. These dispatch to whichever
+    // machine is live so the commands do not have to be gated by machine.
+    [[nodiscard]] bool debugLoadFloppy(const QString& path)
+    {
+        if (m_machine != nullptr) return m_machine->loadFloppyImage(path);
+        if (m_iicxMachine != nullptr) return m_iicxMachine->loadFloppyImage(path, false);
+        return false;
+    }
+
+    void debugEjectFloppy()
+    {
+        if (m_machine != nullptr) m_machine->ejectFloppyImage();
+        else if (m_iicxMachine != nullptr) m_iicxMachine->ejectFloppyImage();
+    }
+
+    [[nodiscard]] cutemac::devices::iwm::IwmController::DebugState debugIwmState() const
+    {
+        if (m_machine != nullptr) return m_machine->iwmDebugState();
+        if (m_iicxMachine != nullptr) return m_iicxMachine->swimDebugState();
+        return {};
+    }
+
+    [[nodiscard]] QByteArray debugFloppyTrack(int track, int side) const
+    {
+        if (m_machine != nullptr) return m_machine->floppyTrackBytesForDebug(track, side);
+        if (m_iicxMachine != nullptr) return m_iicxMachine->floppyTrackBytesForDebug(track, side);
+        return {};
+    }
+
+    [[nodiscard]] QByteArray debugFloppyWindow() const
+    {
+        if (m_machine != nullptr) return m_machine->iwmLastNibblesForDebug();
+        if (m_iicxMachine != nullptr) return m_iicxMachine->iwmLastNibblesForDebug();
+        return {};
+    }
+
     void handleFloppy(const QStringList& parts)
     {
         if (parts.size() >= 3 && parts[1] == QStringLiteral("insert")) {
             m_configuration.floppyPath = parts[2];
-            if (m_machine->loadFloppyImage(m_configuration.floppyPath)) {
+            if (debugLoadFloppy(m_configuration.floppyPath)) {
                 m_out << "floppy inserted: " << displayPath(m_configuration.floppyPath) << '\n';
             } else {
                 m_out << "floppy insert failed: " << displayPath(m_configuration.floppyPath) << '\n';
             }
         } else if (parts.size() >= 2 && parts[1] == QStringLiteral("eject")) {
             m_configuration.floppyPath.clear();
-            m_machine->ejectFloppyImage();
+            debugEjectFloppy();
             m_out << "floppy ejected\n";
         } else if (parts.size() >= 2 && parts[1] == QStringLiteral("status")) {
-            const auto iwm = m_machine->iwmDebugState();
+            const auto iwm = debugIwmState();
             m_out << "floppy=" << displayPath(iwm.imagePath)
                   << " format=" << iwm.imageFormat
                   << " inserted=" << (iwm.diskInserted ? "yes" : "no")
@@ -1874,21 +1949,22 @@ private:
                   << " cursor=" << iwm.trackCursor
                   << " motor=" << (iwm.motorOn ? "on" : "off") << '\n';
         } else if (parts.size() >= 2 && parts[1] == QStringLiteral("scan")) {
-            const auto iwm = m_machine->iwmDebugState();
+            const auto iwm = debugIwmState();
             const auto track = parts.size() >= 3 ? parseNumber(parts[2]).value_or(static_cast<std::uint32_t>(iwm.track)) : static_cast<std::uint32_t>(iwm.track);
             const auto side = parts.size() >= 4 ? parseNumber(parts[3]).value_or(static_cast<std::uint32_t>(iwm.side)) : static_cast<std::uint32_t>(iwm.side);
-            const auto bytes = m_machine->floppyTrackBytesForDebug(static_cast<int>(track), static_cast<int>(side));
+            const auto bytes = debugFloppyTrack(static_cast<int>(track), static_cast<int>(side));
             m_out << "track=" << track
                   << " side=" << side
                   << " bytes=" << bytes.size()
-                  << " addr_marks=" << countPattern(bytes, QByteArray::fromHex("d5aa96"))
-                  << " data_marks=" << countPattern(bytes, QByteArray::fromHex("d5aaad"))
-                  << " trailers=" << countPattern(bytes, QByteArray::fromHex("deaa")) << '\n';
+                  << " encoding=" << (iwm.highDensity ? "mfm" : "gcr")
+                  << " addr_marks=" << countPattern(bytes, addressMarkPattern(iwm.highDensity))
+                  << " data_marks=" << countPattern(bytes, dataMarkPattern(iwm.highDensity))
+                  << " trailers=" << countPattern(bytes, trailerPattern(iwm.highDensity)) << '\n';
         } else if (parts.size() >= 3 && parts[1] == QStringLiteral("export-track")) {
-            const auto iwm = m_machine->iwmDebugState();
+            const auto iwm = debugIwmState();
             const auto track = parts.size() >= 4 ? parseNumber(parts[3]).value_or(static_cast<std::uint32_t>(iwm.track)) : static_cast<std::uint32_t>(iwm.track);
             const auto side = parts.size() >= 5 ? parseNumber(parts[4]).value_or(static_cast<std::uint32_t>(iwm.side)) : static_cast<std::uint32_t>(iwm.side);
-            const auto bytes = m_machine->floppyTrackBytesForDebug(static_cast<int>(track), static_cast<int>(side));
+            const auto bytes = debugFloppyTrack(static_cast<int>(track), static_cast<int>(side));
             QSaveFile file(parts[2]);
             if (!file.open(QIODevice::WriteOnly)) {
                 m_out << "floppy export failed: " << parts[2] << '\n';
@@ -1901,7 +1977,7 @@ private:
             }
             m_out << "floppy track exported: " << parts[2] << " bytes=" << bytes.size() << '\n';
         } else if (parts.size() >= 2 && parts[1] == QStringLiteral("last-window")) {
-            const auto bytes = m_machine->iwmLastNibblesForDebug();
+            const auto bytes = debugFloppyWindow();
             m_out << "floppy_window_bytes=" << bytes.size()
                   << " addr_marks=" << countPattern(bytes, QByteArray::fromHex("d5aa96"))
                   << " data_marks=" << countPattern(bytes, QByteArray::fromHex("d5aaad"))
@@ -1912,7 +1988,7 @@ private:
                 m_out << "floppy window export failed: " << parts[2] << '\n';
                 return;
             }
-            file.write(m_machine->iwmLastNibblesForDebug());
+            file.write(debugFloppyWindow());
             m_out << (file.commit() ? "floppy window exported: " : "floppy window export failed: ") << parts[2] << '\n';
         } else {
             m_out << "usage: floppy insert <path> | floppy eject | floppy status | floppy scan [track] [side] | floppy export-track <file> [track] [side] | floppy last-window | floppy export-window <file>\n";
