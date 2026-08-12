@@ -1438,15 +1438,37 @@ private:
         }
     }
 
+    // A value watch driven by the stepping loop rather than a bus hook: after
+    // each instruction the watched longs are re-read, so a change is reported
+    // against the instruction that made it. That is what a debugger is asked
+    // for -- which code wrote this -- and it needs no engine surgery.
     void configureWatch(const QStringList& parts)
     {
-        if (parts.size() < 3) {
-            m_out << "usage: watch read|write|rw <addr> [size]\n";
+        if (parts.size() >= 2 && parts[1] == QStringLiteral("clear")) {
+            m_watches.clear();
+            m_watchTrace.clear();
+            m_out << "watches cleared\n";
             return;
         }
-        m_watches.append(parts.mid(1).join(QLatin1Char(' ')));
-        m_out << "watch added: " << m_watches.last() << '\n';
+        if (parts.size() >= 2 && parts[1] == QStringLiteral("dump")) {
+            for (const auto& line : m_watchTrace) m_out << "watch: " << line << '\n';
+            return;
+        }
+        if (parts.size() < 2) {
+            m_out << "usage: watch <addr> | watch clear | watch dump\n";
+            return;
+        }
+        const auto address = parseNumber(parts[1]);
+        if (!address.has_value()) {
+            m_out << "invalid address\n";
+            return;
+        }
+        MemoryWatch watch;
+        watch.address = *address;
+        m_watches.append(watch);
+        m_out << "watch added: " << hexValue(watch.address) << '\n';
     }
+
 
     void handleBus(const QStringList& parts)
     {
@@ -3103,6 +3125,7 @@ private:
         // stepping loop, and reading them through the Mac Plus pointer left
         // them permanently empty on every other machine.
         const auto pc = debugProgramCounter();
+        m_watchPc = pc;
         if (m_trace.pc) {
             appendRing(m_pcTrace, QStringLiteral("%1 %2").arg(hexValue(pc), symbolFor(pc)));
         }
@@ -3137,6 +3160,18 @@ private:
 
     void sampleAfterStep()
     {
+        for (auto& watch : m_watches) {
+            const auto value = debugRead32(watch.address);
+            if (!watch.primed) {
+                watch.primed = true;
+                watch.last = value;
+                continue;
+            }
+            if (value == watch.last) continue;
+            appendRing(m_watchTrace, QStringLiteral("pc=%1 addr=%2 %3 -> %4")
+                .arg(hexValue(m_watchPc), hexValue(watch.address), hexValue(watch.last), hexValue(value)));
+            watch.last = value;
+        }
         if (m_trace.irq) {
             const auto via = m_machine->viaDebugState();
             const auto active = via.interruptActive;
@@ -3220,7 +3255,14 @@ private:
     int m_debugSerialChannel = -1;
     quint16 m_gdbPort = 1234;
     std::set<std::uint32_t> m_breakpoints;
-    QStringList m_watches;
+    struct MemoryWatch {
+        std::uint32_t address = 0;
+        std::uint32_t last = 0;
+        bool primed = false;
+    };
+    QVector<MemoryWatch> m_watches;
+    QStringList m_watchTrace;
+    std::uint32_t m_watchPc = 0;
     TraceOptions m_trace;
     QStringList m_pcTrace;
     QStringList m_irqTrace;
