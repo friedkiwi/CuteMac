@@ -629,7 +629,7 @@ private:
             // Every machine with an IWM or SWIM shares the same floppy media
             // layer, and the IIcx is a SuperDrive machine, so gating these out
             // left its high-density media undiagnosable.
-            QStringLiteral("floppy")
+            QStringLiteral("floppy"), QStringLiteral("run-until-event")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -1089,21 +1089,21 @@ private:
             m_out << "usage: run-until-event floppy-eject [max-cycles]\n";
             return;
         }
-        if (m_machine->floppyImagePath().isEmpty()) {
+        if (debugFloppyPath().isEmpty()) {
             m_out << "no floppy inserted\n";
             return;
         }
 
         const auto maxCycles = parts.size() >= 3 ? parts[2].toInt() : 10000000;
         int cyclesUsed = 0;
-        while (cyclesUsed < maxCycles && !m_machine->floppyImagePath().isEmpty()) {
+        while (cyclesUsed < maxCycles && !debugFloppyPath().isEmpty()) {
             sampleBeforeStep();
-            cyclesUsed += std::max(1, m_machine->stepInstruction());
+            cyclesUsed += std::max(1, debugStepInstruction());
             sampleAfterStep();
         }
-        const auto ejected = m_machine->floppyImagePath().isEmpty();
+        const auto ejected = debugFloppyPath().isEmpty();
         m_out << (ejected ? "event floppy-eject" : "timeout")
-              << " cycles=" << cyclesUsed << " pc=" << hexValue(m_machine->programCounter()) << '\n';
+              << " cycles=" << cyclesUsed << " pc=" << hexValue(debugProgramCounter()) << '\n';
     }
 
     void printState()
@@ -1599,13 +1599,23 @@ private:
             if (device.isEmpty() || device == QStringLiteral("swim")) {
                 m_out << "swim_reads=" << io.swimReads << " swim_writes=" << io.swimWrites << '\n';
                 const auto swim = m_iicxMachine->swimDebugState();
-                m_out << "swim_media=" << swim.imageFormat
+                // Which drive is selected has to be reported alongside the
+                // media: these fields describe the selected drive, so an empty
+                // second drive reads exactly like the first one going away.
+                m_out << "swim_drive=" << (swim.internalSelected ? "internal" : "external")
+                      << " media=" << swim.imageFormat
                       << " inserted=" << (swim.diskInserted ? "yes" : "no")
                       << " density=" << (swim.highDensity ? "high" : "double")
                       << " motor=" << (swim.motorOn ? "on" : "off")
                       << " track=" << swim.track << " side=" << swim.side
                       << " data=" << swim.dataReads << " handshake=" << swim.handshakeReads
                       << " writes=" << swim.dataWrites << '\n';
+                for (int drive = 0; drive < 2; ++drive) {
+                    const auto state = m_iicxMachine->swimDebugState(drive);
+                    m_out << "swim_drive" << drive << "=" << displayPath(state.imagePath)
+                          << " format=" << state.imageFormat
+                          << " inserted=" << (state.diskInserted ? "yes" : "no") << '\n';
+                }
             }
             return;
         }
@@ -1915,6 +1925,13 @@ private:
     {
         if (m_machine != nullptr) return m_machine->floppyTrackBytesForDebug(track, side);
         if (m_iicxMachine != nullptr) return m_iicxMachine->floppyTrackBytesForDebug(track, side);
+        return {};
+    }
+
+    [[nodiscard]] QString debugFloppyPath() const
+    {
+        if (m_machine != nullptr) return m_machine->floppyImagePath();
+        if (m_iicxMachine != nullptr) return m_iicxMachine->floppyImagePath();
         return {};
     }
 

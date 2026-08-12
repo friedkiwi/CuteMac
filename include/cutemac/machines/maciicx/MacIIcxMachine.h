@@ -92,6 +92,11 @@ public:
     [[nodiscard]] QStringList swimTraceEvents() const { return m_swim.traceEvents(); }
     [[nodiscard]] QByteArray floppyTrackBytesForDebug(int track, int side) const { return m_swim.trackBytesForDebug(track, side); }
     [[nodiscard]] QByteArray iwmLastNibblesForDebug() const { return m_swim.lastNibblesForDebug(); }
+    [[nodiscard]] QString floppyImagePath() const { return m_floppyPaths[0]; }
+    [[nodiscard]] QString floppyImagePath(int drive) const
+    {
+        return drive >= 0 && drive < static_cast<int>(m_floppyPaths.size()) ? m_floppyPaths[static_cast<std::size_t>(drive)] : QString();
+    }
     [[nodiscard]] bool sccInterruptActive() const { return m_scc.interruptActive(); }
     [[nodiscard]] devices::scc::Z8530Scc::DebugChannelState sccDebugState(devices::scc::Z8530Scc::Channel channel) const { return m_scc.debugState(channel); }
     [[nodiscard]] devices::adb::AdbTransceiver::DebugState adbDebugState() const { return m_adbTransceiver.debugState(); }
