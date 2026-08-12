@@ -634,7 +634,7 @@ private:
             // The rings are filled by this console's own stepping loop, so
             // they are machine-neutral wherever run-until is.
             QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace"),
-            QStringLiteral("translate"), QStringLiteral("watch")
+            QStringLiteral("translate"), QStringLiteral("watch"), QStringLiteral("mem-find")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -1143,7 +1143,7 @@ private:
             return;
         }
         if (parts.size() < 2) {
-            m_out << "usage: run-until <addr> [max-cycles]\n";
+            m_out << "usage: run-until <addr> [max-cycles] [nth-hit]\n";
             return;
         }
         const auto address = parseNumber(parts[1]);
@@ -1152,8 +1152,13 @@ private:
             return;
         }
         const auto maxCycles = parts.size() >= 3 ? parts[2].toInt() : 10000000;
+        // Optional hit count: a routine reached hundreds of times before the
+        // interesting pass cannot be inspected by stopping at the first one.
+        const auto wantedHits = parts.size() >= 4 ? std::max(1, parts[3].toInt()) : 1;
+        int hits = 0;
         int cyclesUsed = 0;
-        while (debugProgramCounter() != *address && cyclesUsed < maxCycles) {
+        while (cyclesUsed < maxCycles) {
+            if (debugProgramCounter() == *address && ++hits >= wantedHits) break;
             // run-until has to feed the trace rings like every other stepping
             // helper, or arriving at a breakpoint tells you nothing about how
             // the guest got there.
@@ -1161,7 +1166,8 @@ private:
             cyclesUsed += std::max(1, debugStepInstruction());
             sampleAfterStep();
         }
-        m_out << (debugProgramCounter() == *address ? "hit " : "timeout ") << hexValue(debugProgramCounter()) << '\n';
+        m_out << (debugProgramCounter() == *address ? "hit " : "timeout ") << hexValue(debugProgramCounter())
+              << " hits=" << hits << '\n';
     }
 
     void runUntilEvent(const QStringList& parts)
