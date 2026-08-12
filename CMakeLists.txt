@@ -646,6 +646,10 @@ if(BUILD_TESTING)
     add_test(NAME host-input-mapper COMMAND CuteMacHostInputMapperTests)
     add_test(NAME framebuffer-renderer COMMAND CuteMacFramebufferRendererTests)
 
+    add_executable(CuteMacCrossPageAccessTests tests/cross_page_access_tests.cpp)
+    target_link_libraries(CuteMacCrossPageAccessTests PRIVATE CuteMacCore)
+    add_test(NAME cross-page-access COMMAND CuteMacCrossPageAccessTests)
+
     add_executable(CuteMacAdbTests tests/adb_tests.cpp)
     target_link_libraries(CuteMacAdbTests PRIVATE CuteMacCore)
     add_test(NAME adb-pic-byte-protocol COMMAND CuteMacAdbTests)
