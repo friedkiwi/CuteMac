@@ -317,6 +317,7 @@ target_sources(CuteMacFrontend
     PRIVATE
         "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/src/session/SessionControlServer.cpp>"
         "$<$<PLATFORM_ID:Darwin>:${CMAKE_CURRENT_SOURCE_DIR}/src/session/MacRelativeMouseCapture.mm>"
+        "$<$<PLATFORM_ID:Windows>:${CMAKE_CURRENT_SOURCE_DIR}/src/session/WindowsRelativeMouseCapture.cpp>"
 )
 
 target_link_libraries(CuteMacFrontend
@@ -330,6 +331,12 @@ target_link_libraries(CuteMacFrontend
 
 if(APPLE)
     target_link_libraries(CuteMacFrontend PRIVATE "-framework Cocoa" "-framework CoreGraphics")
+endif()
+
+if(WIN32)
+    # Raw input, cursor confinement and the foreground-window checks the
+    # Windows relative mouse capture backend performs.
+    target_link_libraries(CuteMacFrontend PRIVATE user32)
 endif()
 
 target_compile_definitions(CuteMacFrontend

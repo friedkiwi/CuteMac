@@ -5,12 +5,15 @@
 
 namespace cutemac::session {
 
-bool HostInputMapper::supportsRelativeCapture(const QString& platformName)
+bool HostInputMapper::supportsPointerWarpCapture(const QString& platformName)
 {
 #if defined(Q_OS_WASM)
     Q_UNUSED(platformName);
     return false;
 #else
+    // Wayland does not let a client place the pointer, so the fallback's
+    // recentering silently does nothing there and every delta it computes is
+    // wrong. Relative motion on Wayland needs a native backend instead.
     return !platformName.startsWith(QStringLiteral("wayland"), Qt::CaseInsensitive);
 #endif
 }

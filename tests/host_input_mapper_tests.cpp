@@ -36,13 +36,16 @@ int main()
     ok &= expect(mappedKey(Qt::Key_Plus, Qt::KeypadModifier) == 0x45, "keypad plus mapping is wrong");
     ok &= expect(mappedKey(Qt::Key_Period, Qt::KeypadModifier) == 0x41, "keypad decimal mapping is wrong");
 
-    ok &= expect(cutemac::session::HostInputMapper::supportsRelativeCapture(QStringLiteral("cocoa")),
-        "a non-Wayland platform must support relative mouse capture");
-    ok &= expect(cutemac::session::HostInputMapper::supportsRelativeCapture(QStringLiteral("windows")),
-        "a non-Wayland platform must support relative mouse capture");
-    ok &= expect(!cutemac::session::HostInputMapper::supportsRelativeCapture(QStringLiteral("wayland")),
-        "Wayland must fall back to the no-warp absolute-pointer path");
-    ok &= expect(!cutemac::session::HostInputMapper::supportsRelativeCapture(QStringLiteral("wayland-egl")),
+    // This predicate governs only the portable warp fallback. A native
+    // HostRelativeMouseCapture backend is tried ahead of it and must not be
+    // gated on it, or a Wayland backend could never run.
+    ok &= expect(cutemac::session::HostInputMapper::supportsPointerWarpCapture(QStringLiteral("cocoa")),
+        "a non-Wayland platform must support the pointer warp fallback");
+    ok &= expect(cutemac::session::HostInputMapper::supportsPointerWarpCapture(QStringLiteral("windows")),
+        "a non-Wayland platform must support the pointer warp fallback");
+    ok &= expect(!cutemac::session::HostInputMapper::supportsPointerWarpCapture(QStringLiteral("wayland")),
+        "Wayland cannot warp the pointer and must fall back to the absolute-pointer path");
+    ok &= expect(!cutemac::session::HostInputMapper::supportsPointerWarpCapture(QStringLiteral("wayland-egl")),
         "Wayland platform name variants must also fall back to the absolute-pointer path");
     ok &= expect(!cutemac::session::HostInputMapper::releaseChordLabel().isEmpty(),
         "the release chord label shown in the Display menu must not be empty");

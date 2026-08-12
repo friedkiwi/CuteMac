@@ -10,11 +10,14 @@
 
 namespace cutemac::session {
 
+// Callbacks::lost is never raised here: dissociating the cursor is not a grab
+// the window server can revoke, so the only way this capture ends early is the
+// display widget losing focus, which the widget already handles itself.
 class MacRelativeMouseCapture final : public HostRelativeMouseCapture {
 public:
     ~MacRelativeMouseCapture() override { stop(); }
 
-    [[nodiscard]] bool start(QWidget& target, DeltaCallback callback) override
+    [[nodiscard]] bool start(QWidget& target, Callbacks callbacks) override
     {
         stop();
         if (!target.isVisible()) return false;
@@ -28,7 +31,7 @@ public:
             return false;
         }
 
-        m_callback = std::move(callback);
+        m_callbacks = std::move(callbacks);
         m_window = window;
         m_active = true;
         m_cursorHidden = true;
@@ -53,8 +56,8 @@ public:
                                 const auto dy = static_cast<int>(std::trunc(self->m_pendingDy));
                                 self->m_pendingDx -= dx;
                                 self->m_pendingDy -= dy;
-                                if ((dx != 0 || dy != 0) && self->m_callback) {
-                                    self->m_callback(dx, dy);
+                                if ((dx != 0 || dy != 0) && self->m_callbacks.delta) {
+                                    self->m_callbacks.delta(dx, dy);
                                 }
                                 return nil;
                             }];
@@ -82,7 +85,7 @@ public:
         }
         m_active = false;
         m_window = nil;
-        m_callback = {};
+        m_callbacks = {};
         m_pendingDx = 0.0;
         m_pendingDy = 0.0;
     }
@@ -90,7 +93,7 @@ public:
     [[nodiscard]] bool active() const override { return m_active; }
 
 private:
-    DeltaCallback m_callback;
+    Callbacks m_callbacks;
     NSWindow* m_window = nil;
     id m_monitor = nil;
     double m_pendingDx = 0.0;

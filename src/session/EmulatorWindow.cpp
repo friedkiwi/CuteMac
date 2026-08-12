@@ -438,18 +438,28 @@ private:
     [[nodiscard]] bool captureMouse()
     {
         setCursor(Qt::BlankCursor);
-        if (!supportsRelativeCapture()) {
-            return false;
+
+        // The native backend is tried first and unconditionally. Gating it on
+        // supportsPointerWarpCapture() would make a backend unreachable on
+        // exactly the platforms that need one most, since that predicate
+        // answers whether the *fallback* can warp a cursor here, not whether
+        // the platform can report relative motion at all.
+        if (m_hostRelativeMouseCapture) {
+            HostRelativeMouseCapture::Callbacks callbacks;
+            callbacks.delta = [this](int dx, int dy) { sendRelativeMouseDelta(dx, dy); };
+            callbacks.lost = [this]() { releaseMouseCapture(); };
+            if (m_hostRelativeMouseCapture->start(*this, std::move(callbacks))) {
+                m_mouseCaptured = true;
+                m_relativeCapture = true;
+                m_nativeRelativeCapture = true;
+                notifyCaptureStateChanged();
+                update();
+                return true;
+            }
         }
 
-        if (m_hostRelativeMouseCapture
-            && m_hostRelativeMouseCapture->start(*this, [this](int dx, int dy) { sendRelativeMouseDelta(dx, dy); })) {
-            m_mouseCaptured = true;
-            m_relativeCapture = true;
-            m_nativeRelativeCapture = true;
-            notifyCaptureStateChanged();
-            update();
-            return true;
+        if (!supportsPointerWarpCapture()) {
+            return false;
         }
 
         grabMouse(QCursor(Qt::BlankCursor));
@@ -474,12 +484,12 @@ private:
         return true;
     }
 
-    [[nodiscard]] bool supportsRelativeCapture() const
+    [[nodiscard]] bool supportsPointerWarpCapture() const
     {
 #if defined(Q_OS_WASM)
         return false;
 #else
-        return cutemac::session::HostInputMapper::supportsRelativeCapture(QGuiApplication::platformName());
+        return cutemac::session::HostInputMapper::supportsPointerWarpCapture(QGuiApplication::platformName());
 #endif
     }
 
