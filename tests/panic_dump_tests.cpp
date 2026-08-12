@@ -6,8 +6,8 @@ int main() { return 0; }
 #else
 
 #include <chrono>
+#include <future>
 #include <iostream>
-#include <mutex>
 #include <thread>
 
 #include <QCoreApplication>
@@ -177,18 +177,21 @@ void testDegradedCapture(const QString& directory)
     auto configuration = cutemac::config::ConfigurationManager::defaultMacPlusConfiguration();
     cutemac::core::EmulationSession session(configuration);
 
-    std::mutex started;
-    started.lock();
+    // The handshake is a promise rather than a mutex the holder unlocks: a
+    // std::mutex may only be released by the thread that locked it, and the
+    // MSVC debug runtime aborts on the cross-thread unlock.
+    std::promise<void> started;
+    auto startedFuture = started.get_future();
     std::thread holder([&]() {
         // runCycles takes the session lock; a paused session returns at once,
         // so the lock is instead held by a long status poll loop.
-        started.unlock();
+        started.set_value();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(600);
         while (std::chrono::steady_clock::now() < deadline) {
             (void)session.status();
         }
     });
-    started.lock();
+    startedFuture.wait();
 
     cutemac::debug::PanicDumpRequest request;
     request.startupConfiguration = configuration;

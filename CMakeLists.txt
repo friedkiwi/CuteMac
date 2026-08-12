@@ -378,15 +378,24 @@ if(WIN32 AND CUTEMAC_DEPLOY_QT)
     find_program(CUTEMAC_WINDEPLOYQT NAMES windeployqt HINTS "${CUTEMAC_QT_TOOL_DIR}")
 
     if(CUTEMAC_WINDEPLOYQT)
-        # Let windeployqt classify the binary itself. Passing --release
-        # explicitly makes it fail to match the platform plugin on llvm-mingw Qt
-        # kits, where its debug/release detection misfires.
+        # vcpkg splits the Qt runtime into <triplet>/bin and
+        # <triplet>/debug/bin, and windeployqt reads the release half through
+        # the qt.conf beside it while looking for ICU on PATH alone. Both have
+        # to be pointed at the configuration being built, so the call goes
+        # through cmake/WinDeployQt.cmake rather than straight into the tool.
+        set(CUTEMAC_QTPATHS_DEBUG "")
+        if(EXISTS "${CUTEMAC_QT_TOOL_DIR}/qtpaths.debug.bat")
+            set(CUTEMAC_QTPATHS_DEBUG "${CUTEMAC_QT_TOOL_DIR}/qtpaths.debug.bat")
+        endif()
+
         add_custom_command(TARGET CuteMac POST_BUILD
-            COMMAND "${CUTEMAC_WINDEPLOYQT}"
-                --no-translations
-                --compiler-runtime
-                --dir "$<TARGET_FILE_DIR:CuteMac>"
-                "$<TARGET_FILE:CuteMac>"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DCUTEMAC_WINDEPLOYQT=${CUTEMAC_WINDEPLOYQT}"
+                "-DCUTEMAC_QT_RUNTIME_DIR=$<TARGET_FILE_DIR:Qt6::Core>"
+                "-DCUTEMAC_QTPATHS=$<$<CONFIG:Debug>:${CUTEMAC_QTPATHS_DEBUG}>"
+                "-DCUTEMAC_DEPLOY_DIR=$<TARGET_FILE_DIR:CuteMac>"
+                "-DCUTEMAC_TARGET_FILE=$<TARGET_FILE:CuteMac>"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WinDeployQt.cmake"
             COMMENT "Deploying the Qt runtime into the build tree"
             VERBATIM
         )

@@ -191,7 +191,7 @@ private:
     }
 
 #if CUTEMAC_HAS_LIBSLIRP
-    static ssize_t sendPacketThunk(const void* buf, size_t len, void* opaque)
+    static slirp_ssize_t sendPacketThunk(const void* buf, size_t len, void* opaque)
     {
         return static_cast<Impl*>(opaque)->sendPacket(buf, len);
     }
@@ -252,10 +252,10 @@ private:
         }
     }
 
-    ssize_t sendPacket(const void* buf, size_t len)
+    slirp_ssize_t sendPacket(const void* buf, size_t len)
     {
         m_receivedFrames.emplace_back(static_cast<const char*>(buf), static_cast<qsizetype>(len));
-        return static_cast<ssize_t>(len);
+        return static_cast<slirp_ssize_t>(len);
     }
 
     Slirp* m_slirp = nullptr;
