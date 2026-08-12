@@ -493,6 +493,12 @@ target_link_libraries(CuteMacPowerMac8100Smoke PRIVATE CuteMacCore)
 add_executable(CuteMacWrapHfsScsi tools/wrap_hfs_scsi.cpp)
 target_link_libraries(CuteMacWrapHfsScsi PRIVATE Qt6::Core)
 
+# Offline stand-in for the debug session's floppy commands. CuteMacDebugSession
+# needs libreadline, which the Windows build cannot supply, so floppy media
+# problems would otherwise be undiagnosable on that host.
+add_executable(CuteMacFloppyProbe tools/floppy_probe.cpp)
+target_link_libraries(CuteMacFloppyProbe PRIVATE CuteMacCore)
+
 if(Readline_FOUND AND NOT EMSCRIPTEN)
     add_executable(CuteMacDebugSession
         src/debug/main.cpp
