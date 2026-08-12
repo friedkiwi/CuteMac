@@ -18,6 +18,8 @@
 #include <QCommandLineOption>
 #include <QDir>
 #include <QSet>
+#include <iostream>
+
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QFile>
@@ -645,8 +647,13 @@ private:
             return true;
         }
 #endif
-        if (m_iicxMachine != nullptr && !machineNeutralCommands.contains(command)) {
-            m_out << command << " is not yet available for mac-iicx; common run/register/memory/video commands are available\n";
+        // Commands outside the neutral set read Mac Plus specific state. The
+        // guard used to name only the IIcx, so on a Quadra 700 or a Power
+        // Macintosh they ran anyway and dereferenced a null machine. Anything
+        // that is not a Mac Plus is refused here, by name.
+        if (m_machine == nullptr && !machineNeutralCommands.contains(command)) {
+            m_out << command << " is not yet available for " << m_configuration.machineId
+                  << "; common run/register/memory/video commands are available\n";
             m_out.flush();
             return true;
         }
@@ -1289,16 +1296,21 @@ private:
             return;
         }
 #endif
+        // Machine-neutral first: every machine reports these through the
+        // session, so state answers on any of them rather than only the two
+        // that happened to have a branch here.
+        const auto state = m_session->status();
+        m_out << "machine=" << m_configuration.machineId << '\n';
+        m_out << "pc=" << hexValue(state.programCounter) << '\n';
+        m_out << "overlay=" << (state.overlayEnabled ? "on" : "off") << '\n';
+        m_out << "cycles=" << state.cycles << '\n';
         if (m_iicxMachine != nullptr) {
-            const auto state = m_session->status();
             const auto io = m_iicxMachine->ioStatistics();
-            m_out << "pc=" << hexValue(state.programCounter) << '\n';
-            m_out << "overlay=" << (state.overlayEnabled ? "on" : "off") << '\n';
-            m_out << "cycles=" << state.cycles << '\n';
             m_out << "nubus_reads=" << io.nubusReads << " nubus_writes=" << io.nubusWrites << '\n';
             m_out << "scsi_reads=" << io.scsiReads << " scsi_writes=" << io.scsiWrites << '\n';
             return;
         }
+        if (m_machine == nullptr) return;
         const auto& summary = m_machine->accessSummary();
         m_out << "pc=" << hexValue(m_machine->programCounter()) << '\n';
         m_out << "overlay=" << (m_machine->overlayEnabled() ? "on" : "off") << '\n';
@@ -3413,6 +3425,12 @@ int main(int argc, char* argv[])
         const auto loaded = manager.loadTomlFile(parser.value(profileOption));
         if (loaded.has_value()) {
             configuration = *loaded;
+        } else {
+            // Falling back to a default machine without saying so means every
+            // command afterwards answers about a machine the user did not ask
+            // for, which reads as the commands being broken.
+            std::cerr << "failed to load profile: " << parser.value(profileOption).toStdString()
+                      << " (continuing with the default Macintosh Plus configuration)\n";
         }
     }
 
