@@ -86,6 +86,7 @@ public:
     {
         return m_cpu.translateForDebug(logical);
     }
+    void debugFlushTranslationCache() override { m_cpu.flushTranslationCache(); }
 
     [[nodiscard]] devices::via6522::Via6522::DebugState via1DebugState() const { return m_via1.debugState(); }
     [[nodiscard]] devices::via6522::Via6522::DebugState via2DebugState() const { return m_via2.debugState(); }
@@ -163,6 +164,7 @@ private:
     void updateViaInputs();
     void advanceDevices(int cpuCycles);
     [[nodiscard]] std::optional<std::size_t> ramIndex(std::uint32_t address) const;
+    [[nodiscard]] bool isAliasedNuBus(std::uint32_t address) const;
     void rebuildPhysicalMemoryMap();
 
     cpu::m68k::M68kCpuCore m_cpu;

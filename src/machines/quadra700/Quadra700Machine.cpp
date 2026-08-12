@@ -309,6 +309,16 @@ void Quadra700Machine::queueInput(const core::GuestInputEvent& event, std::uint6
     m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); }, "guest-input");
 }
 
+// See MacIIcxMachine::isAliasedNuBus. The 24-bit slot alias must not take
+// addresses that installed RAM answers; a 68040 machine is always addressing 32
+// bits, so any RAM reaching into 0x00900000-0x00efffff is real memory.
+bool Quadra700Machine::isAliasedNuBus(std::uint32_t address) const
+{
+    if (devices::nubus::NuBusBus::superSlot(address) >= 0) return true;
+    if (devices::nubus::NuBusBus::standardSlot(address) < 0) return false;
+    return !ramIndex(address).has_value();
+}
+
 std::uint8_t Quadra700Machine::read8(std::uint32_t address)
 {
     if (m_overlay && address < static_cast<std::uint32_t>(m_rom.size())) return static_cast<std::uint8_t>(m_rom[address]);
@@ -328,7 +338,7 @@ std::uint8_t Quadra700Machine::read8(std::uint32_t address)
     if (isDafbVram(address)) return m_dafb.readVram8(address - dafbVramBase);
     if (isDafbRegister(address)) return m_dafb.readRegister8(address - dafbRegisterBase);
     if (isIo(address)) return readIo8(address);
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0 || devices::nubus::NuBusBus::superSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         return m_nubus.read8(address);
     }
     return 0xff;
@@ -350,7 +360,7 @@ std::uint16_t Quadra700Machine::read16(std::uint32_t address)
         const auto value = readIo8(address);
         return static_cast<std::uint16_t>((value << 8) | value);
     }
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0 || devices::nubus::NuBusBus::superSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         return m_nubus.read16(address);
     }
     return static_cast<std::uint16_t>((read8(address) << 8) | read8(address + 1));
@@ -364,7 +374,7 @@ std::uint32_t Quadra700Machine::read32(std::uint32_t address)
     if (!m_overlay && m_physicalMemoryMap.tryRead32(address, directValue)) return directValue;
     if (isDafbVram(address)) return m_dafb.readVram32(address - dafbVramBase);
     if (isDafbRegister(address)) return m_dafb.readRegister32(address - dafbRegisterBase);
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0 || devices::nubus::NuBusBus::superSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         return m_nubus.read32(address);
     }
     return (static_cast<std::uint32_t>(read16(address)) << 16U) | read16(address + 2);
@@ -386,7 +396,7 @@ void Quadra700Machine::write8(std::uint32_t address, std::uint8_t value)
         m_dafb.writeRegister8(address - dafbRegisterBase, value);
     } else if (isIo(address)) {
         writeIo8(address, value);
-    } else if (devices::nubus::NuBusBus::standardSlot(address) >= 0 || devices::nubus::NuBusBus::superSlot(address) >= 0) {
+    } else if (isAliasedNuBus(address)) {
         m_nubus.write8(address, value);
     }
 }
@@ -402,7 +412,7 @@ void Quadra700Machine::write16(std::uint32_t address, std::uint16_t value)
         m_dafb.writeTurboScsiDma16(0, value);
     } else if (isIo(address)) {
         writeIo8(address, highByte(value));
-    } else if (devices::nubus::NuBusBus::standardSlot(address) >= 0 || devices::nubus::NuBusBus::superSlot(address) >= 0) {
+    } else if (isAliasedNuBus(address)) {
         m_nubus.write16(address, value);
     } else {
         write8(address, highByte(value));
@@ -417,7 +427,7 @@ void Quadra700Machine::write32(std::uint32_t address, std::uint32_t value)
         m_dafb.writeVram32(address - dafbVramBase, value);
     } else if (isDafbRegister(address)) {
         m_dafb.writeRegister32(address - dafbRegisterBase, value);
-    } else if (devices::nubus::NuBusBus::standardSlot(address) >= 0 || devices::nubus::NuBusBus::superSlot(address) >= 0) {
+    } else if (isAliasedNuBus(address)) {
         m_nubus.write32(address, value);
     } else {
         write16(address, static_cast<std::uint16_t>(value >> 16U));

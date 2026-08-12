@@ -55,6 +55,39 @@ bool testStraddlingAccess(Machine& machine, std::uint32_t base, const char* name
     return ok;
 }
 
+
+// RAM reaching into 0x00900000-0x00efffff must answer there. That range is the
+// NuBus slot alias a 24-bit machine sees, and the wide accessors used to hand
+// it to an empty slot, which returns 0xffffffff. MODE32 switches the guest to
+// 32-bit addressing and puts its supervisor stack in exactly that range, so the
+// guest read -1 for memory it had just written, jumped through it, and took an
+// address error the ROM reports as a system error.
+template <typename Machine>
+bool testRamUnderSlotAlias(Machine& machine, const char* name)
+{
+    bool ok = true;
+    constexpr std::uint32_t aliased = 0x00bf9ffeu;
+
+    machine.write8(aliased + 0, 0x00);
+    machine.write8(aliased + 1, 0x00);
+    machine.write8(aliased + 2, 0x8e);
+    machine.write8(aliased + 3, 0x86);
+
+    const auto byteValue = machine.read8(aliased + 2);
+    const auto wordValue = machine.read16(aliased + 2);
+    const auto longValue = machine.read32(aliased);
+    ok &= expect(byteValue == 0x8e, "byte read under the slot alias must reach RAM");
+    ok &= expect(wordValue == 0x8e86u, "word read under the slot alias must reach RAM");
+    ok &= expect(longValue == 0x00008e86u, name);
+    if (longValue != 0x00008e86u) {
+        std::cerr << "  read32 0x" << std::hex << aliased << " returned 0x" << longValue
+                  << std::dec << std::endl;
+    }
+    // The three widths must agree; disagreement is what hid this.
+    ok &= expect(byteValue == static_cast<std::uint8_t>(wordValue >> 8),
+        "byte and word reads must agree under the slot alias");
+    return ok;
+}
 } // namespace
 
 int main()
@@ -66,6 +99,8 @@ int main()
         machine.reset();
         ok &= testStraddlingAccess(machine, 0x00040000u,
             "IIcx must read a longword that straddles a direct-page boundary");
+        ok &= testRamUnderSlotAlias(machine,
+            "IIcx RAM must outrank the 24-bit NuBus slot alias");
     }
 
     // The Mac Plus is deliberately not exercised here. It comes out of reset

@@ -75,6 +75,10 @@ public:
     // walks the guest's tables without setting used/modified bits or
     // touching the ATC, so inspecting an address cannot change the run.
     [[nodiscard]] std::uint32_t translateForDebug(std::uint32_t logical) const;
+    // Discards the address translation cache. Architecturally the guest's
+    // own PFLUSH does this; a debugger needs it to tell a stale cached
+    // translation apart from a wrong table.
+    void flushTranslationCache();
     void setBus(M68kBus* bus);
     void setIrqLevel(unsigned int level);
 

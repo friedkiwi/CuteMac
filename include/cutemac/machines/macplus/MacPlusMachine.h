@@ -147,6 +147,7 @@ public:
     {
         return m_cpu.translateForDebug(logical);
     }
+    void debugFlushTranslationCache() override { m_cpu.flushTranslationCache(); }
 
 
     [[nodiscard]] QByteArray framebufferBytes() const override;

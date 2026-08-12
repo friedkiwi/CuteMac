@@ -113,6 +113,12 @@ void M68kCpuCore::setFpuModel(FpuModel model)
     }
 }
 
+void M68kCpuCore::flushTranslationCache()
+{
+    activeCpu = this;
+    m68k_pmmu_atc_flush();
+}
+
 std::uint32_t M68kCpuCore::translateForDebug(std::uint32_t logical) const
 {
     activeCpu = const_cast<M68kCpuCore*>(this);

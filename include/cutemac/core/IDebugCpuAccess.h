@@ -29,6 +29,10 @@ public:
     // without side effects. Machines with no MMU answer with the address
     // unchanged, which is what their hardware does.
     [[nodiscard]] virtual std::uint32_t debugTranslate(std::uint32_t logical) const { return logical; }
+
+    // Discard any cached address translations. A machine without an MMU
+    // has nothing to discard.
+    virtual void debugFlushTranslationCache() {}
 };
 
 } // namespace cutemac::core

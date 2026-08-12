@@ -306,6 +306,18 @@ void MacIIcxMachine::queueInput(const core::GuestInputEvent& event, std::uint64_
     m_scheduler.schedule(std::max(cycle, m_scheduler.now()), [this, event]() { applyInput(event); }, "guest-input");
 }
 
+// The 0x00900000-0x00efffff NuBus alias only exists while the machine is
+// addressing 24 bits. MODE32 switches to 32-bit addressing, where that range is
+// ordinary RAM and the guest puts its supervisor stack there. Installed RAM
+// therefore decodes ahead of the alias, which is what read8 already did: the
+// wider accesses consulted NuBus first and handed the guest 0xffffffff from an
+// empty slot for memory it had just written.
+bool MacIIcxMachine::isAliasedNuBus(std::uint32_t address) const
+{
+    if (devices::nubus::NuBusBus::standardSlot(address) < 0) return false;
+    return !ramIndex(address).has_value();
+}
+
 std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
 {
     std::uint8_t directValue = 0;
@@ -314,7 +326,7 @@ std::uint8_t MacIIcxMachine::read8(std::uint32_t address)
     if (const auto index = ramIndex(address)) return m_ram[static_cast<qsizetype>(*index)];
     if ((address & 0xf0000000U) == romBase) return m_rom[(address - romBase) & (m_rom.size() - 1)];
     if (isIo(address)) return readIo8(address);
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         ++m_ioStatistics.nubusReads;
         return m_nubus.read8(address);
     }
@@ -325,7 +337,7 @@ std::uint16_t MacIIcxMachine::read16(std::uint32_t address)
 {
     std::uint16_t directValue = 0;
     if (m_physicalMemoryMap.tryRead16(address, directValue)) return directValue;
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         ++m_ioStatistics.nubusReads;
         return m_nubus.read16(address);
     }
@@ -344,7 +356,7 @@ std::uint32_t MacIIcxMachine::read32(std::uint32_t address)
 {
     std::uint32_t directValue = 0;
     if (m_physicalMemoryMap.tryRead32(address, directValue)) return directValue;
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         ++m_ioStatistics.nubusReads;
         return m_nubus.read32(address);
     }
@@ -358,7 +370,7 @@ void MacIIcxMachine::write8(std::uint32_t address, std::uint8_t value)
         m_ram[static_cast<qsizetype>(*index)] = value;
     } else if (isIo(address)) {
         writeIo8(address, value);
-    } else if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+    } else if (isAliasedNuBus(address)) {
         ++m_ioStatistics.nubusWrites;
         m_nubus.write8(address, value);
     }
@@ -470,7 +482,7 @@ void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
         writeIo8(address, highByte(value));
         return;
     }
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         ++m_ioStatistics.nubusWrites;
         m_nubus.write16(address, value);
         return;
@@ -482,7 +494,7 @@ void MacIIcxMachine::write16(std::uint32_t address, std::uint16_t value)
 void MacIIcxMachine::write32(std::uint32_t address, std::uint32_t value)
 {
     if (m_physicalMemoryMap.tryWrite32(address, value)) return;
-    if (devices::nubus::NuBusBus::standardSlot(address) >= 0) {
+    if (isAliasedNuBus(address)) {
         ++m_ioStatistics.nubusWrites;
         m_nubus.write32(address, value);
         return;

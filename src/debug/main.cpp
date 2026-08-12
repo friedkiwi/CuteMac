@@ -635,7 +635,7 @@ private:
             // they are machine-neutral wherever run-until is.
             QStringLiteral("pc-trace"), QStringLiteral("trap-trace"), QStringLiteral("irq-trace"),
             QStringLiteral("translate"), QStringLiteral("watch"), QStringLiteral("mem-find"),
-            QStringLiteral("run-until-reg")
+            QStringLiteral("run-until-reg"), QStringLiteral("mmu-flush")
         };
 #if CUTEMAC_ENABLE_PANIC_DUMP
         if (m_snapshot != nullptr && !snapshotSafeCommands().contains(command)) {
@@ -664,6 +664,11 @@ private:
             runCycles(parts);
         } else if (command == QStringLiteral("step")) {
             stepInstructions(parts);
+        } else if (command == QStringLiteral("mmu-flush")) {
+            if (m_cpuDebug != nullptr) {
+                m_cpuDebug->debugFlushTranslationCache();
+                m_out << "translation cache flushed\n";
+            }
         } else if (command == QStringLiteral("translate")) {
             translateAddress(parts);
         } else if (command == QStringLiteral("run-until")) {
