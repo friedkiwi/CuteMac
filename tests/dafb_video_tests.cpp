@@ -97,10 +97,19 @@ bool testVblankInterrupt()
     bool ok = true;
     dafb.setIrqCallback([&](bool asserted) { irq = asserted; });
     dafb.writeRegister32(0x100, 0);
+    dafb.writeRegister32(0x104, 0x05);
     dafb.tick(2'000'000);
-    ok &= expect(irq && dafb.interruptActive(), "DAFB VBL tick must assert IRQ");
+    ok &= expect(irq && dafb.interruptActive() && dafb.readRegister32(0x108) == 0x05,
+        "DAFB frame tick must assert enabled VBL and cursor scanline IRQs");
+    (void)dafb.readRegister32(0x10c);
+    ok &= expect(irq && dafb.readRegister32(0x108) == 0x01,
+        "DAFB cursor clear register must preserve a pending VBL IRQ");
     (void)dafb.readRegister32(0x114);
     ok &= expect(!irq && !dafb.interruptActive(), "DAFB VBL clear register must clear IRQ");
+    dafb.writeRegister32(0x104, 0x04);
+    dafb.tick(2'000'000);
+    ok &= expect(dafb.readRegister32(0x108) == 0x04,
+        "DAFB interrupt enable must suppress disabled VBL events");
     return ok;
 }
 

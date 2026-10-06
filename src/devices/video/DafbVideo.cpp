@@ -58,6 +58,7 @@ void DafbVideo::reset()
     m_blockControl = 0;
     m_swatchTest = 0;
     m_swatchMode = 1;
+    m_swatchInterruptEnable = 0;
     m_monitorDrive = 0;
     m_paletteAddress = 0;
     m_paletteComponent = 0;
@@ -75,7 +76,8 @@ void DafbVideo::tick(std::uint64_t cycles)
     if ((m_swatchMode & 1U) != 0) return;
     if (cycles >= m_vblCycles) {
         m_vblCycles = defaultVblCycles;
-        setInterrupt(0x01, true);
+        if (m_swatchInterruptEnable & 0x01U) setInterrupt(0x01, true);
+        if (m_swatchInterruptEnable & 0x04U) setInterrupt(0x04, true);
     } else {
         m_vblCycles -= cycles;
     }
@@ -310,7 +312,10 @@ void DafbVideo::writeSwatch(std::uint32_t registerOffset, std::uint32_t value)
         return;
     }
     if (registerOffset == 0x04) {
-        if ((value & 1U) == 0) setInterrupt(0x01, false);
+        m_swatchInterruptEnable = static_cast<std::uint8_t>(value & 0x07U);
+        if ((value & 0x01U) == 0) m_interruptStatus &= static_cast<std::uint8_t>(~0x01U);
+        if ((value & 0x04U) == 0) m_interruptStatus &= static_cast<std::uint8_t>(~0x04U);
+        recalcIrq();
         return;
     }
     if (registerOffset == 0x10) {

@@ -124,6 +124,7 @@ private:
     std::uint32_t m_blockControl = 0;
     std::uint32_t m_swatchTest = 0;
     std::uint8_t m_swatchMode = 1;
+    std::uint8_t m_swatchInterruptEnable = 0;
     std::uint8_t m_monitorDrive = 0;
     std::uint8_t m_paletteAddress = 0;
     std::uint8_t m_paletteComponent = 0;
