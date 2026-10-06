@@ -248,12 +248,11 @@ std::uint16_t Ncr53c94::readDmaWord()
         m_status |= terminalCount;
         raiseInterrupt(interruptService);
     }
-    return static_cast<std::uint16_t>((result << 8) | (result >> 8));
+    return result;
 }
 
 void Ncr53c94::writeDmaWord(std::uint16_t value)
 {
-    value = static_cast<std::uint16_t>((value << 8) | (value >> 8));
     auto& destination = m_commandPhase ? m_fifo : m_dataOut;
     destination.append(static_cast<char>(value >> 8)); destination.append(static_cast<char>(value));
     if (m_transferCount > 1) m_transferCount -= 2; else m_transferCount = 0;

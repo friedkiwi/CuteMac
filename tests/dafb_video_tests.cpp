@@ -22,6 +22,8 @@ public:
         cutemac::devices::scsi::ScsiCommandResult result;
         if (!cdb.isEmpty() && static_cast<std::uint8_t>(cdb[0]) == 0x12) {
             result.data = QByteArray(36, 0);
+            for (int index = 0; index < result.data.size(); ++index)
+                result.data[index] = static_cast<char>(index);
             result.data[0] = 0;
             result.data[4] = 31;
         }
@@ -148,7 +150,9 @@ bool testTurboScsiRegisterRouting()
     dafb.writeTurboScsiRegister(0, 0x30, 0x90);
     ok &= expect((dafb.readTurboScsiRegister(0, 0x40) & 0x10U) != 0 && scsi.dmaRequest(),
         "asynchronous data-in must reach terminal count with a DMA block ready");
-    for (int word = 0; word < 8; ++word) (void)dafb.readTurboScsiDma16(0);
+    ok &= expect(dafb.readTurboScsiDma16(0) == 0x0001U,
+        "DAFB 16-bit DMA reads must preserve SCSI byte order on the big-endian CPU bus");
+    for (int word = 1; word < 8; ++word) (void)dafb.readTurboScsiDma16(0);
     ok &= expect(scsi.debugState().dataPosition == 16 && scsi.debugState().dataIn
             && !scsi.dmaRequest() && scsi.interruptActive(),
         "draining one DMA block must preserve data-in and raise the service interrupt");
