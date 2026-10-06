@@ -28163,9 +28163,30 @@ static void m68k_op_pea_32_pcix(void)
 
 static void m68k_op_pflush_32(void)
 {
-	if ((CPU_TYPE_IS_EC020_PLUS(CPU_TYPE)) && (HAS_PMMU))
+	if (CPU_TYPE_IS_040_PLUS(CPU_TYPE) && HAS_PMMU)
 	{
+		if (!FLAG_S)
+		{
+			m68ki_exception_privilege_violation();
+			return;
+		}
 		pmmu_atc_flush();
+		return;
+	}
+	m68ki_exception_1111();
+}
+
+
+static void m68k_op_ptest_32(void)
+{
+	if (CPU_TYPE_IS_040_PLUS(CPU_TYPE) && HAS_PMMU)
+	{
+		if (!FLAG_S)
+		{
+			m68ki_exception_privilege_violation();
+			return;
+		}
+		m68040_ptest();
 		return;
 	}
 	m68ki_exception_1111();
@@ -34451,6 +34472,8 @@ static const opcode_handler_struct m68k_opcode_handler_table[] =
 	{m68k_op_cpgen_32            , 0xf1c0, 0xf000, {  0,   0,   4,   4,   0}},
 	{m68k_op_cpscc_32            , 0xf1c0, 0xf040, {  0,   0,   4,   4,   0}},
 	{m68k_op_pmmu_32             , 0xfe00, 0xf000, {  0,   0,   8,   8,   8}},
+	{m68k_op_pflush_32           , 0xffe0, 0xf500, {  0,   0,   0,   4,   4}},
+	{m68k_op_ptest_32            , 0xffd8, 0xf548, {  0,   0,   0,   0,   8}},
 	{m68k_op_bra_8               , 0xff00, 0x6000, { 10,  10,  10,  10,  10}},
 	{m68k_op_bsr_8               , 0xff00, 0x6100, { 18,  18,   7,   7,   7}},
 	{m68k_op_bhi_8               , 0xff00, 0x6200, { 10,  10,   6,   6,   6}},
@@ -36410,7 +36433,6 @@ static const opcode_handler_struct m68k_opcode_handler_table[] =
 	{m68k_op_bfset_32_al         , 0xffff, 0xeef9, {  0,   0,  24,  24,  24}},
 	{m68k_op_bfins_32_aw         , 0xffff, 0xeff8, {  0,   0,  21,  21,  21}},
 	{m68k_op_bfins_32_al         , 0xffff, 0xeff9, {  0,   0,  21,  21,  21}},
-	{m68k_op_pflush_32           , 0xffff, 0xf518, {  0,   0,   0,   0,   4}},
 	{0, 0, 0, {0, 0, 0, 0, 0}}
 };
 

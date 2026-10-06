@@ -474,6 +474,26 @@ invalid:
 	return result;
 }
 
+void m68040_ptest(void)
+{
+	const uint logical = REG_A[REG_IR & 7U];
+	const uint fc = REG_DFC & 7U;
+	pmmu_translation_result result;
+	if (!(fc & 3U))
+	{
+		m68ki_cpu.mmu_sr_040 = 0;
+		return;
+	}
+	result = pmmu_translate_040(logical, fc, (REG_IR & 0x20U) != 0, 0);
+	if (result.transparent)
+		m68ki_cpu.mmu_sr_040 = M68K_MMU_040_TT_HIT | M68K_MMU_040_RESIDENT;
+	else if (!result.fault)
+		m68ki_cpu.mmu_sr_040 = (result.physical_address & 0xfffff000U)
+			| (result.status & 0x0fffU);
+	else
+		m68ki_cpu.mmu_sr_040 = result.status & 0x0fffU;
+}
+
 static pmmu_translation_result pmmu_translate(uint logical, uint fc, uint rw,
 	uint size, enum pmmu_intent intent, uint limit)
 {

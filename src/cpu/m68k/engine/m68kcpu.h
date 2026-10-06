@@ -1096,6 +1096,7 @@ extern uint pmmu_translate_addr_fc(uint addr_in, uint fc, uint rw);
 extern uint pmmu_translate_addr_fc_size(uint addr_in, uint fc, uint rw, uint size);
 extern uint pmmu_debug_translate_addr(uint addr_in, uint fc);
 extern void pmmu_atc_flush(void);
+extern void m68040_ptest(void);
 
 /* Handles all immediate reads, does address error check, function code setting,
  * and prefetching if they are enabled in m68kconf.h

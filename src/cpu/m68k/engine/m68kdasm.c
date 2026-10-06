@@ -2712,6 +2712,12 @@ static void d68040_pflush(void)
 	}
 }
 
+static void d68040_ptest(void)
+{
+	LIMIT_CPU_TYPES(M68040_PLUS);
+	sprintf(g_dasm_str, "ptest%c  (A%d)", (g_cpu_ir & 0x20) ? 'r' : 'w', g_cpu_ir & 7);
+}
+
 static void d68000_reset(void)
 {
 	sprintf(g_dasm_str, "reset");
@@ -3525,6 +3531,7 @@ static const opcode_struct g_opcode_info[] =
 	{d68020_pack_rr      , 0xf1f8, 0x8140, 0x000},
 	{d68020_pack_mm      , 0xf1f8, 0x8148, 0x000},
 	{d68000_pea          , 0xffc0, 0x4840, 0x27b},
+	{d68040_ptest        , 0xffd8, 0xf548, 0x000},
 	{d68040_pflush       , 0xffe0, 0xf500, 0x000},
 	{d68000_reset        , 0xffff, 0x4e70, 0x000},
 	{d68000_ror_s_8      , 0xf1f8, 0xe018, 0x000},

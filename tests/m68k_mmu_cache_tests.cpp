@@ -238,6 +238,15 @@ int main()
             && (bus.read32(0x1080) & 0x08U) != 0
             && (bus.read32(0x2004) & 0x18U) == 0x18U,
         "68040 table walk must update used and modified descriptor state");
+    bus.write32(0x2000, 0x00003001U);
+    bus.write16(0x3100, 0xf569U); // PTESTR (A1), mapped from logical $00800100
+    m68ki_cpu.dar[9] = q700Logical;
+    m68ki_cpu.dfc = 5;
+    m68ki_cpu.mmu_sr_040 = 0;
+    core.setProgramCounter(0x00800100U);
+    (void)core.stepInstruction();
+    ok &= expect(m68ki_cpu.mmu_sr_040 == 0x00003001U,
+        "68040 PTESTR must report the translated physical page in MMUSR");
 
     core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68030);
 
