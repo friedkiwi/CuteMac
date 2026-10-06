@@ -183,6 +183,26 @@ bool testTurboScsiBusResetTiming()
     return ok;
 }
 
+bool testTurboScsiDelayedDmaSelectCdb()
+{
+    using cutemac::devices::scsi::ncr53c94::Ncr53c94;
+    bool ok = true;
+    Ncr53c94 scsi;
+    scsi.reset();
+    scsi.attachTarget(3, std::make_shared<InquiryTarget>());
+    scsi.writeRegister(4, 3);
+    scsi.writeRegister(3, 0xc1); // DMA Select with ATN, before the FIFO is populated.
+    ok &= expect(scsi.debugState().command && !scsi.interruptActive(),
+        "DMA selection with an empty FIFO must wait in command phase");
+    for (const auto byte : QByteArray::fromHex("80120000002400"))
+        scsi.writeRegister(2, static_cast<std::uint8_t>(byte));
+    const auto state = scsi.debugState();
+    ok &= expect(!state.command && state.dataIn && state.cdb == QByteArray::fromHex("120000002400")
+            && scsi.interruptActive() && scsi.readRegister(7) == 0,
+        "a delayed DMA SELECT CDB must drain the FIFO and enter data-in phase");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -193,5 +213,6 @@ int main()
     ok &= testVblankInterrupt();
     ok &= testTurboScsiRegisterRouting();
     ok &= testTurboScsiBusResetTiming();
+    ok &= testTurboScsiDelayedDmaSelectCdb();
     return ok ? 0 : 1;
 }

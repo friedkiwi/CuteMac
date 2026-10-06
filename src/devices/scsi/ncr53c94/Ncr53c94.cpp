@@ -79,6 +79,14 @@ void Ncr53c94::writeRegister(std::uint8_t index, std::uint8_t value)
     case 1: m_startTransferCount = (m_startTransferCount & 0xff00ffU) | (static_cast<std::uint32_t>(value) << 8); break;
     case 2:
         if (m_fifo.size() < 16) m_fifo.append(static_cast<char>(value));
+        if (m_commandPhase && m_dmaActive && !m_fifo.isEmpty()) {
+            const auto cdbOffset = (static_cast<std::uint8_t>(m_fifo.front()) & 0x80U) ? 1 : 0;
+            if (m_fifo.size() > cdbOffset
+                && m_fifo.size() - cdbOffset >= commandLength(static_cast<std::uint8_t>(m_fifo[cdbOffset]))) {
+                m_commandPhase = false;
+                selectTarget();
+            }
+        }
         break;
     case 3: m_registers[3] = value; executeCommand(value); break;
     case 4: m_targetId = value & 7U; break;
