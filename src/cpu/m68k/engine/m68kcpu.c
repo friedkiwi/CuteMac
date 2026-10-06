@@ -1270,6 +1270,12 @@ void m68k_pulse_reset(void)
 	m68ki_cpu.pmmu_enabled = 0;
 	m68ki_cpu.mmu_tt0 = 0;
 	m68ki_cpu.mmu_tt1 = 0;
+	m68ki_cpu.mmu_itt0 = 0;
+	m68ki_cpu.mmu_itt1 = 0;
+	m68ki_cpu.mmu_dtt0 = 0;
+	m68ki_cpu.mmu_dtt1 = 0;
+	m68ki_cpu.mmu_urp_aptr = 0;
+	m68ki_cpu.mmu_sr_040 = 0;
 	m68ki_cpu.mmu_sr = 0;
 	m68ki_cpu.mmu_tmp_sr = 0;
 	m68ki_cpu.mmu_fault_address = 0;

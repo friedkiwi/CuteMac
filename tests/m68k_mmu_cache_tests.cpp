@@ -208,6 +208,37 @@ int main()
             && bus.read32(0x3ed8U) == 0x3000U,
         "the format-7 frame must report read direction, supervisor data, and fault address");
     bus.faultReads = false;
+
+    // The Quadra ROM enables the native 68040 MMU with MOVEC, then relies on
+    // its fixed root/pointer/page table geometry for the 24-bit compatibility
+    // map. Keep this separate from the 68030 descriptor path above.
+    bus.write16(0x0100, 0x4e7bU); // MOVEC D0,SRP
+    bus.write16(0x0102, 0x0807U);
+    m68ki_cpu.dar[0] = 0x00000800U;
+    core.setProgramCounter(0x0100U);
+    (void)core.stepInstruction();
+    bus.write16(0x0100, 0x4e7aU); // MOVEC SRP,D1
+    bus.write16(0x0102, 0x1807U);
+    m68ki_cpu.dar[1] = 0;
+    core.setProgramCounter(0x0100U);
+    (void)core.stepInstruction();
+    ok &= expect(m68ki_cpu.mmu_srp_aptr == 0x00000800U && m68ki_cpu.dar[1] == 0x00000800U,
+        "68040 MOVEC must expose the native supervisor root pointer");
+
+    constexpr std::uint32_t q700Logical = 0x00801234U;
+    bus.write32(0x0800, 0x00001002U);
+    bus.write32(0x1080, 0x00002002U);
+    bus.write32(0x2004, 0x00003001U);
+    m68ki_cpu.mmu_tc = 0x00008000U; // enabled, 4 KiB pages
+    m68ki_cpu.pmmu_enabled = 1;
+    ok &= expect(pmmu_translate_addr_fc(q700Logical, 6, 1) == 0x00003234U,
+        "68040 table walk must translate through fixed root, pointer, and page levels");
+    (void)pmmu_translate_addr_fc_size(q700Logical, 5, 0, 4);
+    ok &= expect((bus.read32(0x0800) & 0x08U) != 0
+            && (bus.read32(0x1080) & 0x08U) != 0
+            && (bus.read32(0x2004) & 0x18U) == 0x18U,
+        "68040 table walk must update used and modified descriptor state");
+
     core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68030);
 
     // A/UX saves a freshly reset 68882 frame through FSAVE (A7). This valid

@@ -1024,8 +1024,11 @@ typedef struct
 	uint mmu_crp_aptr, mmu_crp_limit;
 	uint mmu_srp_aptr, mmu_srp_limit;
 	uint mmu_tt0, mmu_tt1;
+	uint mmu_itt0, mmu_itt1, mmu_dtt0, mmu_dtt1;
+	uint mmu_urp_aptr;
 	uint mmu_tc;
 	uint16 mmu_sr;
+	uint mmu_sr_040;
 	uint16 mmu_tmp_sr;
 	uint mmu_last_logical_addr;
 	uint mmu_fault_address;
@@ -1174,7 +1177,7 @@ static inline uint m68ki_read_8_fc(uint address, uint fc)
 	m68ki_set_fc(fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 1, 1);
 #endif
 
@@ -1187,7 +1190,7 @@ static inline uint m68ki_read_16_fc(uint address, uint fc)
 	m68ki_check_address_error_010_less(address, MODE_READ, fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 1, 2);
 #endif
 
@@ -1200,7 +1203,7 @@ static inline uint m68ki_read_32_fc(uint address, uint fc)
 	m68ki_check_address_error_010_less(address, MODE_READ, fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 1, 4);
 #endif
 
@@ -1213,7 +1216,7 @@ static inline void m68ki_write_8_fc(uint address, uint fc, uint value)
 	m68ki_set_fc(fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 0, 1);
 #endif
 
@@ -1226,7 +1229,7 @@ static inline void m68ki_write_16_fc(uint address, uint fc, uint value)
 	m68ki_check_address_error_010_less(address, MODE_WRITE, fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 0, 2);
 #endif
 
@@ -1239,7 +1242,7 @@ static inline void m68ki_write_32_fc(uint address, uint fc, uint value)
 	m68ki_check_address_error_010_less(address, MODE_WRITE, fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 0, 4);
 #endif
 
@@ -1254,7 +1257,7 @@ static inline void m68ki_write_32_pd_fc(uint address, uint fc, uint value)
 	m68ki_check_address_error_010_less(address, MODE_WRITE, fc); /* auto-disable (see m68kcpu.h) */
 
 #if M68K_EMULATE_PMMU
-	if (HAS_PMMU && PMMU_ENABLED)
+	if (HAS_PMMU && (PMMU_ENABLED || m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040))
 	    address = pmmu_translate_addr_fc_size(address, fc, 0, 4);
 #endif
 

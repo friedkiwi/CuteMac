@@ -34,6 +34,11 @@
 #define M68K_MMU_TC_SRE             0x02000000U
 #define M68K_MMU_TC_FCL             0x01000000U
 
+#define M68K_MMU_040_SUPERVISOR     0x00000080U
+#define M68K_MMU_040_TT_ENABLE      0x00008000U
+#define M68K_MMU_040_TT_HIT         0x0002U
+#define M68K_MMU_040_RESIDENT       0x0001U
+
 enum pmmu_intent
 {
 	PMMU_INTENT_NORMAL = 0,
@@ -336,10 +341,159 @@ static void pmmu_walk_tables(uint logical, uint fc, uint rw, uint limit,
 	m68ki_cpu.mmu_tablewalk = 0;
 }
 
+static int pmmu_match_tt_040(uint logical, uint fc, uint tt, uint rw,
+	pmmu_translation_result *result)
+{
+	static const uint8 fc_mask[4] = { 4, 4, 0, 0 };
+	static const uint8 fc_match[4] = { 0, 4, 0, 0 };
+	uint mask;
+	if (!(tt & M68K_MMU_040_TT_ENABLE)) return 0;
+	mask = (~(tt >> 16) & 0xffU) << 24;
+	if ((logical & mask) != (tt & mask)
+		|| (fc & fc_mask[(tt >> 13) & 3]) != fc_match[(tt >> 13) & 3])
+		return 0;
+	result->transparent = 1;
+	result->status = M68K_MMU_040_TT_HIT | M68K_MMU_040_RESIDENT;
+	if (!rw && (tt & M68K_MMU_DF_WP))
+	{
+		result->status |= M68K_MMU_SR_WRITE_PROTECT;
+		result->fault = 1;
+	}
+	return 1;
+}
+
+static pmmu_translation_result pmmu_translate_040(uint logical, uint fc, uint rw,
+	uint side_effects)
+{
+	pmmu_translation_result result;
+	uint root_index, pointer_index, page_index, page_offset;
+	uint root_address, pointer_address, page_address;
+	uint root_entry, pointer_entry, page_entry, original_page_entry;
+	uint tt0, tt1;
+	memset(&result, 0, sizeof(result));
+	result.physical_address = logical;
+
+	if (fc & 1U)
+	{
+		tt0 = m68ki_cpu.mmu_dtt0;
+		tt1 = m68ki_cpu.mmu_dtt1;
+	}
+	else if (fc & 2U)
+	{
+		tt0 = m68ki_cpu.mmu_itt0;
+		tt1 = m68ki_cpu.mmu_itt1;
+	}
+	else
+	{
+		result.status = M68K_MMU_SR_INVALID;
+		result.fault = 1;
+		return result;
+	}
+	if (pmmu_match_tt_040(logical, fc, tt0, rw, &result)
+		|| pmmu_match_tt_040(logical, fc, tt1, rw, &result))
+		return result;
+	if (!PMMU_ENABLED) return result;
+
+	root_index = (logical >> 25) & 0x7fU;
+	pointer_index = (logical >> 18) & 0x7fU;
+	if (m68ki_cpu.mmu_tc & 0x4000U)
+	{
+		page_index = (logical >> 13) & 0x1fU;
+		page_offset = logical & 0x1fffU;
+	}
+	else
+	{
+		page_index = (logical >> 12) & 0x3fU;
+		page_offset = logical & 0x0fffU;
+	}
+
+	m68ki_cpu.mmu_tmp_sr = 0;
+	m68ki_cpu.mmu_tablewalk = 1;
+	root_address = ((fc & 4U) ? m68ki_cpu.mmu_srp_aptr : m68ki_cpu.mmu_urp_aptr)
+		+ root_index * 4U;
+	root_entry = m68k_read_memory_32(root_address);
+	if ((m68ki_cpu.mmu_tmp_sr & M68K_MMU_SR_BUS_ERROR) || !(root_entry & 2U))
+		goto invalid;
+	if (!rw && (root_entry & M68K_MMU_DF_WP)) goto protected_page;
+	if (side_effects && !(root_entry & M68K_MMU_DF_USED))
+	{
+		root_entry |= M68K_MMU_DF_USED;
+		m68k_write_memory_32(root_address, root_entry);
+	}
+
+	pointer_address = (root_entry & ~0x1ffU) + pointer_index * 4U;
+	pointer_entry = m68k_read_memory_32(pointer_address);
+	if ((m68ki_cpu.mmu_tmp_sr & M68K_MMU_SR_BUS_ERROR) || !(pointer_entry & 2U))
+		goto invalid;
+	if (!rw && (pointer_entry & M68K_MMU_DF_WP)) goto protected_page;
+	if (side_effects && !(pointer_entry & M68K_MMU_DF_USED))
+	{
+		pointer_entry |= M68K_MMU_DF_USED;
+		m68k_write_memory_32(pointer_address, pointer_entry);
+	}
+
+	pointer_entry &= (m68ki_cpu.mmu_tc & 0x4000U) ? ~0x7fU : ~0xffU;
+	page_address = pointer_entry + page_index * 4U;
+	page_entry = m68k_read_memory_32(page_address);
+	if ((page_entry & 3U) == 2U)
+	{
+		page_address = page_entry & ~3U;
+		page_entry = m68k_read_memory_32(page_address);
+		if ((page_entry & 3U) == 2U) page_entry = 0;
+	}
+	if ((m68ki_cpu.mmu_tmp_sr & M68K_MMU_SR_BUS_ERROR) || !(page_entry & 1U))
+		goto invalid;
+	if ((!rw && (page_entry & M68K_MMU_DF_WP))
+		|| (!(fc & 4U) && (page_entry & M68K_MMU_040_SUPERVISOR)))
+		goto protected_page;
+
+	result.physical_address = (page_entry
+		& ((m68ki_cpu.mmu_tc & 0x4000U) ? ~0x1fffU : ~0x0fffU)) | page_offset;
+	result.status = M68K_MMU_040_RESIDENT;
+	if (side_effects)
+	{
+		original_page_entry = page_entry;
+		page_entry |= M68K_MMU_DF_USED;
+		if (!rw) page_entry |= M68K_MMU_DF_MODIFIED;
+		if (page_entry != original_page_entry)
+			m68k_write_memory_32(page_address, page_entry);
+	}
+	m68ki_cpu.mmu_tablewalk = 0;
+	return result;
+
+protected_page:
+	result.status |= M68K_MMU_SR_WRITE_PROTECT;
+	result.fault = 1;
+	m68ki_cpu.mmu_tablewalk = 0;
+	return result;
+
+invalid:
+	result.status |= M68K_MMU_SR_INVALID | m68ki_cpu.mmu_tmp_sr;
+	result.fault = 1;
+	m68ki_cpu.mmu_tablewalk = 0;
+	return result;
+}
+
 static pmmu_translation_result pmmu_translate(uint logical, uint fc, uint rw,
 	uint size, enum pmmu_intent intent, uint limit)
 {
 	pmmu_translation_result result;
+	if (m68ki_cpu.mmu_kind == M68K_MMU_KIND_68040)
+	{
+		result = pmmu_translate_040(logical, fc, rw,
+			intent == PMMU_INTENT_NORMAL || intent == PMMU_INTENT_PLOAD);
+		m68ki_cpu.mmu_tmp_sr = result.status;
+		if (result.fault && intent == PMMU_INTENT_NORMAL)
+		{
+			m68ki_cpu.mmu_fault_address = logical;
+			m68ki_cpu.mmu_fault_fc = (uint8)(fc & 7);
+			m68ki_cpu.mmu_fault_rw = (uint8)rw;
+			m68ki_cpu.mmu_fault_size = (uint8)size;
+			m68ki_cpu.mmu_fault_is_mmu = 1;
+			m68ki_exception_bus_error();
+		}
+		return result;
+	}
 	memset(&result, 0, sizeof(result));
 	result.physical_address = logical;
 	m68ki_cpu.mmu_last_logical_addr = logical;
