@@ -1609,6 +1609,21 @@ private:
             return;
         }
 #endif
+        if (m_machine == nullptr && m_iicxMachine == nullptr && m_session != nullptr) {
+            const auto snapshot = m_session->debugSnapshot(std::chrono::milliseconds(0));
+            const auto filter = parts.size() >= 2 ? parts[1] : QString {};
+            for (const auto& device : snapshot.devices) {
+                if (!filter.isEmpty() && !device.id.contains(filter, Qt::CaseInsensitive)
+                    && !device.kind.contains(filter, Qt::CaseInsensitive)) {
+                    continue;
+                }
+                m_out << "device " << device.id << " kind=" << device.kind << '\n';
+                for (const auto& line : device.stateLines) m_out << "  " << line << '\n';
+                for (auto field = device.fields.constBegin(); field != device.fields.constEnd(); ++field)
+                    m_out << "  " << field.key() << '=' << field.value() << '\n';
+            }
+            return;
+        }
         if (m_iicxMachine != nullptr) {
             const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
             const auto io = m_iicxMachine->ioStatistics();
