@@ -133,7 +133,7 @@ bool testTurboScsiRegisterRouting()
     scsi.attachTarget(3, std::make_shared<InquiryTarget>());
     dafb.attachTurboScsi(0, &scsi);
     dafb.writeTurboScsiRegister(0, 0x40, 3);
-    dafb.writeTurboScsiRegister(0, 0x20, 0x03);
+    dafb.writeTurboScsiRegister(0, 0x20, 0x80);
     dafb.writeTurboScsiRegister(0, 0x20, 0x12);
     dafb.writeTurboScsiRegister(0, 0x20, 0);
     dafb.writeTurboScsiRegister(0, 0x20, 0);
@@ -143,6 +143,18 @@ bool testTurboScsiRegisterRouting()
     dafb.writeTurboScsiRegister(0, 0x30, 0x41);
     ok &= expect(scsi.interruptActive(), "DAFB TurboSCSI register writes must reach NCR53C9x");
     (void)dafb.readTurboScsiRegister(0, 0x50);
+    dafb.writeTurboScsiRegister(0, 0x00, 16);
+    dafb.writeTurboScsiRegister(0, 0x10, 0);
+    dafb.writeTurboScsiRegister(0, 0x30, 0x90);
+    ok &= expect((dafb.readTurboScsiRegister(0, 0x40) & 0x10U) != 0 && scsi.dmaRequest(),
+        "asynchronous data-in must reach terminal count with a DMA block ready");
+    for (int word = 0; word < 8; ++word) (void)dafb.readTurboScsiDma16(0);
+    ok &= expect(scsi.debugState().dataPosition == 16 && scsi.debugState().dataIn
+            && !scsi.dmaRequest() && scsi.interruptActive(),
+        "draining one DMA block must preserve data-in and raise the service interrupt");
+    (void)dafb.readTurboScsiRegister(0, 0x50);
+    dafb.writeTurboScsiRegister(0, 0x30, 0x90);
+    ok &= expect(scsi.dmaRequest(), "a following Transfer Information command must expose the next block");
     return ok;
 }
 

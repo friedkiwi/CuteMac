@@ -208,6 +208,12 @@ void Ncr53c94::executeCommand(std::uint8_t command)
         } else {
             m_transferCount = dma ? (m_startTransferCount ? m_startTransferCount : 0x10000U) : 0;
             m_dmaActive = dma;
+            m_status &= static_cast<std::uint8_t>(~terminalCount);
+            // In asynchronous DATA IN, the SCSI side fills the FIFO and
+            // exhausts the programmed count before the host drains it.  The
+            // simplified target model has the complete payload already, so
+            // make that controller-side completion visible immediately.
+            if (dma && m_dataIn) m_status |= terminalCount;
         }
         break;
     case 0x11:
@@ -233,7 +239,15 @@ std::uint16_t Ncr53c94::readDmaWord()
             ? static_cast<std::uint8_t>(m_data[m_dataPosition++]) : 0));
         if (m_transferCount) --m_transferCount;
     }
-    if (m_transferCount == 0 || m_dataPosition >= m_data.size()) completeTransfer();
+    if (m_dataPosition >= m_data.size()) {
+        completeTransfer();
+    } else if (m_transferCount == 0) {
+        // The 53C96 remains in DATA IN after one programmed FIFO block; the
+        // initiator starts another Transfer Information command to continue.
+        m_dmaActive = false;
+        m_status |= terminalCount;
+        raiseInterrupt(interruptService);
+    }
     return static_cast<std::uint16_t>((result << 8) | (result >> 8));
 }
 
