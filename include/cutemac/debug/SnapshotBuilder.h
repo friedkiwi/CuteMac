@@ -7,7 +7,6 @@
 #include <QString>
 
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
-#include "cutemac/cpu/ppc/PpcCpuCore.h"
 #include "cutemac/debug/MachineSnapshot.h"
 #include "cutemac/devices/adb/AdbTransceiver.h"
 #include "cutemac/devices/cuda/CudaController.h"
@@ -36,9 +35,6 @@ inline constexpr int vectorTableEntries = 256;
 
 [[nodiscard]] CpuSnapshot buildCpuSnapshot(const cpu::m68k::M68kCpuCore::RegisterSnapshot& registers,
     const QString& architecture, const MemoryReader& read8, const Disassembler& disassemble);
-
-[[nodiscard]] CpuSnapshot buildCpuSnapshot(const cpu::ppc::PowerPc601Core::RegisterSnapshot& registers,
-    const MemoryReader& read8, const Disassembler& disassemble);
 
 [[nodiscard]] DeviceSnapshot viaSnapshot(const QString& id, const devices::via6522::Via6522::DebugState& state);
 [[nodiscard]] DeviceSnapshot scsiSnapshot(const QString& id,

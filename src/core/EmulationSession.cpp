@@ -6,7 +6,6 @@
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/quadra700/Quadra700Machine.h"
-#include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/network/nubus/AppleNuBusEthernetCard.h"
@@ -155,9 +154,6 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
             configuration.nvramPath);
         installConfiguredNuBusCards(*machine, configuration.nubusDevices);
         result = std::move(machine);
-    } else if (configuration.machineId == QStringLiteral("powermac-8100")) {
-        result = std::make_unique<machines::powermac8100::PowerMac8100Machine>(
-            static_cast<std::size_t>(configuration.ramSizeKiB) * 1024U);
     }
     if (!result) return {};
     for (const auto& device : configuration.serialDevices) {

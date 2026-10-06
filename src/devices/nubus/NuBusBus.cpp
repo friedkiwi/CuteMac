@@ -48,7 +48,7 @@ int NuBusBus::standardSlot(std::uint32_t address)
 
 int NuBusBus::superSlot(std::uint32_t address)
 {
-    // NuBus Power Macs expose each slot through a 256 MiB super-slot window.
+    // NuBus exposes each slot through a 256 MiB super-slot window.
     // Cards which only decode the traditional 16 MiB slot space see that
     // space repeated throughout the window.
     if (address < 0x60000000U || address >= 0xf0000000U) return -1;

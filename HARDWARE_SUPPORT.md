@@ -1,15 +1,14 @@
 # CuteMac Hardware And System Software Support
 
-This document is the **scope map** for CuteMac: every Apple Macintosh machine from
-the 1984 Macintosh 128K up to and including the pre-PCI (NuBus/PDS) Power
-Macintosh generation, the peripherals those machines used, and every Apple
-system software release before Mac OS X — plus, for each item, where CuteMac's
-implementation actually stands today.
+This document is the **scope map** for CuteMac: m68k Macintosh machines from the
+1984 Macintosh 128K through the final 68040 models, the peripherals those
+machines used, and the Apple system software releases they can run — plus, for
+each item, where CuteMac's implementation actually stands today.
 
 It is deliberately larger than what is built. Treat the tables as the long-term
 target set, not a promise. The currently committed development targets are still
-the narrower set named in `AGENTS.md`: 68000-era compacts, Macintosh IIcx,
-Quadra 700/800, and the Power Macintosh 8100/80.
+the narrower set named in `AGENTS.md`: 68000-era compacts, Macintosh IIcx, and
+Quadra 700/800.
 
 Related documents:
 
@@ -19,14 +18,10 @@ Related documents:
 
 ## Scope Boundary
 
-"Pre-PCI" is the cut line. Every Macintosh whose expansion bus is NuBus, a
-processor-direct slot (PDS), or nothing at all is in scope. The first PCI Macs
-(Power Macintosh 7200/7500/8500/9500, February 1995 onward) and everything after
-them are out of scope, as is Mac OS X and its Rhapsody/Darwin ancestry.
-
-This means the Power Macintosh line is included only through its first, NuBus
-generation: the 6100/7100/8100 family, their Performa and Workgroup Server
-rebadges, the 603-based x200 machines, and the pre-PCI PowerBooks.
+The m68k architecture is the cut line. Macintosh models built around the 68000,
+68020, 68030, and 68040 families are in scope, including compact, modular,
+portable, NuBus, and PDS systems. Later architectures and system software that
+requires them are outside the project scope.
 
 ## Status Legend
 
@@ -100,8 +95,8 @@ System 6.0.8 to Finder from unmodified ROM with either the authentic Apple
 Macintosh II Video Card or the project's own CuteMac Video card. The IIfx is the
 hardest machine in this table by a wide margin — its I/O Processors and OSS
 interrupt controller share almost nothing with the rest of the family. The IIsi
-and IIvx introduce Egret, which is the direct ancestor of the Cuda controller
-already modelled for the Power Macintosh.
+and IIvx introduce Egret, whose packet protocol can share parts of the existing
+Cuda controller model.
 
 ### 1.4 Macintosh LC And Performa (LC PDS)
 
@@ -158,44 +153,13 @@ have no analogue anywhere else in the line.
 | PowerBook 160 / 165 / 165c / 180 / 180c | 1992-93 | 68030 | as above + **external video out** | Internal modem, RAM card | 🔴 TODO |
 | PowerBook 150 | 1994 | 68030 | as above, **IDE disk** | RAM card | 🔴 TODO |
 | PowerBook Duo 210 / 230 / 250 / 270c / 280 / 280c | 1992-94 | 68030 | VIA, SCC, SWIM, ADB, power manager, LCD, **Duo dock connector** | Duo Dock / MiniDock / Dock II, internal modem | 🔴 TODO |
-| PowerBook 500 series (520/520c/540/540c) | 1994 | 68LC040 | VIA, SCC, SWIM2, SCSI, ADB, power manager, **trackpad**, built-in Ethernet, stereo sound | PC Card cage, PowerPC upgrade card, second battery | 🔴 TODO |
+| PowerBook 500 series (520/520c/540/540c) | 1994 | 68LC040 | VIA, SCC, SWIM2, SCSI, ADB, power manager, **trackpad**, built-in Ethernet, stereo sound | PC Card cage, second battery | 🔴 TODO |
 | PowerBook 190 / 190cs | 1995 | 68LC040 | as 500 series, **IDE disk**, PC Card | PC Card modem/Ethernet | 🔴 TODO |
 
 Portables add an entire subsystem CuteMac has never touched: the **Power
 Manager** microcontroller, which owns sleep, battery, backlight, the trackball/
 trackpad, and on most models the ADB bus itself. No PowerBook is realistically
 reachable without it.
-
-### 1.7 Power Macintosh — NuBus / Pre-PCI
-
-The first PowerPC generation. All use the PowerPC 601, the HMC memory
-controller, Cuda for ADB/RTC/PRAM/power, and Curio for SCC/SCSI/Ethernet.
-
-| Model | Year | CPU | Required devices | Optional / add-in | Status |
-| --- | --- | --- | --- | --- | --- |
-| Power Macintosh 6100/60, /60AV, /66 | 1994 | PPC 601 @ 60-66 MHz | HMC, AMIC, Cuda, Curio (SCC + 53C94 + SONIC/AAUI), SWIM2, onboard video, AWACS/Singer audio | **1 PDS**: HPV video card, AV card, [DOS Compatibility Card](#36-processor-direct-slot-pds-per-machine), NuBus adapter; CD-ROM | 🔴 TODO |
-| Power Macintosh 7100/66, /80, AV | 1994 | PPC 601 @ 66-80 MHz | as 6100 | **3 NuBus + PDS**: HPV/AV video card; CD-ROM | 🔴 TODO |
-| Power Macintosh 8100/80, /100, /110, AV | 1994-95 | PPC 601 @ 80-110 MHz | HMC, **BART** NuBus controller, Cuda, Curio, SWIM2, video, audio | **3 NuBus + PDS**: HPV/AV video card; CD-ROM, second internal disk | 🟠 WIP |
-| Performa 6110CD-6118CD | 1994-95 | PPC 601 @ 60 MHz | as 6100 | CD-ROM standard, TV tuner, modem | 🔴 TODO |
-| Apple Workgroup Server 6150 / 8150 / 9150 | 1994-95 | PPC 601 | as 6100 / 8100 respectively, server-configured SCSI and RAM | DAT tape, external RAID, [AppleShare](#63-server-and-workgroup-software) | 🔴 TODO |
-| Power Macintosh / Performa 5200, 6200 (x200) | 1995 | PPC 603 @ 75 MHz | 603 on a **Quadra-derived 68k-style bus**, Valkyrie video, Cuda, SWIM3, IDE + SCSI | LC PDS, comm slot, TV tuner, CD-ROM | 🔴 TODO |
-| Power Macintosh / Performa 5300, 6300 | 1995 | PPC 603e @ 100 MHz | as x200 | as x200 | 🔴 TODO |
-| PowerBook 5300 series | 1995 | PPC 603e | power manager, PC Card, IDE, ADB, SCSI, LCD | PC Card modem/Ethernet, video out | 🔴 TODO |
-| PowerBook Duo 2300c | 1995 | PPC 603e | power manager, Duo connector, IDE, ADB | Duo Dock, modem | 🔴 TODO |
-
-**Implementation notes.** `PowerMac8100Machine` is the active PowerPC bringup.
-It has a real physical memory map with HMC, AMIC, NuBus and machine-ID regions,
-a `Cuda` controller, dual `Ncr53c94` SCSI controllers with a DMA path, VIA1 plus
-a VIA2-style interrupt block, `Z8530Scc`, and a `SonoraVideo`-class framebuffer
-standing in for the machine's video path. `PowerPc601Core` is a portable
-interpreter with BAT/page translation, exception handling, and trace rings, and
-has its own CTest coverage. What it does not have: a modelled HPV/AV PDS video
-card, AWACS/Singer audio (ASC accesses are absorbed by a compatibility shim),
-SONIC Ethernet, floppy support (`loadFloppyImage` returns `false`), and guest
-input (`queueInput` is empty, so there is no keyboard or mouse yet).
-
-The x200 machines are architecturally closer to a Quadra than to an 8100 despite
-being PowerPC, and the PowerBooks again need the power manager.
 
 ---
 
@@ -208,7 +172,6 @@ being PowerPC, and the PowerBooks again need the power manager.
 | Macintosh IIcx | 🟢 Finder | Boots System 6.0.8 from unmodified ROM with NuBus video, ADB, SWIM1, SCSI, ASC. |
 | Quadra 700 | 🟠 ROM bringup | 68040 reset, RAM map, VIA VBL chain, DAFB. Does not boot system software. |
 | Quadra 800 | 🔴 Catalog only | Listed in `MachineCatalog`, no machine class, cannot be instantiated. |
-| Power Macintosh 8100/80 | 🟠 ROM bringup | 601 interpreter, HMC/AMIC/BART map, Cuda, 53C94, Sonora framebuffer. No input, no floppy, no audio. |
 | Everything else above | 🔴 TODO | No machine class. |
 
 ---
@@ -230,14 +193,14 @@ document that names a bus is subject to that bus's status as well as its own.
 
 Present on every Mac from the Macintosh SE and Macintosh II forward. Physically
 identical across machines; the *host side* differs — a VIA-attached PIC-style
-transceiver on the II family, Egret on the IIsi/LC/Quadra generation, Cuda on the
-Power Macintosh, and the power manager on portables.
+transceiver on the II family, Egret or Cuda on later desktop models, and the
+power manager on portables.
 
 | Item | Required? | Status | Notes |
 | --- | --- | --- | --- |
 | ADB host: VIA + external transceiver (Mac II family) | Required | 🟡 Mostly working | `AdbTransceiver`, validated against IIcx ROM ordering; has CTest coverage. |
 | ADB host: Egret (IIsi, LC, IIvx, early Quadra) | Required | 🔴 TODO | Direct ancestor of Cuda; should share its packet layer. |
-| ADB host: Cuda (Power Macintosh, later Quadra) | Required | 🟠 WIP | `CudaController` handles packets and PRAM for 8100 bringup; not driving input yet. |
+| ADB host: Cuda (later Quadra) | Required | 🟠 WIP | `CudaController` handles packets and PRAM but is not yet wired into a supported machine. |
 | ADB host: Power Manager (all portables) | Required | 🔴 TODO | |
 | Apple Keyboard (M0116) / Apple Keyboard II | Required in practice | 🟡 Mostly working | Default handler `0x22` at address 2. |
 | Apple Extended Keyboard / Extended Keyboard II | Optional | 🟡 Mostly working | Modelled as the same endpoint; extended-only keys unverified. |
@@ -263,7 +226,7 @@ targets do not.
 | Item | Machines | Required? | Status | Notes |
 | --- | --- | --- | --- | --- |
 | NCR 5380 controller | Plus, SE, II, IIx, IIcx, IIci, IIsi, SE/30, LC | Required | 🟢 Good | Plus and IIcx paths both work, including Macintosh pseudo-DMA and blind transfers via `MacintoshNcr5380Bus`. |
-| NCR 53C94 / 53CF94 ("Curio") controller | Quadra/Centris, LC 475+, Power Macintosh | Required | 🟠 WIP | Implemented and wired into the 8100 with a DMA path; not yet driving a booted system. |
+| NCR 53C94 / 53CF94 controller | Quadra/Centris, LC 475+ | Required | 🟠 WIP | Implemented with device-level coverage; not yet driving a booted system. |
 | IIfx SCSI + DMA | IIfx only | Required | 🔴 TODO | |
 | Fixed disks (Apple 20SC/40SC/80SC/160SC, Quantum, Conner, IBM) | All SCSI Macs | One boot disk required | 🟢 Good | `ScsiBlockDevice` derives its INQUIRY personality from image size and supports FORMAT UNIT, MODE SELECT/SENSE, VERIFY(10), and READ DEFECT DATA so Apple HD SC Setup and Drive Setup can prepare it. |
 | CD-ROM (AppleCD SC/150/300/300i/600i, and later) | II family onward | Optional | 🟢 Good | `ScsiCdRomDevice`: 2048-byte ISO sectors, `MATSHITA CD-ROM CR-8004` identity, READ TOC, unit-attention on media change, runtime insert/eject from the session toolbar. |
@@ -276,9 +239,9 @@ targets do not.
 
 ### 3.4 NuBus (Shared Bus)
 
-Macintosh II through the Power Macintosh 8100. Every NuBus card is **optional**,
-except that machines without onboard video (Mac II, IIx, IIcx, IIfx) require at
-least one video card to be usable.
+Macintosh II and Quadra families. Every NuBus card is **optional**, except that
+machines without onboard video (Mac II, IIx, IIcx, IIfx) require at least one
+video card to be usable.
 
 | Card | Machines | Status | Notes |
 | --- | --- | --- | --- |
@@ -297,7 +260,7 @@ least one video card to be usable.
 | Radius Rocket / accelerator cards (popular) | II family, Quadra | 🔴 TODO | Second CPU on a card; a large architectural question, not a device. |
 | Video capture — Radius VideoVision, SuperMac (popular) | Quadra | 🔴 TODO | |
 | DOS-on-a-card — Orange Micro Mac86/Mac286 (popular) | II family | 🔴 TODO | |
-| NuBus bus and slot decoding | II family through 8100 | 🟢 Good | `NuBusBus` with correct byte-lane behaviour, sparse declaration-ROM views, slot interrupts, and 24-bit logical slot window translation. |
+| NuBus bus and slot decoding | Macintosh II and Quadra families | 🟢 Good | `NuBusBus` with correct byte-lane behaviour, sparse declaration-ROM views, slot interrupts, and 24-bit logical slot window translation. |
 
 ### 3.5 Serial / SCC (Shared Bus)
 
@@ -313,7 +276,7 @@ scope.
 | Hayes-compatible modem (Apple Personal Modem, third-party) | Optional | 🟢 Good | `HayesModem` with phonebook dialling, optional direct `host:port` TCP, telnet negotiation filtering, and SLIP/PPP networking through libslirp. |
 | Terminal / null modem | Optional | 🟢 Good | `NullModem` in TCP listen or dial mode for debuggers and null-modem workflows. |
 | LocalTalk / PhoneNet networking | Optional | 🔴 TODO | Kept behind a controller-independent endpoint boundary; the default is an unattached idle wire. |
-| GeoPort / GeoPort Telecom Adapter | Optional | 🔴 TODO | AV and PowerPC machines only. |
+| GeoPort / GeoPort Telecom Adapter | Optional | 🔴 TODO | AV machines only. |
 | MIDI interfaces (popular) | Optional | 🔴 TODO | |
 | Serial Newton / PDA connection (popular) | Optional | 🔴 TODO | |
 
@@ -326,16 +289,11 @@ different electrical contract on nearly every machine. Cards are always optional
 | --- | --- | --- | --- |
 | SE PDS | Macintosh SE | Accelerators, Ethernet (Asanté MacCon SE), video adapters | 🔴 TODO |
 | 030 Direct Slot | SE/30, IIfx | Ethernet, video, accelerators, Micron Xceed grayscale | 🔴 TODO |
-| LC PDS | LC family, Color Classic, x200 | **Apple IIe Card**, Apple Ethernet LC, video, TV tuner | 🔴 TODO |
+| LC PDS | LC family, Color Classic | **Apple IIe Card**, Apple Ethernet LC, video, TV tuner | 🔴 TODO |
 | IIsi PDS | IIsi | NuBus adapter card, Ethernet, FPU adapter | 🔴 TODO |
-| 68040 PDS | Quadra 700/800/900/950 | Ethernet, video, **PowerPC Upgrade Card** | 🔴 TODO |
-| PPC 601 PDS | Power Mac 6100/7100/8100 | **HPV video card**, **AV card**, DOS Compatibility Card (Houdini), NuBus adapter (6100) | 🔴 TODO |
-| Comm slot | LC 575, 630 family, x200 | Ethernet, internal modem | 🔴 TODO |
-| PC Card / PCMCIA | PowerBook 500 (cage), 190, 5300 | Modem, Ethernet, storage | 🔴 TODO |
-
-The **HPV video card** matters more than most PDS entries: it is how a real
-7100 and 8100 produce video at all. CuteMac's 8100 currently stands in a
-Sonora-class onboard framebuffer instead.
+| 68040 PDS | Quadra 700/800/900/950 | Ethernet, video | 🔴 TODO |
+| Comm slot | LC 575, 630 family | Ethernet, internal modem | 🔴 TODO |
+| PC Card / PCMCIA | PowerBook 500 (cage), 190 | Modem, Ethernet, storage | 🔴 TODO |
 
 ### 3.7 Floppy Port And External Drives
 
@@ -343,7 +301,7 @@ Sonora-class onboard framebuffer instead.
 | --- | --- | --- | --- | --- |
 | IWM controller | 128K – Plus, SE, Mac II | Required | 🟢 Good | Soft-switch ordering validated against unmodified ROM; CTest coverage. |
 | SWIM / SWIM1 | SE FDHD, IIx onward | Required | 🟡 Mostly working | ISM mode entry via `0x40,0x00,0x40,0x40`; GCR and MFM paths both implemented for the IIcx. |
-| SWIM2 / SWIM3 | Quadra, LC III+, Power Macintosh | Required | 🔴 TODO | The 8100 has no floppy support at all today. |
+| SWIM2 / SWIM3 | Quadra, LC III+ | Required | 🔴 TODO | |
 | IOP-driven floppy | IIfx, Quadra 900/950 | Required | 🔴 TODO | |
 | 400K single-sided GCR media | 128K, 512K | Required (boot media) | 🟢 Good | Raw and Disk Copy 4.2 images. |
 | 800K double-sided GCR media | 512Ke onward | Required (boot media) | 🟢 Good | Raw and Disk Copy 4.2 images. |
@@ -362,9 +320,9 @@ each generation is its own device rather than a shared card.
 | --- | --- | --- | --- |
 | Compact 512×342 monochrome video | 128K – Classic, SE/30, Classic II | 🟢 Good | Working for the Plus-family machines in the tree. |
 | RBV / VDAC | IIci, IIsi | 🔴 TODO | |
-| V8 / Sonora | LC, LC II, LC III, IIvx | 🟠 WIP | `SonoraVideo` exists but is currently used as the 8100's stand-in framebuffer, not as an LC-family device. |
+| V8 / Sonora | LC, LC II, LC III, IIvx | 🟠 WIP | `SonoraVideo` exists but is not yet wired into an LC-family machine. |
 | DAFB / DAFB II | Quadra 700/800/900/950, Centris | 🟠 WIP | `DafbVideo` implemented with CTest coverage; not yet driving a booted system. |
-| Valkyrie | 630 family, x200 | 🔴 TODO | |
+| Valkyrie | 630 family | 🔴 TODO | |
 | Civic / AV video with digitizer | 660AV, 840AV | 🔴 TODO | |
 | Built-in colour LCD panels | PowerBooks, Color Classic, all-in-ones | 🔴 TODO | |
 
@@ -374,8 +332,8 @@ each generation is its own device rather than a shared card.
 | --- | --- | --- | --- |
 | Compact-Mac PWM sound buffer | 128K – Classic | 🟢 Good | 370 samples at 22.255 kHz from RAM high bytes, dual buffers selected by VIA PA3, hardware volume curve, active-low enable. |
 | Apple Sound Chip (ASC) | Mac II family, Quadra | 🟡 Mostly working | FIFO consumed at 22.257 kHz with half-empty interrupts through inverted VIA2 CB1; enough for Sound Manager. CTest coverage. |
-| Enhanced ASC / Singer / AWACS | AV Quadras, Power Macintosh | 🔴 TODO | 8100 ASC-range accesses are absorbed by a compatibility shim, not emulated. |
-| Sound input (Apple PlainTalk microphone) | 660AV onward, Power Macintosh | 🔴 TODO | |
+| Enhanced ASC / Singer | AV Quadras | 🔴 TODO | |
+| Sound input (Apple PlainTalk microphone) | 660AV and 840AV | 🔴 TODO | |
 | DSP3210 | 660AV, 840AV | 🔴 TODO | |
 
 ### 3.10 Networking
@@ -383,7 +341,7 @@ each generation is its own device rather than a shared card.
 | Item | Machines | Required? | Status | Notes |
 | --- | --- | --- | --- | --- |
 | LocalTalk (built into the printer port) | All | Optional | 🔴 TODO | Idle-wire stub by design; endpoint boundary exists for a future bridge. |
-| SONIC Ethernet + AAUI (onboard) | Quadra 700/800/610/650, PowerBook 500, Power Macintosh | Optional | 🔴 TODO | Notably absent from the Quadra 700, where it shipped standard. |
+| SONIC Ethernet + AAUI (onboard) | Quadra 700/800/610/650, PowerBook 500 | Optional | 🔴 TODO | Notably absent from the Quadra 700, where it shipped standard. |
 | MACE Ethernet | Some Quadra/Centris | Optional | 🔴 TODO | |
 | AAUI transceivers (10BASE-T, thin coax) | Any AAUI machine | Optional | 🔴 TODO | |
 | NuBus Ethernet | See [3.4](#34-nubus-shared-bus) | Optional | 🟡 Mostly working | Currently the only working Ethernet path in the emulator. |
@@ -396,7 +354,7 @@ each generation is its own device rather than a shared card.
 | --- | --- | --- | --- |
 | VIA bit-banged RTC + 20/256-byte PRAM | 128K – Mac II family | 🟢 Good | PB0 data, PB1 clock, active-low PB2 enable. Host-local time in the classic Macintosh epoch; guest time writes are discarded, PRAM changes persist. |
 | Egret-managed RTC/PRAM | IIsi, LC, IIvx | 🔴 TODO | |
-| Cuda-managed RTC/PRAM | Quadra (late), Power Macintosh | 🟠 WIP | `CudaController` holds a 256-byte PRAM and answers time requests. |
+| Cuda-managed RTC/PRAM | Later Quadra models | 🟠 WIP | `CudaController` holds a 256-byte PRAM and answers time requests. |
 | Power Manager | All portables | 🔴 TODO | |
 | Soft power on/off | IIsi onward | 🔴 TODO | `GuestPowerRequest` exists at the interface level. |
 
@@ -445,7 +403,6 @@ than chosen by a modelled monitor.
 | Newton MessagePad (popular) | Serial | Optional | 🔴 TODO |
 | Apple IIe Card | [LC PDS](#36-processor-direct-slot-pds-per-machine) | Optional | 🔴 TODO |
 | DOS Compatibility Card (Houdini, 486) | PDS | Optional | 🔴 TODO |
-| PowerPC Upgrade Card | 68040 PDS | Optional | 🔴 TODO |
 | Apple Adjustable Keyboard, Turbo Mouse, tablets, joysticks | [ADB](#32-apple-desktop-bus-shared-bus) | Optional | 🔴 TODO |
 
 ---
@@ -469,17 +426,11 @@ not whether the OS itself is supported.
 | **System 6.0.7 – 6.0.8** | 1990-91 | 68000 | Mac II family, Quadra 700 | 🟢 Good |
 | System 7.0 / 7.0.1 | 1991 | 68000, 2 MB | Quadra | 🔴 TODO |
 | System 7.1 / 7.1.1 Pro | 1992-93 | 68000, 2 MB | Quadra, AV | 🟠 WIP |
-| System 7.1.2 | 1994 | **PowerPC only** | NuBus Power Macintosh | 🔴 TODO |
-| System 7.5 / 7.5.1 | 1994 | 68000, 4 MB | NuBus Power Macintosh | 🔴 TODO |
-| System 7.5.2 | 1995 | PCI Power Macintosh, PowerBook 5300 | (first PCI release) | 🔴 TODO |
+| System 7.5 / 7.5.1 | 1994 | 68000, 4 MB | In-scope m68k machines | 🔴 TODO |
 | System 7.5.3 / 7.5.5 | 1995-96 | 68000, 4 MB | All in scope | 🔴 TODO |
 | Mac OS 7.6 / 7.6.1 | 1997 | **68030+**, 8 MB | All in scope; drops 68000/68020 | 🔴 TODO |
-| Mac OS 8.0 | 1997 | **68040 or PowerPC**, 12 MB | Quadra and later | 🔴 TODO |
-| Mac OS 8.1 | 1998 | 68040 or PowerPC | **Last release supporting 68k** | 🔴 TODO |
-| Mac OS 8.5 / 8.6 | 1998-99 | **PowerPC only** | NuBus Power Macintosh still supported | 🔴 TODO |
-| Mac OS 9.0 / 9.0.4 | 1999-2000 | PowerPC, 32 MB | NuBus Power Macintosh (601) still supported | 🔴 TODO |
-| Mac OS 9.1 | 2001 | PowerPC, 40 MB | Practical ceiling for a 601 Power Macintosh | 🔴 TODO |
-| Mac OS 9.2 – 9.2.2 | 2001 | **PowerPC G3 or later** | Out of scope — no in-scope machine qualifies | ⛔ N/A |
+| Mac OS 8.0 | 1997 | **68040**, 12 MB | Quadra | 🔴 TODO |
+| Mac OS 8.1 | 1998 | 68040 | **Last release for m68k Macs** | 🔴 TODO |
 
 **Where CuteMac stands.** System 6.0.8 is the validated target: both System Tools
 and Utilities 1 raw 800K images boot the Macintosh IIcx to Finder from an
@@ -487,12 +438,9 @@ unmodified ROM. Earlier System 6 point releases share that path and are expected
 to work but are not routinely exercised. System 7.1 is partially reached — the
 IIcx path handles its unclean-shutdown warning and Sound Manager behaviour, which
 is why the ASC had to be modelled properly — but it is not a validated boot.
-Nothing PowerPC-hosted boots yet, so every 7.1.2-and-later PowerPC-only release
-is blocked behind the 8100's missing input, floppy, and video-card work.
 
-Practical ceilings worth remembering when scoping: **Mac OS 8.1** is the last
-release for any 68k machine, and **Mac OS 9.1** is the last that a NuBus Power
-Macintosh can run.
+The practical software ceiling is **Mac OS 8.1**, the last release for m68k
+machines.
 
 ### 6.2 A/UX (Apple Unix, 68k)
 
@@ -508,9 +456,9 @@ stress test: a **PMMU** and, for most releases, an **FPU**.
 | A/UX 3.1 | 1993 | 68030 or 68040, FPU | adds Quadra 610/650/800, Centris | 🔴 TODO |
 | A/UX 3.1.1 | 1995 | 68030 or 68040, FPU | Final release; adds Workgroup Server 95 | 🔴 TODO |
 
-**Blockers.** A/UX was never ported to PowerPC and never supported the AV
-Quadras or the LC line, so its target set is exactly the NuBus 68030/68040
-machines. Running it needs three things CuteMac does not yet have together:
+**Blockers.** A/UX did not support the AV Quadras or the LC line, so its target
+set is the NuBus 68030/68040 machines. Running it needs three things CuteMac does
+not yet have together:
 a validated **68030 PMMU** translation path under a real OS load (the PMMU is
 compiled in and has cache tests, but the IIcx deliberately does not advertise
 32-bit mode yet), a validated **68881/68882 FPU** (Musashi's FPU and softfloat
@@ -526,33 +474,12 @@ NuBus target.
 | Item | Runs on | Status |
 | --- | --- | --- |
 | AppleShare File Server 2.x / 3.x | Any Mac II class or later | 🔴 TODO |
-| AppleShare 4.x | Quadra, Workgroup Servers, Power Macintosh | 🔴 TODO |
+| AppleShare 4.x | Quadra and Workgroup Server 95 | 🔴 TODO |
 | Apple Workgroup Server Software (60/80/95) | AWS 60, 80, 95 | 🔴 TODO |
 | A/UX 3.1.1 + AppleShare Pro | Apple Workgroup Server 95 | 🔴 TODO |
 | At Ease / At Ease for Workgroups | System 7 machines | 🔴 TODO |
 
-### 6.4 AIX
-
-A scope correction worth recording, because it changes what would need to be
-built. **IBM AIX for the Apple Network Server (4.1.4 / 4.1.5, 1996) ran on the
-Apple Network Server 500 and 700 — PowerPC 604 machines with PCI**, not on the
-PowerPC Workgroup Servers.
-
-The **Apple Workgroup Server 6150 / 8150 / 9150** listed in [§1.7](#17-power-macintosh--nubus--pre-pci)
-are 601-based NuBus machines that ran **Mac OS plus AppleShare**, not AIX.
-
-| Item | Runs on | In pre-PCI scope? | Status |
-| --- | --- | --- | --- |
-| IBM AIX 4.1.4 / 4.1.5 for Apple Network Server | Apple Network Server 500 / 700 (PowerPC 604, **PCI**) | ❌ No | ⛔ Out of scope |
-| AIX on Workgroup Server 6150/8150/9150 | — | — | ⛔ Does not exist — these ran Mac OS |
-
-If AIX is genuinely wanted as a target, it implies extending scope past the PCI
-boundary to the Apple Network Server, which is a different machine architecture
-(604, PCI, no ADB console, IBM firmware conventions) and a substantially separate
-project from everything else in this document. It is listed here for
-completeness rather than as a plan.
-
-### 6.5 Other Operating Systems (Non-Apple, Popular)
+### 6.4 Other Operating Systems (Non-Apple, Popular)
 
 Not Apple system software, but frequently run on these machines and useful as
 independent correctness tests because they exercise the MMU and interrupt paths
@@ -560,14 +487,9 @@ much harder than Mac OS does.
 
 | Item | Runs on | Status |
 | --- | --- | --- |
-| MkLinux DR1+ | **Power Macintosh 6100/7100/8100** — the original target | 🔴 TODO |
 | NetBSD/mac68k | 68020+PMMU through Quadra | 🔴 TODO |
 | Linux/m68k | 68030/68040 Macs | 🔴 TODO |
 | MachTen (Tenon) | System 7 machines, hosted Unix | 🔴 TODO |
-| NetBSD/macppc (pre-PCI subset) | NuBus Power Macintosh | 🔴 TODO |
-
-MkLinux is worth singling out: its first release targeted precisely the NuBus
-Power Macintosh trio that CuteMac's 8100 work is aimed at.
 
 ---
 
@@ -575,13 +497,12 @@ Power Macintosh trio that CuteMac's 8100 work is aimed at.
 
 For orientation when reading the tables above, this is the actual inventory.
 
-**CPU cores.** `M68kCpuCore` (Musashi-derived, models 68000/68010/68EC020/68020/
+**CPU core.** `M68kCpuCore` (Musashi-derived, models 68000/68010/68EC020/68020/
 68EC030/68030/68EC040/68LC040/68040, PMMU and FPU compiled in, optional external
-68851). `PowerPc601Core` (portable interpreter, BAT/page translation, exceptions,
-trace rings).
+68851).
 
 **Machines.** `MacPlusMachine` (+128K/512K/512Ke variants), `MacIIcxMachine`,
-`Quadra700Machine`, `PowerMac8100Machine`.
+and `Quadra700Machine`.
 
 **Devices.** `Via6522`, `Z8530Scc`, `MacRtc`, `IwmController` (IWM + SWIM1),
 `FloppyDiskImage`, `Ncr5380` + `MacintoshNcr5380Bus`, `Ncr53c94`, `ScsiBus`,
@@ -592,8 +513,8 @@ trace rings).
 `HayesModem`, `NullModem`, `SlirpEthernetBackend`.
 
 **Not present at all.** Egret, Power Manager, IOP, OSS, RBV/VDAC, V8, Valkyrie,
-Civic, DSP3210, Singer/AWACS, SONIC, MACE, SWIM2/SWIM3, IDE, LocalTalk framing,
-HPV/AV PDS video, any PDS bus, any portable chassis.
+Civic, DSP3210, Singer, SONIC, MACE, SWIM2/SWIM3, IDE, LocalTalk framing, any
+PDS bus, or any portable chassis.
 
 ---
 
@@ -604,14 +525,11 @@ than the one after it.
 
 1. **Finish the Quadra 700 to a Finder boot.** DAFB and the 68040 map exist; the
    gap is system-software-level validation and SWIM/SCSI integration.
-2. **Add SONIC Ethernet.** Unblocks period-correct networking on Quadra 700/800
-   and every Power Macintosh, and the `PacketNetworkBackend` boundary is already
-   proven by the NuBus card.
-3. **Give the 8100 input, floppy, and a real video card.** `queueInput` is empty
-   and `loadFloppyImage` returns `false`; both block every PowerPC OS test.
-4. **Implement the Macintosh SE/30.** Highest reuse-to-effort ratio on the 68k
+2. **Add SONIC Ethernet.** Unblocks period-correct networking on Quadra 700/800,
+   and the `PacketNetworkBackend` boundary is already proven by the NuBus card.
+3. **Implement the Macintosh SE/30.** Highest reuse-to-effort ratio on the 68k
    side — a IIcx without NuBus, and the natural A/UX 2.0 candidate.
-5. **Implement Egret.** One controller unlocks the IIsi, IIvx, and the entire LC
+4. **Implement Egret.** One controller unlocks the IIsi, IIvx, and the entire LC
    family, and shares its packet layer with the existing Cuda work.
-6. **Validate PMMU and FPU under load**, which is the real precondition for A/UX
+5. **Validate PMMU and FPU under load**, which is the real precondition for A/UX
    on any machine.

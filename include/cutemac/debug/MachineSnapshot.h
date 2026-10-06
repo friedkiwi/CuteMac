@@ -41,7 +41,7 @@ struct MemoryRegion {
 };
 
 struct CpuSnapshot {
-    QString architecture;                        // "m68k:68030", "ppc:601"
+    QString architecture;                        // For example, "m68k:68030"
     std::uint32_t pc = 0;
     QStringList registerLines;                   // debugRegisterLines(), verbatim
     QMap<QString, std::uint64_t> registers;      // d0..d7, a0..a7, sr, vbr, usp, isp, msp

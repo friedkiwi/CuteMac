@@ -32,9 +32,8 @@ std::uint8_t Z8530Scc::readControl(Channel channel)
 
     if (selectedRegister == 0) return static_cast<std::uint8_t>(channelState.status | (channelState.transmitCycles == 0 ? 0x44 : 0x00)
         | (channelState.zeroCount ? 0x02 : 0x00) | (channelState.receiveDataAvailable ? 0x01 : 0x00));
-    // RR1 bit 0 is All Sent.  The Power Macintosh ROM selects RR1 and polls
-    // this bit while programming each SCC channel; leaving RR1 stubbed at zero
-    // strands early hardware initialization before video bring-up.
+    // RR1 bit 0 is All Sent. ROM code polls it while programming each SCC
+    // channel, so leaving RR1 stubbed at zero can strand initialization.
     if (selectedRegister == 1)
         return channelState.transmitCycles == 0 ? 0x01U : 0x00U;
     if (selectedRegister == 2 && channel == Channel::B) return modifiedInterruptVector();

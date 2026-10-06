@@ -192,7 +192,6 @@ add_library(CuteMacCore
     src/cpu/m68k/engine/m68kdasm.c
     src/cpu/m68k/engine/m68kops.c
     src/cpu/m68k/engine/softfloat/softfloat.c
-    src/cpu/ppc/PpcCpuCore.cpp
     src/devices/adb/AdbBus.cpp
     src/devices/bus/ByteWideMmioAdapter.cpp
     src/devices/audio/AppleSoundChip.cpp
@@ -227,7 +226,6 @@ add_library(CuteMacCore
     src/machines/macplus/MacPlusMachine.cpp
     src/machines/maciicx/MacIIcxMachine.cpp
     src/machines/quadra700/Quadra700Machine.cpp
-    src/machines/powermac8100/PowerMac8100Machine.cpp
     src/rom/RomPatcher.cpp
     src/rom/RomCatalog.cpp
     src/storage/DiskImageManager.cpp
@@ -489,12 +487,6 @@ target_link_libraries(CuteMacIIcxSmoke
 add_executable(CuteMacQuadra700Smoke tools/quadra700_smoke.cpp)
 target_link_libraries(CuteMacQuadra700Smoke PRIVATE CuteMacCore)
 
-add_executable(CuteMacPowerMac8100Smoke
-    tools/powermac8100_smoke.cpp
-)
-
-target_link_libraries(CuteMacPowerMac8100Smoke PRIVATE CuteMacCore)
-
 add_executable(CuteMacWrapHfsScsi tools/wrap_hfs_scsi.cpp)
 target_link_libraries(CuteMacWrapHfsScsi PRIVATE Qt6::Core)
 
@@ -653,14 +645,6 @@ if(BUILD_TESTING)
     add_executable(CuteMacAdbTests tests/adb_tests.cpp)
     target_link_libraries(CuteMacAdbTests PRIVATE CuteMacCore)
     add_test(NAME adb-pic-byte-protocol COMMAND CuteMacAdbTests)
-
-    add_executable(CuteMacPpc601Tests tests/ppc601_tests.cpp)
-    target_link_libraries(CuteMacPpc601Tests PRIVATE CuteMacCore)
-    add_test(NAME ppc601-core COMMAND CuteMacPpc601Tests)
-
-    add_executable(CuteMacPowerMac8100Tests tests/powermac8100_tests.cpp)
-    target_link_libraries(CuteMacPowerMac8100Tests PRIVATE CuteMacCore)
-    add_test(NAME powermac-8100-machine COMMAND CuteMacPowerMac8100Tests)
 
     add_executable(CuteMacDebugCpuAccessTests tests/debug_cpu_access_tests.cpp)
     target_link_libraries(CuteMacDebugCpuAccessTests PRIVATE CuteMacCore)

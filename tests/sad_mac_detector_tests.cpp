@@ -55,7 +55,7 @@ int main()
 
     auto colorMachine = frame(640, 480);
     drawSadLayout(colorMachine);
-    require(cutemac::debug::SadMacDetector::detect(colorMachine), "IIcx/PM8100 Sad Mac layout");
+    require(cutemac::debug::SadMacDetector::detect(colorMachine), "IIcx Sad Mac layout");
     colorMachine.colorTable = { 0xff000000U, 0xffffffffU };
     require(!cutemac::debug::SadMacDetector::detect(colorMachine), "palette interpretation");
     std::cout << "Sad Mac detector tests passed\n";

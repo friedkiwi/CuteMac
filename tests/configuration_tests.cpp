@@ -119,16 +119,6 @@ int main()
         ok &= expect(migrated->scsiDevices.size() == 1 && migrated->scsiDevices.first().imagePath == QStringLiteral("old.hda"), "legacy disk was not migrated");
     }
 
-    QFile powerMacProfile(path);
-    ok &= expect(powerMacProfile.open(QIODevice::WriteOnly | QIODevice::Truncate), "Power Macintosh migration fixture open failed");
-    powerMacProfile.write("name = \"Power Macintosh\"\n[machine]\nid = \"powermac-6100\"\n");
-    powerMacProfile.close();
-    const auto migratedPowerMac = manager.loadTomlFile(path);
-    ok &= expect(migratedPowerMac.has_value() && migratedPowerMac->machineId == QStringLiteral("powermac-8100"),
-        "legacy Power Macintosh 6100 target must migrate to the 8100 target");
-    ok &= expect(migratedPowerMac && migratedPowerMac->ramSizeKiB == 8192,
-        "a legacy Power Macintosh profile must receive a valid default RAM size");
-
     QFile invalidRam(path);
     ok &= expect(invalidRam.open(QIODevice::WriteOnly | QIODevice::Truncate), "invalid RAM fixture open failed");
     invalidRam.write("name = \"Invalid Plus\"\n[machine]\nid = \"mac-plus\"\nram_size_mib = 3\n");

@@ -17,18 +17,11 @@ video/NuBus, SCSI, floppy, VIA/ADB/audio, or machine-specific chipset code.
 - Build CuteMac as a modular classic Macintosh emulator using Qt 6 and CMake.
 - Keep WebAssembly support in mind for all design choices; avoid platform-specific assumptions unless isolated behind small adapters.
 - Primary development happens on WSL2, targeting Windows, macOS on Intel/aarch64, Linux, and wasm.
-- Target machines are 68000-era Macs, Macintosh IIcx, Macintosh Quadra 800, and Power Macintosh 8100/80.
+- Target machines are 68000-era Macs, Macintosh IIcx, and Macintosh Quadra 800.
+- CuteMac is an m68k Macintosh emulator; processor upgrade cards for other architectures are out of scope.
 - Support original, unmodified ROM files supplied by users. Do not embed copyrighted ROM content.
 - ROM patches are optional profile features and default off. Apply them to an in-memory copy only, gate them by the original ROM SHA-256 and expected bytes, apply transactionally, and expose applied patch IDs in debug state. Never modify the user's ROM file.
 - Configuration files use TOML, parsed and serialized with toml++ — no ad hoc TOML parsing. Evolve toward a WinUAE/VMware Workstation style configuration workflow.
-
-### Power Macintosh 8100/80
-
-- The target is the launch-model 8100/80. It shares the 4 MiB `9FEB69B3` ROM with the 6100/60 and 7100/66, but must model the 8100's own memory topology, three native NuBus slots, BART controller configuration, PDS/video configuration, interrupts, and 80 MHz PowerPC 601 with a 40 MHz bus.
-- Implement the PowerPC 601 core as a single portable interpreter. Do not add a backend abstraction, JIT interface, optimized-backend hooks, or speculative dual-engine design; improve the interpreter itself in response to profiling, and revisit the architecture only if measured performance requires it.
-- Integrate `PowerPc601Core` through the same machine-neutral boundaries as the 68k core: derive it from `core::CpuCore`, expose reset, interrupt, instruction-step, cycle-budget execution, program-counter, register snapshot, and disassembly operations, and keep machine/chipset and Qt dependencies out of the CPU. Its `PowerPcBus` performs big-endian physical 8/16/32-bit accesses analogous to `M68kBus`; effective-address translation, protection, precise exceptions, and 601 architectural state remain inside the CPU.
-- The machine owns cycle scheduling, the physical address map, BART/bus glue, and interrupt routing. Advance the 601 and devices through `MachineScheduler` using instruction cycle counts, with no host clocks or timers in the CPU. Reuse existing device layers only at valid boundaries: NuBus bus/cards and the framebuffer contract directly; SCSI targets/media, ADB endpoints, floppy media, PRAM persistence/date overlay, and other protocol-independent state beneath 8100-specific controllers or adapters. Do not reuse a controller model when the 8100 hardware protocol differs.
-- Treat PowerPC tracing and `CuteMacDebugSession` support as part of initial 601 development, not post-bringup polish. Extend the debug boundary with architecture-tagged CPU state and disassembly, and add bounded, opt-in rings for instructions, exceptions, interrupts, effective-to-physical translations, and physical bus accesses. Every record carries the machine cycle and relevant PC; exception records include vector/cause and saved architectural state, while translation records include access type, address, result, and protection/fault outcome. Keep capture disabled at zero/near-zero normal-session cost, make trace save output deterministic for differential comparison, and ensure step, run-until, breakpoints, and tracing all advance the complete machine timing path.
 
 ## Architecture
 

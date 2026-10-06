@@ -54,15 +54,6 @@ int main()
     ok &= expect(!compactCatalog.pathForId(QStringLiteral("mac128k-28ba61ce")).isEmpty(),
         "ROM manager must identify the Macintosh 128K ROM independent of filename");
 
-    const auto definitions = cutemac::rom::RomCatalog::definitions();
-    const auto powerMacRom = std::find_if(definitions.cbegin(), definitions.cend(), [](const auto& definition) {
-        return definition.id == QStringLiteral("powermac-pdm-9feb69b3");
-    });
-    ok &= expect(powerMacRom != definitions.cend()
-            && powerMacRom->ownerId == QStringLiteral("powermac-8100")
-            && powerMacRom->revision == QStringLiteral("9FEB69B3"),
-        "the shared launch Power Macintosh ROM must belong to the 8100 target");
-
     cutemac::config::Configuration configuration;
     configuration.machineId = QStringLiteral("mac-plus");
     ok &= expect(catalog.missingRomNames(configuration).isEmpty(), "found compatible revision must satisfy machine requirement");

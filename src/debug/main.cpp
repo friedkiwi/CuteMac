@@ -54,7 +54,6 @@
 #include "cutemac/devices/serial/SerialEndpoint.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/macplus/MacPlusMachine.h"
-#include "cutemac/machines/powermac8100/PowerMac8100Machine.h"
 #include "cutemac/devices/video/nubus/MacintoshIIVideoCard.h"
 #include "cutemac/session/FramebufferRenderer.h"
 
@@ -956,8 +955,6 @@ private:
         m_iicxMachine = static_cast<cutemac::machines::maciicx::MacIIcxMachine*>(m_session->debugMachine(QStringLiteral("mac-iicx")));
         m_deviceDebug = m_session->debugDeviceAccess();
         if (m_iicxMachine != nullptr) m_iicxMachine->setAdbTraceEnabled(true);
-        m_powerMac8100Machine = static_cast<cutemac::machines::powermac8100::PowerMac8100Machine*>(
-            m_session->debugMachine(QStringLiteral("powermac-8100")));
         if (m_cpuDebug == nullptr && m_machine == nullptr && m_iicxMachine == nullptr) {
             m_out << "debug support is unavailable for machine " << m_configuration.machineId << '\n';
             m_romLoaded = false;
@@ -1562,45 +1559,6 @@ private:
 
     void handleBus(const QStringList& parts)
     {
-        if (m_powerMac8100Machine != nullptr) {
-            if (parts.size() >= 2 && (parts[1] == QStringLiteral("on") || parts[1] == QStringLiteral("off"))) {
-                const auto enabled = parts[1] == QStringLiteral("on");
-                m_powerMac8100Machine->setBusTraceEnabled(enabled);
-                m_out << "bus trace=" << (enabled ? "on" : "off") << '\n';
-                return;
-            }
-            int count = 32;
-            bool amicOnly = false;
-            bool scsiOnly = false;
-            if (parts.size() >= 3 && parts[1] == QStringLiteral("filter"))
-                amicOnly = parts[2].compare(QStringLiteral("amic"), Qt::CaseInsensitive) == 0;
-            if (parts.size() >= 3 && parts[1] == QStringLiteral("filter"))
-                scsiOnly = parts[2].compare(QStringLiteral("scsi"), Qt::CaseInsensitive) == 0;
-            if (parts.size() >= 3 && parts[1] == QStringLiteral("last"))
-                count = std::max(1, parts[2].toInt());
-            const auto& trace = m_powerMac8100Machine->busTrace();
-            const auto start = (amicOnly || scsiOnly) ? 0U
-                : trace.size() > static_cast<std::size_t>(count) ? trace.size() - count : 0U;
-            for (auto index = start; index < trace.size(); ++index) {
-                const auto& access = trace[index];
-                if (amicOnly && access.region
-                    != cutemac::machines::powermac8100::PowerMac8100Machine::BusRegion::Amic) continue;
-                if (scsiOnly) {
-                    const auto controller = access.address >= 0x50f10000U
-                        && access.address < 0x50f11200U;
-                    const auto dma = access.address >= 0x50f32000U
-                        && access.address < 0x50f32014U;
-                    if (!controller && !dma) continue;
-                }
-                m_out << (access.write ? "write" : "read")
-                      << " region=" << static_cast<unsigned>(access.region)
-                      << " pc=" << hexValue(access.pc)
-                      << " address=" << hexValue(access.address)
-                      << " size=" << access.size
-                      << " value=" << hexValue(access.value, access.size * 2) << '\n';
-            }
-            return;
-        }
         if (parts.size() >= 2 && (parts[1] == QStringLiteral("on") || parts[1] == QStringLiteral("off"))) {
             const auto enabled = parts[1] == QStringLiteral("on");
             m_machine->setBusTraceEnabled(enabled);
@@ -1651,42 +1609,6 @@ private:
             return;
         }
 #endif
-        if (m_powerMac8100Machine != nullptr) {
-            const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
-            if (device.isEmpty() || device == QStringLiteral("scsi")) {
-                const auto dma = m_powerMac8100Machine->scsiDmaDebugState();
-                const auto irq = m_powerMac8100Machine->interruptDebugState();
-                m_out << "scsi-dma base=" << hexValue(dma[0])
-                      << " address=" << hexValue(dma[1])
-                      << " offset=" << hexValue(dma[2])
-                      << " control=" << hexValue(dma[3], 2)
-                      << " via2_ifr=" << hexValue(irq[1], 2)
-                      << " via2_ier=" << hexValue(irq[2], 2) << '\n';
-                for (const auto internal : { false, true }) {
-                    const auto& controller = m_powerMac8100Machine->scsiController(internal);
-                    const auto scsi = controller.debugState();
-                    m_out << "scsi-" << (internal ? "internal" : "external")
-                          << " target=" << scsi.targetId
-                          << " cdb=" << scsi.cdb.toHex(' ')
-                          << " data=" << scsi.dataPosition << '/' << scsi.dataSize
-                          << " remaining=" << scsi.transferCount
-                          << " status=" << hexValue(scsi.status, 2)
-                          << " interrupt=" << hexValue(scsi.interruptStatus, 2)
-                          << " step=" << hexValue(scsi.sequenceStep, 2)
-                          << " scsi_status=" << hexValue(scsi.scsiStatus, 2)
-                          << " message=" << hexValue(scsi.message, 2)
-                          << " phase=" << (scsi.command ? "command" : scsi.dataIn ? "data-in"
-                                  : scsi.dataOut ? "data-out" : "other") << '\n';
-                    m_out << "scsi-" << (internal ? "internal" : "external") << " commands";
-                    for (std::size_t command = 0; command < controller.scsiCommandCounts().size(); ++command) {
-                        if (controller.scsiCommandCounts()[command] != 0)
-                            m_out << ' ' << hexValue(command, 2) << ':' << controller.scsiCommandCounts()[command];
-                    }
-                    m_out << '\n';
-                }
-            }
-            return;
-        }
         if (m_iicxMachine != nullptr) {
             const auto device = parts.size() >= 2 ? parts[1].toLower() : QString();
             const auto io = m_iicxMachine->ioStatistics();
@@ -2372,10 +2294,6 @@ private:
             m_iicxMachine->attachSerialEndpoint(channel, endpoint);
             return true;
         }
-        if (m_powerMac8100Machine) {
-            m_powerMac8100Machine->attachSerialEndpoint(channel, endpoint);
-            return true;
-        }
         return false;
     }
 
@@ -2754,13 +2672,6 @@ private:
         m_sadMac.reason = QStringLiteral("framebuffer-layout");
         m_sadMac.frame = m_session->videoFrame();
         if (m_cpuDebug) m_sadMac.registers = m_cpuDebug->debugRegisterLines();
-        if (m_powerMac8100Machine != nullptr) {
-            const auto registers = m_powerMac8100Machine->cpuRegisters();
-            // The PDM ROM's 68k compatibility renderer carries the displayed
-            // primary and secondary words in these nanokernel registers.
-            m_sadMac.primaryCode = registers.gpr[15];
-            m_sadMac.secondaryCode = registers.gpr[14];
-        }
         m_out << "sadmac detected cycle=" << m_sadMac.cycle << " pc=" << hexValue(m_sadMac.pc)
               << " reason=" << m_sadMac.reason << '\n';
         return true;
@@ -3054,7 +2965,6 @@ private:
         m_gdbEnabled = false;
         m_machine = nullptr;
         m_iicxMachine = nullptr;
-        m_powerMac8100Machine = nullptr;
         m_session.reset();
 
         m_snapshot = std::make_unique<cutemac::debug::SnapshotMachine>(std::move(*snapshot));
@@ -3328,7 +3238,6 @@ private:
     cutemac::core::IDebugDeviceAccess* m_deviceDebug = nullptr;
     cutemac::machines::macplus::MacPlusMachine* m_machine = nullptr;
     cutemac::machines::maciicx::MacIIcxMachine* m_iicxMachine = nullptr;
-    cutemac::machines::powermac8100::PowerMac8100Machine* m_powerMac8100Machine = nullptr;
 #if CUTEMAC_ENABLE_PANIC_DUMP
     std::unique_ptr<cutemac::debug::SnapshotMachine> m_snapshot;
     QString m_snapshotPath;

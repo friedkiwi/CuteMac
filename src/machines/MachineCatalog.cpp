@@ -10,7 +10,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("mac-128k"),
             QStringLiteral("Macintosh 128K"),
-            CpuFamily::M68k,
             QStringLiteral("68000"),
             {
                 QStringLiteral("device.via6522"),
@@ -24,7 +23,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("mac-512k"),
             QStringLiteral("Macintosh 512K"),
-            CpuFamily::M68k,
             QStringLiteral("68000"),
             {
                 QStringLiteral("device.via6522"),
@@ -38,7 +36,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("mac-512ke"),
             QStringLiteral("Macintosh 512Ke"),
-            CpuFamily::M68k,
             QStringLiteral("68000"),
             {
                 QStringLiteral("device.via6522"),
@@ -53,7 +50,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("mac-plus"),
             QStringLiteral("Macintosh Plus"),
-            CpuFamily::M68k,
             QStringLiteral("68000"),
             {
                 QStringLiteral("device.via6522"),
@@ -69,7 +65,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("mac-iicx"),
             QStringLiteral("Macintosh IIcx"),
-            CpuFamily::M68k,
             QStringLiteral("68030"),
             {
                 QStringLiteral("device.via6522.primary"),
@@ -87,7 +82,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("quadra-700"),
             QStringLiteral("Macintosh Quadra 700"),
-            CpuFamily::M68k,
             QStringLiteral("68040"),
             {
                 QStringLiteral("device.via6522.primary"),
@@ -106,7 +100,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
         {
             QStringLiteral("quadra-800"),
             QStringLiteral("Macintosh Quadra 800"),
-            CpuFamily::M68k,
             QStringLiteral("68040"),
             {
                 QStringLiteral("device.adb.bus"),
@@ -115,20 +108,6 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
                 QStringLiteral("device.video"),
             },
             { 8192, 12288, 24576, 40960, 73728, 139264 },
-        },
-        {
-            QStringLiteral("powermac-8100"),
-            QStringLiteral("Power Macintosh 8100/80"),
-            CpuFamily::PowerPc,
-            QStringLiteral("PowerPC 601"),
-            {
-                QStringLiteral("device.adb.bus"),
-                QStringLiteral("device.scc.z8530"),
-                QStringLiteral("device.scsi.bus"),
-                QStringLiteral("device.nubus"),
-                QStringLiteral("device.video"),
-            },
-            { 8192, 16384, 24576, 40960, 73728, 139264, 270336 },
         },
     };
 }
