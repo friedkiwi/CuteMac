@@ -33,6 +33,8 @@ public:
     void detachTarget(std::uint8_t id);
     [[nodiscard]] std::uint8_t readRegister(std::uint8_t index);
     void writeRegister(std::uint8_t index, std::uint8_t value);
+    [[nodiscard]] std::uint8_t readDmaByte();
+    void writeDmaByte(std::uint8_t value);
     [[nodiscard]] std::uint16_t readDmaWord();
     void writeDmaWord(std::uint16_t value);
     void tick(std::uint32_t controllerCycles);
@@ -47,6 +49,7 @@ public:
 private:
     void executeCommand(std::uint8_t command);
     void selectTarget();
+    void consumeCommandFifo();
     void executeCdb();
     void completeTransfer();
     void raiseInterrupt(std::uint8_t cause);

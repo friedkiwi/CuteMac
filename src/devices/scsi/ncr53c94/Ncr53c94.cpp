@@ -79,14 +79,7 @@ void Ncr53c94::writeRegister(std::uint8_t index, std::uint8_t value)
     case 1: m_startTransferCount = (m_startTransferCount & 0xff00ffU) | (static_cast<std::uint32_t>(value) << 8); break;
     case 2:
         if (m_fifo.size() < 16) m_fifo.append(static_cast<char>(value));
-        if (m_commandPhase && m_dmaActive && !m_fifo.isEmpty()) {
-            const auto cdbOffset = (static_cast<std::uint8_t>(m_fifo.front()) & 0x80U) ? 1 : 0;
-            if (m_fifo.size() > cdbOffset
-                && m_fifo.size() - cdbOffset >= commandLength(static_cast<std::uint8_t>(m_fifo[cdbOffset]))) {
-                m_commandPhase = false;
-                selectTarget();
-            }
-        }
+        if (m_commandPhase && m_dmaActive) consumeCommandFifo();
         break;
     case 3: m_registers[3] = value; executeCommand(value); break;
     case 4: m_targetId = value & 7U; break;
@@ -123,6 +116,7 @@ void Ncr53c94::selectTarget()
 {
     auto target = m_targets[m_targetId];
     if (!target || !target->selectable()) { m_fifo.clear(); raiseInterrupt(interruptDisconnected); return; }
+    m_cdb.clear();
     if (!m_fifo.isEmpty() && (static_cast<std::uint8_t>(m_fifo.front()) & 0x80U)) m_fifo.remove(0, 1);
     // A DMA SELECT may perform arbitration/selection before the command bytes
     // are supplied by the DMA channel.  Successful target selection leaves
@@ -136,13 +130,29 @@ void Ncr53c94::selectTarget()
     executeCdb();
 }
 
+void Ncr53c94::consumeCommandFifo()
+{
+    while (m_commandPhase && !m_fifo.isEmpty()) {
+        const auto value = static_cast<std::uint8_t>(m_fifo.front());
+        m_fifo.remove(0, 1);
+        if (m_cdb.isEmpty() && (value & 0x80U)) continue;
+        m_cdb.append(static_cast<char>(value));
+        if (m_cdb.size() >= commandLength(static_cast<std::uint8_t>(m_cdb.front()))) {
+            m_commandPhase = false;
+            executeCdb();
+        }
+    }
+}
+
 void Ncr53c94::executeCdb()
 {
-    if (m_fifo.isEmpty()) return;
     const auto target = m_targets[m_targetId];
     if (!target || !target->selectable()) { m_fifo.clear(); raiseInterrupt(interruptDisconnected); return; }
-    const auto length = std::min(commandLength(static_cast<std::uint8_t>(m_fifo.front())), static_cast<int>(m_fifo.size()));
-    m_cdb = m_fifo.left(length); m_fifo.remove(0, length);
+    if (m_cdb.isEmpty()) {
+        if (m_fifo.isEmpty()) return;
+        const auto length = std::min(commandLength(static_cast<std::uint8_t>(m_fifo.front())), static_cast<int>(m_fifo.size()));
+        m_cdb = m_fifo.left(length); m_fifo.remove(0, length);
+    }
     const auto opcode = static_cast<std::uint8_t>(m_cdb.front());
     ++m_scsiCommandCounts[opcode];
     m_transferCount = 0;
@@ -241,12 +251,14 @@ void Ncr53c94::executeCommand(std::uint8_t command)
 
 std::uint16_t Ncr53c94::readDmaWord()
 {
-    std::uint16_t result = 0;
-    for (unsigned byte = 0; byte < 2; ++byte) {
-        result = static_cast<std::uint16_t>((result << 8) | (m_dataPosition < m_data.size()
-            ? static_cast<std::uint8_t>(m_data[m_dataPosition++]) : 0));
-        if (m_transferCount) --m_transferCount;
-    }
+    return static_cast<std::uint16_t>((readDmaByte() << 8) | readDmaByte());
+}
+
+std::uint8_t Ncr53c94::readDmaByte()
+{
+    const auto result = m_dataPosition < m_data.size()
+        ? static_cast<std::uint8_t>(m_data[m_dataPosition++]) : 0;
+    if (m_transferCount) --m_transferCount;
     if (m_dataPosition >= m_data.size()) {
         completeTransfer();
     } else if (m_transferCount == 0) {
@@ -261,10 +273,28 @@ std::uint16_t Ncr53c94::readDmaWord()
 
 void Ncr53c94::writeDmaWord(std::uint16_t value)
 {
-    auto& destination = m_commandPhase ? m_fifo : m_dataOut;
-    destination.append(static_cast<char>(value >> 8)); destination.append(static_cast<char>(value));
-    if (m_transferCount > 1) m_transferCount -= 2; else m_transferCount = 0;
-    if (m_transferCount == 0) completeTransfer();
+    writeDmaByte(static_cast<std::uint8_t>(value >> 8));
+    writeDmaByte(static_cast<std::uint8_t>(value));
+}
+
+void Ncr53c94::writeDmaByte(std::uint8_t value)
+{
+    const bool wasCommandPhase = m_commandPhase;
+    if (m_commandPhase) {
+        if (m_fifo.size() < 16) m_fifo.append(static_cast<char>(value));
+        consumeCommandFifo();
+    } else {
+        m_dataOut.append(static_cast<char>(value));
+    }
+    if (m_transferCount) --m_transferCount;
+    if (m_transferCount != 0) return;
+    if (wasCommandPhase) {
+        m_dmaActive = false;
+        m_status |= terminalCount;
+        if (m_commandPhase) raiseInterrupt(interruptService);
+    } else {
+        completeTransfer();
+    }
 }
 
 } // namespace cutemac::devices::scsi::ncr53c94

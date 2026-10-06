@@ -203,6 +203,32 @@ bool testTurboScsiDelayedDmaSelectCdb()
     return ok;
 }
 
+bool testTurboScsiSplitDmaSelectCdb()
+{
+    using cutemac::devices::scsi::ncr53c94::Ncr53c94;
+    using cutemac::devices::video::DafbVideo;
+    bool ok = true;
+    Ncr53c94 scsi;
+    DafbVideo dafb;
+    scsi.reset();
+    scsi.attachTarget(3, std::make_shared<InquiryTarget>());
+    dafb.attachTurboScsi(0, &scsi);
+    dafb.writeTurboScsiRegister(0, 0x40, 3);
+    dafb.writeTurboScsiRegister(0, 0x00, 1);
+    dafb.writeTurboScsiRegister(0, 0x10, 0);
+    dafb.writeTurboScsiRegister(0, 0x30, 0xc1);
+    for (const auto byte : QByteArray::fromHex("8028000001166b000001"))
+        dafb.writeTurboScsiRegister(0, 0x20, static_cast<std::uint8_t>(byte));
+    ok &= expect(dafb.readTurboScsiRegister(0, 0x70) == 0 && scsi.debugState().command,
+        "DMA selection must drain a partial CDB from the command FIFO");
+    dafb.writeTurboScsiDma8(0, 0);
+    ok &= expect(!scsi.debugState().command
+            && scsi.debugState().cdb == QByteArray::fromHex("28000001166b00000100")
+            && scsi.interruptActive(),
+        "the byte-wide DMA aperture must complete a split command without duplicating its last byte");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -214,5 +240,6 @@ int main()
     ok &= testTurboScsiRegisterRouting();
     ok &= testTurboScsiBusResetTiming();
     ok &= testTurboScsiDelayedDmaSelectCdb();
+    ok &= testTurboScsiSplitDmaSelectCdb();
     return ok ? 0 : 1;
 }

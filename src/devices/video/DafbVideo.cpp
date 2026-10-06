@@ -174,6 +174,18 @@ void DafbVideo::writeTurboScsiRegister(int bus, std::uint32_t offset, std::uint8
     m_scsi[static_cast<std::size_t>(bus)]->writeRegister(static_cast<std::uint8_t>((offset >> 4) & 0x0fU), value);
 }
 
+std::uint8_t DafbVideo::readTurboScsiDma8(int bus)
+{
+    if (bus < 0 || bus >= static_cast<int>(m_scsi.size()) || !m_scsi[static_cast<std::size_t>(bus)]) return 0xff;
+    return m_scsi[static_cast<std::size_t>(bus)]->readDmaByte();
+}
+
+void DafbVideo::writeTurboScsiDma8(int bus, std::uint8_t value)
+{
+    if (bus < 0 || bus >= static_cast<int>(m_scsi.size()) || !m_scsi[static_cast<std::size_t>(bus)]) return;
+    m_scsi[static_cast<std::size_t>(bus)]->writeDmaByte(value);
+}
+
 std::uint16_t DafbVideo::readTurboScsiDma16(int bus)
 {
     if (bus < 0 || bus >= static_cast<int>(m_scsi.size()) || !m_scsi[static_cast<std::size_t>(bus)]) return 0xffffU;

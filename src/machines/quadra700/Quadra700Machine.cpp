@@ -632,7 +632,7 @@ std::uint8_t Quadra700Machine::readIo8(std::uint32_t address)
         }
     }
     if (offset >= 0xf000 && offset < 0xf100) return m_dafb.readTurboScsiRegister(0, offset - 0xf000);
-    if (offset >= 0xf100 && offset < 0xf102) return highByte(m_dafb.readTurboScsiDma16(0));
+    if (offset >= 0xf100 && offset < 0xf102) return m_dafb.readTurboScsiDma8(0);
     if (offset >= 0x14000 && offset < 0x16000) return m_asc.read(static_cast<std::uint16_t>(offset & 0x0fffU));
     if (offset >= 0x1e000 && offset < 0x20000) return m_swim.access(wordHandlerRegister(offset - 0x1e000));
     return 0x00;
@@ -669,7 +669,7 @@ void Quadra700Machine::writeIo8(std::uint32_t address, std::uint8_t value)
     } else if (offset >= 0xf000 && offset < 0xf100) {
         m_dafb.writeTurboScsiRegister(0, offset - 0xf000, value);
     } else if (offset >= 0xf100 && offset < 0xf102) {
-        m_dafb.writeTurboScsiDma16(0, static_cast<std::uint16_t>((value << 8) | value));
+        m_dafb.writeTurboScsiDma8(0, value);
     } else if (offset >= 0x14000 && offset < 0x16000) {
         m_asc.write(static_cast<std::uint16_t>(offset & 0x0fffU), value);
     } else if (offset >= 0x1e000 && offset < 0x20000) {

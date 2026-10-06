@@ -63,6 +63,8 @@ public:
 
     [[nodiscard]] std::uint8_t readTurboScsiRegister(int bus, std::uint32_t offset);
     void writeTurboScsiRegister(int bus, std::uint32_t offset, std::uint8_t value);
+    [[nodiscard]] std::uint8_t readTurboScsiDma8(int bus);
+    void writeTurboScsiDma8(int bus, std::uint8_t value);
     [[nodiscard]] std::uint16_t readTurboScsiDma16(int bus);
     void writeTurboScsiDma16(int bus, std::uint16_t value);
 
