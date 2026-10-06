@@ -68,9 +68,9 @@ bool testIndexedScanoutAndClut()
     dafb.writeRegister32(0x14c, 0);
     dafb.writeRegister32(0x150, 0);
     dafb.writeRegister32(0x154, 0);
-    dafb.writeRegister32(0x158, 0);
-    dafb.writeRegister32(0x15c, 0);
-    dafb.writeRegister32(0x160, 960);
+    dafb.writeRegister32(0x158, 10); // VBP is not the active-display start.
+    dafb.writeRegister32(0x15c, 80); // VAL: active-display start, in half-lines.
+    dafb.writeRegister32(0x160, 1040); // VFP: active-display end, in half-lines.
     dafb.writeRegister32(0x164, 1050);
     dafb.writeRegister32(0x200, 1);
     dafb.writeRegister32(0x210, 0xaa);

@@ -478,7 +478,7 @@ void DafbVideo::updateMode()
     const auto vtotal = m_vertical[6] >> 1U;
     if (htotal == 0 || vtotal == 0) return;
     const auto hres = static_cast<int>(m_horizontal[8] - m_horizontal[7]);
-    const auto vres = static_cast<int>((m_vertical[5] >> 1U) - (m_vertical[3] >> 1U));
+    const auto vres = static_cast<int>((m_vertical[5] >> 1U) - (m_vertical[4] >> 1U));
     if (hres > 0 && hres <= 4096) m_width = hres;
     if (vres > 0 && vres <= 2160) m_height = vres;
     if (m_width == 512 && m_variant == Variant::Discrete) {

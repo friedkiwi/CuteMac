@@ -71,6 +71,7 @@ changing code in that subsystem.
 - The IIcx Apple Sound Chip consumes its FIFO at 22.257 kHz and raises half-empty FIFO interrupts through the inverted VIA2 CB1 input. Reading ASC FIFO status acknowledges both the status bits and IRQ. A register-array-only ASC leaves Sound Manager waiting forever during the System 7 unclean-shutdown warning and makes the dialog appear to crash the machine.
 - Quadra 700 uses the enhanced ASC (`$B0` version), whose FIFO status remains visible after a read, whose clock register reports 44.1 kHz, and whose two playback FIFOs drain as a stereo pair. Do not apply the original ASC's read-to-clear status or writable control register to this variant; the ROM and Sound Manager poll those differences directly.
 - DAFB Swatch interrupt control independently enables VBL (bit 0) and cursor-scanline (bit 2) events. Both status bits recur once per modeled frame and retain their separate read-to-clear registers; the Q700 ROM polls cursor status while bringing up copied-RAM video code.
+- DAFB vertical resolution is the half-line distance from `VAL` (vertical active-line start) to `VFP` (vertical front-porch start), not from `VBP`; the Q700's `$052`/`$412` endpoints produce 480 lines.
 
 ## Machine-Specific
 
