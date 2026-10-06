@@ -65,15 +65,18 @@ bool testRamDoesNotAliasOutsideConfiguredRange()
             && !machine.readPhysical32(0x04000000U).busError,
         "Q700 installed temporary map must expose absent banks as open bus");
     machine.debugWrite32(0x20U, 0x13579bdfU);
+    machine.debugWrite32(ramSize - 0x2cU, 0x2468ace0U);
     machine.debugWrite8(0x5000e000U, 0x00);
     ok &= expect(machine.readPhysical32(ramSize).busError,
         "Q700 clearing the temporary map must restore faults for destructive sizing");
-    ok &= expect(machine.debugRead32(0x38000020U) == 0x13579bdfU,
-        "Q700 cleared sizing map must snapshot low RAM into the preserved bank");
-    machine.debugWrite32(0x38000020U, 0x89abcdefU);
-    ok &= expect(machine.debugRead32(0x37c00020U) == 0x89abcdefU
+    ok &= expect(machine.debugRead32(0x37ff0020U) == 0x13579bdfU,
+        "Q700 relocated RAM aperture must begin at 0x37ff0000");
+    ok &= expect(machine.debugRead32(0x383effd4U) == 0x2468ace0U,
+        "Q700 relocated aperture must preserve the ROM's top-of-bank descriptor offset");
+    machine.debugWrite32(0x37ff0020U, 0x89abcdefU);
+    ok &= expect(machine.debugRead32(0x383f0020U) == 0x89abcdefU
             && machine.debugRead32(0x20U) == 0x13579bdfU,
-        "Q700 high working bank must mirror around 0x38000000 without changing low RAM");
+        "Q700 relocated working bank must mirror by RAM size without changing low RAM");
     machine.debugWrite8(0x5000e000U, 0x00);
     ok &= expect(!machine.readPhysical32(ramSize).busError,
         "Q700 repeated odd mapping pass must reinstall the temporary open-bus map");

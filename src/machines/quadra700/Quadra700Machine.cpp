@@ -510,7 +510,7 @@ std::optional<std::size_t> Quadra700Machine::sizingRamIndex(std::uint32_t addres
     const auto size = static_cast<std::uint32_t>(m_sizingRam.size());
     if (m_mcuZeroBaseWrites >= 2 && (m_mcuZeroBaseWrites & 1U) == 0 && size != 0
         && address >= 0x30000000U && address < 0x40000000U)
-        return address % size;
+        return (address - 0x37ff0000U) % size;
     return std::nullopt;
 }
 
