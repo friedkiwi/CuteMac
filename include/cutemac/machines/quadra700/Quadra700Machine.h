@@ -148,6 +148,7 @@ private:
     [[nodiscard]] std::optional<std::size_t> ramIndex(std::uint32_t address) const;
     [[nodiscard]] std::optional<std::size_t> sizingRamIndex(std::uint32_t address) const;
     [[nodiscard]] bool unconfiguredRamAccessFaults(std::uint32_t address, std::uint32_t size) const;
+    [[nodiscard]] bool isAliasedRom(std::uint32_t address) const;
     [[nodiscard]] bool isAliasedNuBus(std::uint32_t address) const;
     void rebuildPhysicalMemoryMap();
 

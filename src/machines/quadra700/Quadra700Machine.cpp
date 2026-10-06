@@ -15,6 +15,7 @@ namespace {
 
 constexpr std::uint32_t romBase = 0x40000000U;
 constexpr std::uint32_t macRomLoadBase = 0x40800000U;
+constexpr std::uint32_t rom24BitBase = 0x00800000U;
 constexpr std::uint32_t ioBase = 0x50000000U;
 constexpr std::uint32_t ioMirrorMask = 0x00fc0000U;
 constexpr std::uint32_t ioOffsetMask = 0x0003ffffU;
@@ -327,6 +328,13 @@ bool Quadra700Machine::isAliasedNuBus(std::uint32_t address) const
     return !ramIndex(address).has_value();
 }
 
+bool Quadra700Machine::isAliasedRom(std::uint32_t address) const
+{
+    return !m_overlay && address >= rom24BitBase
+        && address < rom24BitBase + static_cast<std::uint32_t>(m_rom.size())
+        && !ramIndex(address).has_value();
+}
+
 std::uint8_t Quadra700Machine::read8(std::uint32_t address)
 {
     if (m_overlay && address < static_cast<std::uint32_t>(m_rom.size())) return static_cast<std::uint8_t>(m_rom[address]);
@@ -339,6 +347,7 @@ std::uint8_t Quadra700Machine::read8(std::uint32_t address)
     }
     std::uint8_t directValue = 0;
     if (m_physicalMemoryMap.tryRead8(address, directValue)) return directValue;
+    if (isAliasedRom(address)) return static_cast<std::uint8_t>(m_rom[address - rom24BitBase]);
     if (!m_overlay) {
         if (const auto index = sizingRamIndex(address)) {
             const auto qindex = static_cast<qsizetype>(*index);
@@ -522,6 +531,7 @@ bool Quadra700Machine::unconfiguredRamAccessFaults(std::uint32_t address, std::u
     if ((ramIndex(address) && ramIndex(lastAddress))
         || (sizingRamIndex(address) && sizingRamIndex(lastAddress)))
         return false;
+    if (isAliasedRom(address) && isAliasedRom(lastAddress)) return false;
     return !isAliasedNuBus(address) || !isAliasedNuBus(lastAddress);
 }
 

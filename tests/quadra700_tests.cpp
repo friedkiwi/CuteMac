@@ -121,12 +121,37 @@ bool testRamDoesNotAliasOutsideConfiguredRange()
     return ok;
 }
 
+bool testTwentyFourBitRomAliasYieldsToInstalledRam()
+{
+    using cutemac::machines::quadra700::Quadra700Machine;
+
+    constexpr std::uint32_t romAlias = 0x00800000U;
+    Quadra700Machine fourMiB(4U * 1024U * 1024U);
+    fourMiB.reset();
+    (void)fourMiB.debugRead8(0x40000000U); // Release the reset overlay.
+
+    bool ok = true;
+    ok &= expect(!fourMiB.readPhysical32(romAlias).busError,
+        "Q700 24-bit ROM alias must answer above installed 4 MiB RAM");
+    ok &= expect(fourMiB.debugRead32(romAlias) == fourMiB.debugRead32(0x40800000U),
+        "Q700 24-bit ROM alias must expose the same ROM contents as the high mapping");
+
+    Quadra700Machine sixteenMiB(16U * 1024U * 1024U);
+    sixteenMiB.reset();
+    (void)sixteenMiB.debugRead8(0x40000000U);
+    sixteenMiB.debugWrite32(romAlias, 0x12345678U);
+    ok &= expect(sixteenMiB.debugRead32(romAlias) == 0x12345678U,
+        "Q700 installed RAM must take precedence over the 24-bit ROM alias");
+    return ok;
+}
+
 } // namespace
 
 int main()
 {
     return testVia1TimerCalibrationSequence() && testRtcChipEnableIsActiveLow()
             && testRamDoesNotAliasOutsideConfiguredRange()
+            && testTwentyFourBitRomAliasYieldsToInstalledRam()
         ? 0
         : 1;
 }
