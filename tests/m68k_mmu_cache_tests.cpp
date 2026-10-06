@@ -46,8 +46,16 @@ public:
         write16(address + 2, static_cast<std::uint16_t>(value));
     }
 
+    ReadResult<std::uint32_t> readPhysical32(std::uint32_t address) override
+    {
+        if (faultReads && address == faultAddress) return { 0, true };
+        return { read32(address), false };
+    }
+
     std::array<std::uint8_t, 0x4000> memory {};
     unsigned int reads = 0;
+    std::uint32_t faultAddress = 0;
+    bool faultReads = false;
 };
 
 bool expect(bool condition, const char* message)
@@ -177,6 +185,30 @@ int main()
     core.reset();
     ok &= expect(m68k_get_pmmu_atc_hits() == 0 && m68k_get_pmmu_atc_misses() == 0,
         "CPU reset must flush the ATC and reset its statistics");
+
+    // The Quadra ROM catches transfer errors while sizing RAM and inspects the
+    // native 68040 format-7 frame before returning with RTE.
+    core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68040);
+    m68ki_cpu.pmmu_enabled = 0;
+    bus.write32(0x0008, 0x00000200U); // bus-error vector
+    bus.write16(0x0100, 0x2010U); // MOVE.L (A0),D0
+    bus.write16(0x0200, 0x4e73U); // RTE
+    m68ki_cpu.dar[8] = 0x3000U;
+    m68ki_cpu.dar[15] = 0x3f00U;
+    m68ki_cpu.s_flag = SFLAG_SET;
+    core.setProgramCounter(0x0100U);
+    bus.faultAddress = 0x3000U;
+    bus.faultReads = true;
+    (void)core.stepInstruction();
+    ok &= expect(core.programCounter() == 0x0100U && m68ki_cpu.dar[15] == 0x3f00U,
+        "a 68040 bus-error handler must return through the complete 30-word frame");
+    ok &= expect(bus.read16(0x3ecaU) == 0x7008U
+            && bus.read32(0x3eccU) == 0x3000U
+            && (bus.read16(0x3ed0U) & 0x0107U) == 0x0105U
+            && bus.read32(0x3ed8U) == 0x3000U,
+        "the format-7 frame must report read direction, supervisor data, and fault address");
+    bus.faultReads = false;
+    core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68030);
 
     // A/UX saves a freshly reset 68882 frame through FSAVE (A7). This valid
     // no-update addressing form must write the null frame without changing A7.

@@ -64,7 +64,10 @@ constexpr std::uint8_t bitswapMacAddress(std::uint8_t value)
 
 Quadra700Machine::Quadra700Machine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(std::max<std::size_t>(ramSize, 4U * 1024U * 1024U)), 0)
+    , m_sizingRam(m_ram.size(), 0)
+    , m_sizingRamDirty(m_ram.size(), 0)
     , m_rom(romSize, 0)
+    , m_asc(devices::audio::AppleSoundChip::Model::Enhanced)
     , m_dafb(devices::video::DafbVideo::Variant::Discrete, devices::video::DafbVideo::Monitor::HiResRgb)
 {
     (void)m_rtc.setNvramImagePath(nvramPath);
@@ -219,6 +222,8 @@ void Quadra700Machine::ejectFloppyImage(int drive)
 void Quadra700Machine::reset()
 {
     std::fill(m_ram.begin(), m_ram.end(), 0);
+    std::fill(m_sizingRam.begin(), m_sizingRam.end(), 0);
+    std::fill(m_sizingRamDirty.begin(), m_sizingRamDirty.end(), 0);
     m_scheduler.reset();
     m_scc.reset();
     m_swim.reset();
@@ -243,6 +248,9 @@ void Quadra700Machine::reset()
     m_nubusIrqState = 0xff;
     m_viaCycleRemainder = 0;
     m_via1TimerCalibrationState = 0;
+    m_orwellRegisters.fill(0);
+    m_mcuZeroBaseWrites = 0;
+    m_mcuBanksConfigured = false;
     if (m_romLoaded && m_ram.size() >= 8) {
         writeBigEndian32(m_ram, 0, readBigEndian32(m_rom, 0));
         writeBigEndian32(m_ram, 4, macRomLoadBase + readBigEndian32(m_rom, 4));
@@ -332,8 +340,12 @@ std::uint8_t Quadra700Machine::read8(std::uint32_t address)
     std::uint8_t directValue = 0;
     if (m_physicalMemoryMap.tryRead8(address, directValue)) return directValue;
     if (!m_overlay) {
+        if (const auto index = sizingRamIndex(address)) {
+            const auto qindex = static_cast<qsizetype>(*index);
+            return m_sizingRamDirty[qindex] ? m_sizingRam[qindex] : m_ram[qindex];
+        }
         if (const auto index = ramIndex(address)) return m_ram[static_cast<qsizetype>(*index)];
-        if (address < 0x40000000U) return 0x00;
+        if (address < 0x40000000U) return 0xff;
     }
     if (isDafbVram(address)) return m_dafb.readVram8(address - dafbVramBase);
     if (isDafbRegister(address)) return m_dafb.readRegister8(address - dafbRegisterBase);
@@ -370,6 +382,16 @@ std::uint32_t Quadra700Machine::read32(std::uint32_t address)
 {
     if ((address & 0xf0000000U) == romBase)
         return (static_cast<std::uint32_t>(read16(address)) << 16U) | read16(address + 2);
+    if (isIo(address)) {
+        const auto offset = address & ioOffsetMask;
+        if (offset >= 0xe000 && offset <= 0xe0f8) {
+            const auto index = (offset - 0xe000) >> 1U;
+            return (static_cast<std::uint32_t>(m_orwellRegisters[index]) << 24U)
+                | (static_cast<std::uint32_t>(m_orwellRegisters[index + 1]) << 16U)
+                | (static_cast<std::uint32_t>(m_orwellRegisters[index + 2]) << 8U)
+                | m_orwellRegisters[index + 3];
+        }
+    }
     std::uint32_t directValue = 0;
     if (!m_overlay && m_physicalMemoryMap.tryRead32(address, directValue)) return directValue;
     if (isDafbVram(address)) return m_dafb.readVram32(address - dafbVramBase);
@@ -384,6 +406,12 @@ void Quadra700Machine::write8(std::uint32_t address, std::uint8_t value)
 {
     if (m_physicalMemoryMap.tryWrite8(address, value)) return;
     if (!m_overlay) {
+        if (const auto index = sizingRamIndex(address)) {
+            const auto qindex = static_cast<qsizetype>(*index);
+            m_sizingRam[qindex] = value;
+            m_sizingRamDirty[qindex] = 1;
+            return;
+        }
         if (const auto index = ramIndex(address)) {
             m_ram[static_cast<qsizetype>(*index)] = value;
             return;
@@ -435,10 +463,66 @@ void Quadra700Machine::write32(std::uint32_t address, std::uint32_t value)
     }
 }
 
+cpu::m68k::M68kBus::ReadResult<std::uint8_t> Quadra700Machine::readPhysical8(std::uint32_t address)
+{
+    return { read8(address), unconfiguredRamAccessFaults(address, 1) };
+}
+
+cpu::m68k::M68kBus::ReadResult<std::uint16_t> Quadra700Machine::readPhysical16(std::uint32_t address)
+{
+    return { read16(address), unconfiguredRamAccessFaults(address, 2) };
+}
+
+cpu::m68k::M68kBus::ReadResult<std::uint32_t> Quadra700Machine::readPhysical32(std::uint32_t address)
+{
+    return { read32(address), unconfiguredRamAccessFaults(address, 4) };
+}
+
+bool Quadra700Machine::writePhysical8(std::uint32_t address, std::uint8_t value)
+{
+    if (unconfiguredRamAccessFaults(address, 1)) return false;
+    write8(address, value);
+    return true;
+}
+
+bool Quadra700Machine::writePhysical16(std::uint32_t address, std::uint16_t value)
+{
+    if (unconfiguredRamAccessFaults(address, 2)) return false;
+    write16(address, value);
+    return true;
+}
+
+bool Quadra700Machine::writePhysical32(std::uint32_t address, std::uint32_t value)
+{
+    if (unconfiguredRamAccessFaults(address, 4)) return false;
+    write32(address, value);
+    return true;
+}
+
 std::optional<std::size_t> Quadra700Machine::ramIndex(std::uint32_t address) const
 {
     if (address < static_cast<std::uint32_t>(m_ram.size())) return address;
     return std::nullopt;
+}
+
+std::optional<std::size_t> Quadra700Machine::sizingRamIndex(std::uint32_t address) const
+{
+    const auto size = static_cast<std::uint32_t>(m_sizingRam.size());
+    if (m_mcuZeroBaseWrites >= 2 && (m_mcuZeroBaseWrites & 1U) == 0 && size != 0
+        && address >= 0x30000000U && address < 0x40000000U)
+        return address % size;
+    return std::nullopt;
+}
+
+bool Quadra700Machine::unconfiguredRamAccessFaults(std::uint32_t address, std::uint32_t size) const
+{
+    if (m_overlay || m_mcuBanksConfigured || address >= romBase || size == 0) return false;
+    const auto lastAddress = address + size - 1;
+    if (lastAddress < address || lastAddress >= romBase) return true;
+    if ((ramIndex(address) && ramIndex(lastAddress))
+        || (sizingRamIndex(address) && sizingRamIndex(lastAddress)))
+        return false;
+    return !isAliasedNuBus(address) || !isAliasedNuBus(lastAddress);
 }
 
 void Quadra700Machine::rebuildPhysicalMemoryMap()
@@ -513,6 +597,8 @@ bool Quadra700Machine::isDafbVram(std::uint32_t address) const
 std::uint8_t Quadra700Machine::readIo8(std::uint32_t address)
 {
     const auto offset = address & ioOffsetMask;
+    if (offset >= 0xe000 && offset < 0xe100)
+        return m_orwellRegisters[(offset - 0xe000) >> 1U];
     if (offset < 0x2000) return m_via1.readRegister(wordHandlerRegister(offset));
     if (offset >= 0x2000 && offset < 0x4000) return m_via2.readRegister(wordHandlerRegister(offset - 0x2000));
     if (offset >= 0x8000 && offset < 0x8008) {
@@ -545,6 +631,17 @@ std::uint8_t Quadra700Machine::readIo8(std::uint32_t address)
 void Quadra700Machine::writeIo8(std::uint32_t address, std::uint8_t value)
 {
     const auto offset = address & ioOffsetMask;
+    if (offset >= 0xe000 && offset < 0xe100)
+        m_orwellRegisters[(offset - 0xe000) >> 1U] = value;
+    if (offset == 0xe000) {
+        // Each odd write installs the temporary zero-based map used for alias
+        // and write/read bank-presence checks. Each even write clears it so
+        // absent-bank TEA is active during the following destructive pass.
+        if (value == 0 && m_mcuZeroBaseWrites != 0xff) ++m_mcuZeroBaseWrites;
+        m_mcuBanksConfigured = (m_mcuZeroBaseWrites & 1U) != 0;
+        if (value == 0 && !m_mcuBanksConfigured)
+            std::fill(m_sizingRamDirty.begin(), m_sizingRamDirty.end(), 0);
+    }
     if (offset < 0x2000) {
         const auto reg = wordHandlerRegister(offset);
         observeVia1TimerCalibrationWrite(reg, value);

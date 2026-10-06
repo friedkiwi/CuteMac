@@ -107,6 +107,12 @@ public:
     void write8(std::uint32_t address, std::uint8_t value) override;
     void write16(std::uint32_t address, std::uint16_t value) override;
     void write32(std::uint32_t address, std::uint32_t value) override;
+    [[nodiscard]] ReadResult<std::uint8_t> readPhysical8(std::uint32_t address) override;
+    [[nodiscard]] ReadResult<std::uint16_t> readPhysical16(std::uint32_t address) override;
+    [[nodiscard]] ReadResult<std::uint32_t> readPhysical32(std::uint32_t address) override;
+    bool writePhysical8(std::uint32_t address, std::uint8_t value) override;
+    bool writePhysical16(std::uint32_t address, std::uint16_t value) override;
+    bool writePhysical32(std::uint32_t address, std::uint32_t value) override;
 
     [[nodiscard]] bool installNuBusCard(int slot, std::shared_ptr<devices::nubus::NuBusCard> card);
     [[nodiscard]] QString debugCpuArchitecture() const override;
@@ -140,11 +146,15 @@ private:
     void advanceDevices(int cpuCycles);
     void observeVia1TimerCalibrationWrite(std::uint8_t reg, std::uint8_t value);
     [[nodiscard]] std::optional<std::size_t> ramIndex(std::uint32_t address) const;
+    [[nodiscard]] std::optional<std::size_t> sizingRamIndex(std::uint32_t address) const;
+    [[nodiscard]] bool unconfiguredRamAccessFaults(std::uint32_t address, std::uint32_t size) const;
     [[nodiscard]] bool isAliasedNuBus(std::uint32_t address) const;
     void rebuildPhysicalMemoryMap();
 
     cpu::m68k::M68kCpuCore m_cpu;
     QVector<std::uint8_t> m_ram;
+    QVector<std::uint8_t> m_sizingRam;
+    QVector<std::uint8_t> m_sizingRamDirty;
     QByteArray m_rom;
     devices::via6522::Via6522 m_via1;
     devices::via6522::Via6522 m_via2;
@@ -170,6 +180,9 @@ private:
     std::uint8_t m_nubusIrqState = 0xff;
     int m_viaCycleRemainder = 0;
     std::uint8_t m_via1TimerCalibrationState = 0;
+    std::array<std::uint8_t, 0x80> m_orwellRegisters {};
+    std::uint8_t m_mcuZeroBaseWrites = 0;
+    bool m_mcuBanksConfigured = false;
 };
 
 } // namespace cutemac::machines::quadra700

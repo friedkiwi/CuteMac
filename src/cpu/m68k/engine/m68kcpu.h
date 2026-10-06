@@ -1876,6 +1876,35 @@ static inline void m68ki_stack_frame_1011(uint sr, uint vector, uint pc,
 	m68ki_push_16(sr);
 }
 
+/* Format 7 stack frame (68040 access error), 30 words. */
+static inline void m68ki_stack_frame_0111(uint sr, uint vector, uint pc,
+	uint fault_address, uint ssw)
+{
+	/* Internal registers and push data, 18 words. */
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+	m68ki_fake_push_32();
+
+	/* Data fault address and three writeback-status words. */
+	m68ki_push_32(fault_address);
+	m68ki_push_16(0);
+	m68ki_push_16(0);
+	m68ki_push_16(0);
+
+	/* Special status, effective address, format/vector, PC and SR. */
+	m68ki_push_16(ssw);
+	m68ki_push_32(fault_address);
+	m68ki_push_16(0x7000 | (vector << 2));
+	m68ki_push_32(pc);
+	m68ki_push_16(sr);
+}
+
 
 /* Used for Group 2 exceptions.
  * These stack a type 2 frame on the 020.
@@ -1976,7 +2005,6 @@ static inline void m68ki_exception_bus_error(void)
 	 */
 	if(CPU_RUN_MODE == RUN_MODE_BERR_AERR_RESET_WSF)
 	{
-		m68k_read_memory_8(0x00ffff01);
 		CPU_STOPPED = STOP_LEVEL_HALT;
 		return;
 	}
@@ -1991,7 +2019,15 @@ static inline void m68ki_exception_bus_error(void)
 
 	uint sr = m68ki_init_exception();
 
-	if (CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
+	if (CPU_TYPE_IS_040_PLUS(CPU_TYPE))
+	{
+		uint ssw = (m68ki_cpu.mmu_fault_is_mmu ? 0x0400U : 0)
+			| (m68ki_cpu.mmu_fault_rw ? 0x0100U : 0)
+			| (m68ki_cpu.mmu_fault_fc & 7U);
+		m68ki_stack_frame_0111(sr, EXCEPTION_BUS_ERROR, REG_PPC,
+			m68ki_cpu.mmu_fault_address, ssw);
+	}
+	else if (CPU_TYPE_IS_EC020_PLUS(CPU_TYPE))
 	{
 		uint ssw = 0x0100U | (m68ki_cpu.mmu_fault_rw ? 0x0040U : 0)
 			| (m68ki_cpu.mmu_fault_fc & 7U);

@@ -29467,6 +29467,16 @@ rte_loop:
 				CPU_INSTR_MODE = INSTRUCTION_YES;
 				CPU_RUN_MODE = RUN_MODE_NORMAL;
 				return;
+			case 7: /* 68040 access error */
+				new_sr = m68ki_pull_16();
+				new_pc = m68ki_pull_32();
+				m68ki_fake_pull_16(); /* format word */
+				REG_A[7] = MASK_OUT_ABOVE_32(REG_A[7] + 52);
+				m68ki_jump(new_pc);
+				m68ki_set_sr(new_sr);
+				CPU_INSTR_MODE = INSTRUCTION_YES;
+				CPU_RUN_MODE = RUN_MODE_NORMAL;
+				return;
 			case 10: /* 68020/68030 short access fault (format A) */
 				new_sr = m68ki_pull_16();
 				new_pc = m68ki_pull_32();
