@@ -778,6 +778,8 @@ void Quadra700Machine::updateViaInputs()
 
 void Quadra700Machine::advanceDevices(int cpuCycles)
 {
+    // The Quadra 700 clocks its NCR53C96 at the 25 MHz CPU clock.
+    m_scsi.tick(static_cast<std::uint32_t>(cpuCycles));
     m_scc.tick(cpuCycles);
     m_asc.tick(static_cast<std::uint64_t>(cpuCycles));
     m_adbTransceiver.tick(cpuCycles);

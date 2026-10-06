@@ -10,6 +10,7 @@ constexpr std::uint8_t interruptReset = 0x80;
 constexpr std::uint8_t interruptDisconnected = 0x20;
 constexpr std::uint8_t interruptService = 0x10;
 constexpr std::uint8_t interruptSuccess = 0x08;
+constexpr std::uint32_t busResetDelayCycles = 130;
 }
 
 void Ncr53c94::reset()
@@ -20,6 +21,7 @@ void Ncr53c94::reset()
     m_targetId = 0; m_status = m_interruptStatus = m_sequenceStep = 0;
     m_scsiStatus = m_message = 0;
     m_dataIn = m_dataOutPhase = m_commandPhase = m_dmaActive = false;
+    m_busResetCycles = 0;
     m_controllerCommandCounts.fill(0);
     m_scsiCommandCounts.fill(0);
 }
@@ -90,6 +92,18 @@ void Ncr53c94::raiseInterrupt(std::uint8_t cause)
 {
     m_interruptStatus = cause;
     m_status |= interruptPending;
+}
+
+void Ncr53c94::tick(std::uint32_t controllerCycles)
+{
+    if (m_busResetCycles == 0) return;
+    if (controllerCycles < m_busResetCycles) {
+        m_busResetCycles -= controllerCycles;
+        return;
+    }
+    m_busResetCycles = 0;
+    // Configuration register bit 6 disables the SCSI reset interrupt.
+    if ((m_registers[8] & 0x40U) == 0) raiseInterrupt(interruptReset);
 }
 
 int Ncr53c94::commandLength(std::uint8_t opcode) const
@@ -171,7 +185,12 @@ void Ncr53c94::executeCommand(std::uint8_t command)
     switch (command & 0x7fU) {
     case 0x01: m_fifo.clear(); break;
     case 0x02: { const auto targets = m_targets; reset(); m_targets = targets; break; }
-    case 0x03: raiseInterrupt(interruptReset); break;
+    case 0x03:
+        // The 53C9x keeps RST asserted for 130 controller clocks before it
+        // reports completion.  In particular, the interrupt is not visible
+        // during the command-register write that starts the reset.
+        m_busResetCycles = busResetDelayCycles;
+        break;
     case 0x10:
         if (m_commandPhase && !dma && !m_fifo.isEmpty()
             && m_fifo.size() >= commandLength(static_cast<std::uint8_t>(m_fifo.front()))) {

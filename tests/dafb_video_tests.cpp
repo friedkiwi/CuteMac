@@ -137,6 +137,27 @@ bool testTurboScsiRegisterRouting()
     return ok;
 }
 
+bool testTurboScsiBusResetTiming()
+{
+    using cutemac::devices::scsi::ncr53c94::Ncr53c94;
+    bool ok = true;
+    Ncr53c94 scsi;
+    scsi.reset();
+    scsi.writeRegister(3, 0x03);
+    ok &= expect(!scsi.interruptActive(), "NCR53C9x bus reset interrupt must not be immediate");
+    scsi.tick(129);
+    ok &= expect(!scsi.interruptActive(), "NCR53C9x bus reset must last 130 controller clocks");
+    scsi.tick(1);
+    ok &= expect(scsi.interruptActive(), "NCR53C9x bus reset completion must raise an interrupt");
+    ok &= expect(scsi.readRegister(5) == 0x80, "NCR53C9x reset interrupt cause must be reported");
+
+    scsi.writeRegister(8, 0x40);
+    scsi.writeRegister(3, 0x03);
+    scsi.tick(130);
+    ok &= expect(!scsi.interruptActive(), "NCR53C9x configuration must be able to suppress reset interrupts");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -146,5 +167,6 @@ int main()
     ok &= testIndexedScanoutAndClut();
     ok &= testVblankInterrupt();
     ok &= testTurboScsiRegisterRouting();
+    ok &= testTurboScsiBusResetTiming();
     return ok ? 0 : 1;
 }

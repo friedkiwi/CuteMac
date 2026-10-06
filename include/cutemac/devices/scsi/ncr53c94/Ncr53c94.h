@@ -35,6 +35,7 @@ public:
     void writeRegister(std::uint8_t index, std::uint8_t value);
     [[nodiscard]] std::uint16_t readDmaWord();
     void writeDmaWord(std::uint16_t value);
+    void tick(std::uint32_t controllerCycles);
     [[nodiscard]] bool interruptActive() const { return (m_status & 0x80U) != 0; }
     [[nodiscard]] bool dmaRequest() const { return m_dmaActive && m_transferCount != 0
         && (m_dataIn || m_dataOutPhase || m_commandPhase); }
@@ -70,6 +71,7 @@ private:
     bool m_dataOutPhase = false;
     bool m_commandPhase = false;
     bool m_dmaActive = false;
+    std::uint32_t m_busResetCycles = 0;
     std::array<std::uint64_t, 128> m_controllerCommandCounts {};
     std::array<std::uint64_t, 256> m_scsiCommandCounts {};
 };
