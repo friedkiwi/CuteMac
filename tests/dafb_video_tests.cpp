@@ -110,6 +110,15 @@ bool testVblankInterrupt()
     dafb.tick(2'000'000);
     ok &= expect(dafb.readRegister32(0x108) == 0x04,
         "DAFB interrupt enable must suppress disabled VBL events");
+    dafb.writeRegister32(0x10c, 0);
+    ok &= expect(!irq && dafb.readRegister32(0x108) == 0,
+        "DAFB cursor clear register must acknowledge writes as well as reads");
+
+    dafb.writeRegister32(0x104, 0x01);
+    dafb.tick(2'000'000);
+    dafb.writeRegister32(0x114, 0);
+    ok &= expect(!irq && dafb.readRegister32(0x108) == 0,
+        "DAFB VBL clear register must acknowledge writes as well as reads");
     return ok;
 }
 

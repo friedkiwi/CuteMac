@@ -318,9 +318,12 @@ void DafbVideo::writeSwatch(std::uint32_t registerOffset, std::uint32_t value)
         recalcIrq();
         return;
     }
-    if (registerOffset == 0x10) {
-        m_interruptStatus = 0;
-        recalcIrq();
+    if (registerOffset == 0x0c) {
+        setInterrupt(0x04, false);
+        return;
+    }
+    if (registerOffset == 0x14) {
+        setInterrupt(0x01, false);
         return;
     }
     if (registerOffset == 0x20) {
