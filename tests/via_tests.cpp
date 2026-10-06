@@ -31,6 +31,21 @@ int main()
     via.writeRegister(2, 0x8f);
     ok &= expect((via.readRegister(0) & 0x08) != 0, "PB3 output latch must take effect after changing DDRB to output");
 
+    via.setCb2(false);
+    ok &= expect((via.readRegister(13) & 0x08) != 0, "CB2 falling edge must set IFR3");
+    (void)via.readRegister(0);
+    ok &= expect((via.readRegister(13) & 0x08) == 0,
+        "ORB read must acknowledge CB2 in handshake input mode");
+    via.setCb2(true);
+    via.writeRegister(12, 0x20); // CB2 independent interrupt input, negative edge.
+    via.writeRegister(14, 0x88); // Enable CB2 interrupts.
+    via.setCb2(false);
+    (void)via.readRegister(0);
+    ok &= expect((via.readRegister(13) & 0x08) != 0 && via.interruptActive(),
+        "ORB read must preserve CB2 in independent interrupt input mode");
+    via.writeRegister(13, 0x08);
+    ok &= expect(!via.interruptActive(), "IFR write must acknowledge independent CB2 interrupt");
+
     via.writeRegister(14, 0x82); // Enable the Mac CA1 vertical-blank interrupt.
     via.tick(130560);
     ok &= expect((via.readRegister(13) & 0x02) != 0, "VBL must assert the VIA CA1 interrupt");

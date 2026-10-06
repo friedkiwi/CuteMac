@@ -16,6 +16,7 @@ constexpr std::uint8_t timer2CounterLow = 8;
 constexpr std::uint8_t timer2CounterHigh = 9;
 constexpr std::uint8_t auxiliaryControl = 11;
 constexpr std::uint8_t shiftRegister = 10;
+constexpr std::uint8_t peripheralControl = 12;
 constexpr std::uint8_t interruptFlag = 13;
 constexpr std::uint8_t interruptEnable = 14;
 constexpr std::uint8_t registerA = 15;
@@ -65,7 +66,10 @@ std::uint8_t Via6522::readRegister(std::uint8_t index)
 {
     index &= 0x0f;
     if (index == registerB) {
-        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~(cb1InterruptBit | cb2InterruptBit));
+        m_registers[interruptFlag] &= static_cast<std::uint8_t>(~cb1InterruptBit);
+        const auto cb2Mode = static_cast<std::uint8_t>((m_registers[peripheralControl] >> 5U) & 7U);
+        if (cb2Mode != 1U && cb2Mode != 3U)
+            m_registers[interruptFlag] &= static_cast<std::uint8_t>(~cb2InterruptBit);
         return portB();
     }
     if (index == registerAHandshake) {
