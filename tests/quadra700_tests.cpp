@@ -32,6 +32,41 @@ bool testVia1TimerCalibrationSequence()
     return ok;
 }
 
+bool testRtcChipEnableIsActiveLow()
+{
+    using cutemac::machines::quadra700::Quadra700Machine;
+
+    Quadra700Machine machine(4U * 1024U * 1024U);
+    machine.reset();
+
+    constexpr std::uint32_t via1 = 0x50000000U;
+    constexpr std::uint32_t orb = via1;
+    constexpr std::uint32_t ddrb = via1 + 0x0400U;
+    const auto writePins = [&machine](std::uint8_t value) { machine.debugWrite8(orb, value); };
+    const auto sendByte = [&writePins](std::uint8_t value) {
+        for (int bit = 7; bit >= 0; --bit) {
+            const auto data = static_cast<std::uint8_t>((value >> bit) & 1U);
+            writePins(data); // PB2 low selects the RTC; PB1 low is the clock's idle phase.
+            writePins(static_cast<std::uint8_t>(data | 0x02U));
+        }
+    };
+
+    machine.debugWrite8(ddrb, 0x07U);
+    writePins(0x07U); // PB2 high deselects the RTC.
+    writePins(0x00U); // Begin a transaction with PB2 low.
+    sendByte(0xc1U); // Read blank PRAM byte 0x10.
+    std::uint8_t value = 0;
+    for (int bit = 0; bit < 8; ++bit) {
+        writePins(0x00U);
+        writePins(0x02U);
+        value = static_cast<std::uint8_t>((value << 1U) | (machine.debugRead8(orb) & 1U));
+    }
+    writePins(0x07U);
+
+    return expect(value == 0x00U,
+        "Q700 VIA1 PB2 low must select the RTC and expose serial PRAM data");
+}
+
 bool testRamDoesNotAliasOutsideConfiguredRange()
 {
     using cutemac::machines::quadra700::Quadra700Machine;
@@ -90,5 +125,8 @@ bool testRamDoesNotAliasOutsideConfiguredRange()
 
 int main()
 {
-    return testVia1TimerCalibrationSequence() && testRamDoesNotAliasOutsideConfiguredRange() ? 0 : 1;
+    return testVia1TimerCalibrationSequence() && testRtcChipEnableIsActiveLow()
+            && testRamDoesNotAliasOutsideConfiguredRange()
+        ? 0
+        : 1;
 }

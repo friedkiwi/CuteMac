@@ -104,7 +104,7 @@ Quadra700Machine::Quadra700Machine(std::size_t ramSize, const QString& nvramPath
     });
     m_via1.setPortBChangedCallback([this](std::uint8_t value, std::uint8_t ddr) {
         m_adbTransceiver.setViaState(static_cast<std::uint8_t>((value >> 4) & 3U));
-        m_rtc.setPins((value & 0x04U) != 0, (value & 0x02U) != 0, (value & 0x01U) != 0 && (ddr & 0x01U) != 0);
+        m_rtc.setPins((value & 0x04U) == 0, (value & 0x02U) != 0, (value & 0x01U) != 0 && (ddr & 0x01U) != 0);
         updateViaInputs();
     });
     m_via1.setShiftRegisterWriteCallback([this](std::uint8_t value) { m_adbTransceiver.shiftRegisterWritten(value); });
