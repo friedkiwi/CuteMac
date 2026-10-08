@@ -46,6 +46,7 @@ video/NuBus, SCSI, floppy, VIA/ADB/audio, or machine-specific chipset code.
 - Desktop sessions run emulation through `SessionRunner` off the Qt event thread. WebAssembly uses the same runner API in single-threaded host-frame mode.
 - Runtime speed is profile-controlled with `[runtime] speed = "realtime"|"unlimited"` and can change without resetting the guest. Desktop unlimited mode removes throttling; wasm unlimited mode uses a bounded host-frame work budget so the browser remains responsive. New profiles default to unlimited.
 - Unlimited desktop execution must leave a deterministic host-service window between emulation quanta. A scheduler yield alone does not prevent the worker from starving the session mutex and makes Qt input/framebuffer access unreliable.
+- Keep that window at least 1 ms on desktop: a 50 us wait let the Q700 worker reacquire the session mutex before the GUI woke, blocking status, input, and control commands for tens of seconds.
 - While interactive host input is held, temporarily pace unlimited execution at realtime so a normal wall-clock click or keypress does not span thousands of guest VBLs and trigger Finder auto-repeat. Queue the release before removing this temporary throttle, and retain realtime pacing through the host double-click interval so the guest's `DoubleTime` window does not expire between clicks; do not change the profile's configured speed.
 - Timestamp host input with the machine cycle counter and deliver it through `MachineScheduler`; preserve button transitions long enough for guest VBL sampling.
 
