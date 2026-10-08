@@ -217,6 +217,40 @@ bool testTurboScsiRead6DmaFifoPolling()
     return ok;
 }
 
+bool testTurboScsiInquiryPioTail()
+{
+    using cutemac::devices::scsi::ncr53c94::Ncr53c94;
+    Ncr53c94 scsi;
+    scsi.reset();
+    scsi.attachTarget(0, std::make_shared<ProbeTarget>());
+    scsi.writeRegister(4, 0);
+    for (const auto byte : QByteArray::fromHex("120000002400"))
+        scsi.writeRegister(2, static_cast<std::uint8_t>(byte));
+    scsi.writeRegister(3, 0x41); // Select 36-byte INQUIRY
+    (void)scsi.readRegister(5);
+    for (int block = 0; block < 2; ++block) {
+        scsi.writeRegister(0, 16);
+        scsi.writeRegister(1, 0);
+        scsi.writeRegister(3, 0x90); // DMA Transfer Information
+        for (int word = 0; word < 8; ++word) (void)scsi.readDmaWord();
+        (void)scsi.readRegister(5);
+    }
+    bool ok = expect(scsi.debugState().dataPosition == 32 && scsi.debugState().dataIn,
+        "INQUIRY must retain its four-byte programmed-I/O tail after two DMA blocks");
+    for (int byte = 32; byte < 36; ++byte) {
+        scsi.writeRegister(3, 0x10); // one non-DMA Transfer Information
+        ok &= expect(scsi.readRegister(7) == 1 && scsi.interruptActive(),
+            "each programmed-I/O INQUIRY byte must appear in FIFO with one service interrupt");
+        ok &= expect(scsi.readRegister(5) == 0x10,
+            "programmed-I/O data-in must report Bus Service");
+        ok &= expect(scsi.readRegister(2) == byte && !scsi.interruptActive(),
+            "reading the staged byte must not raise a second service interrupt");
+    }
+    ok &= expect((scsi.readRegister(4) & 7U) == 3U && !scsi.debugState().dataIn,
+        "the final INQUIRY byte must leave the controller in STATUS phase");
+    return ok;
+}
+
 bool testTurboScsiDelayedDmaSelectCdb()
 {
     using cutemac::devices::scsi::ncr53c94::Ncr53c94;
@@ -274,6 +308,7 @@ int main()
     ok &= testTurboScsiRegisterRouting();
     ok &= testTurboScsiBusResetTiming();
     ok &= testTurboScsiRead6DmaFifoPolling();
+    ok &= testTurboScsiInquiryPioTail();
     ok &= testTurboScsiDelayedDmaSelectCdb();
     ok &= testTurboScsiSplitDmaSelectCdb();
     return ok ? 0 : 1;

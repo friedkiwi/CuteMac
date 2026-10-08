@@ -49,9 +49,6 @@ std::uint8_t Ncr53c94::readRegister(std::uint8_t index)
             const auto value = static_cast<std::uint8_t>(m_fifo.front());
             m_fifo.remove(0, 1);
             if (m_dmaActive && m_transferCount) --m_transferCount;
-            if (m_dataIn && m_fifo.isEmpty()) {
-                if (m_dataPosition >= m_data.size()) completeTransfer();
-            }
             return value;
         }
     case 3: return m_registers[3];
@@ -229,7 +226,12 @@ void Ncr53c94::executeCommand(std::uint8_t command)
             m_fifo.append(m_data.constData() + m_dataPosition, count);
             m_dataPosition += count;
             m_dmaActive = false;
-            m_status = static_cast<std::uint8_t>((m_status & 0xe8U) | 1U);
+            // The bus-service interrupt belongs to this received byte. On
+            // the last byte the target already requests the STATUS phase;
+            // draining the host FIFO must not create a second interrupt.
+            const bool lastByte = m_dataPosition >= m_data.size();
+            m_status = static_cast<std::uint8_t>((m_status & 0xe8U) | (lastByte ? 3U : 1U));
+            if (lastByte) m_dataIn = false;
             raiseInterrupt(interruptService);
         } else {
             m_transferCount = dma ? (m_startTransferCount ? m_startTransferCount : 0x10000U) : 0;
