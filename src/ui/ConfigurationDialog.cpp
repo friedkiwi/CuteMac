@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHeaderView>
+#include <QHash>
 #include <QInputMethodEvent>
 #include <QHBoxLayout>
 #include <QLineEdit>
@@ -54,6 +55,8 @@ public:
     QWidget* nubusTab = nullptr;
     QTableWidget* nubus = nullptr;
     QList<config::NuBusDeviceConfiguration> nubusDevices;
+    QHash<QString, QList<config::NuBusDeviceConfiguration>> nubusDevicesByMachine;
+    QString currentMachineId;
 };
 
 namespace {
@@ -569,6 +572,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->name = new QLineEdit(m_impl->original.profileName);
     form->addRow(QStringLiteral("Name"), m_impl->name);
     m_impl->machine = new QComboBox;
+    m_impl->machine->setObjectName(QStringLiteral("machineSelector"));
     for (const auto& machine : machines::MachineCatalog::supportedMachines()) {
         m_impl->machine->addItem(machine.displayName, machine.id);
     }
@@ -576,6 +580,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     form->addRow(QStringLiteral("Machine"), m_impl->machine);
 
     m_impl->nvram = new QLineEdit(m_impl->original.nvramPath);
+    m_impl->nvram->setObjectName(QStringLiteral("nvramPath"));
     auto* nvramBrowse = new QPushButton(QStringLiteral("Browse..."));
     auto* nvramNew = new QPushButton(QStringLiteral("New..."));
     auto* nvramZap = new QPushButton(QStringLiteral("Zap..."));
@@ -586,6 +591,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     nvramRow->addWidget(nvramZap);
     form->addRow(QStringLiteral("NVRAM image"), nvramRow);
     m_impl->ram = new QComboBox;
+    m_impl->ram->setObjectName(QStringLiteral("ramSelector"));
     form->addRow(QStringLiteral("RAM"), m_impl->ram);
     m_impl->speed = new QComboBox;
     m_impl->speed->addItem(QStringLiteral("Unlimited"), static_cast<int>(config::RuntimeSpeed::Unlimited));
@@ -593,11 +599,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->speed->setCurrentIndex(m_impl->speed->findData(static_cast<int>(m_impl->original.runtimeSpeed)));
     form->addRow(QStringLiteral("Emulation speed"), m_impl->speed);
     m_impl->skipRamTest = new QCheckBox;
+    m_impl->skipRamTest->setObjectName(QStringLiteral("skipRamPatternTest"));
     m_impl->skipRamTest->setChecked(m_impl->original.skipRamPatternTest);
     form->addRow(QStringLiteral("Skip RAM pattern test"), m_impl->skipRamTest);
     m_impl->tabs->addTab(general, QStringLiteral("General"));
 
     m_impl->serialTab = new QWidget;
+    m_impl->serialTab->setObjectName(QStringLiteral("serialTab"));
     auto* serialForm = new QFormLayout(m_impl->serialTab);
     const std::array<QString, 2> portNames { QStringLiteral("Modem port"), QStringLiteral("Printer port") };
     for (int channel = 0; channel < 2; ++channel) {
@@ -650,6 +658,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->tabs->addTab(m_impl->serialTab, QStringLiteral("Serial"));
 
     m_impl->iwmTab = new QWidget;
+    m_impl->iwmTab->setObjectName(QStringLiteral("floppyTab"));
     auto* iwmForm = new QFormLayout(m_impl->iwmTab);
     auto configuredFloppy = [this](int drive) {
         if (drive >= 0 && drive < m_impl->original.iwmDevices.size()) return m_impl->original.iwmDevices[drive];
@@ -683,11 +692,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             if (!path.isEmpty()) m_impl->floppy[drive]->setText(path);
         });
     }
-    m_impl->tabs->addTab(m_impl->iwmTab, QStringLiteral("IWM"));
+    m_impl->tabs->addTab(m_impl->iwmTab, QStringLiteral("Floppy"));
 
     m_impl->scsiTab = new QWidget;
+    m_impl->scsiTab->setObjectName(QStringLiteral("scsiTab"));
     auto* scsiLayout = new QVBoxLayout(m_impl->scsiTab);
     m_impl->scsi = new NonEditableTableWidget(0, 4);
+    m_impl->scsi->setObjectName(QStringLiteral("scsiDevices"));
     m_impl->scsi->setHorizontalHeaderLabels({ QStringLiteral("ID"), QStringLiteral("Device"), QStringLiteral("Image"), QStringLiteral("Access") });
     m_impl->scsi->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
     m_impl->scsi->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -708,8 +719,10 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     m_impl->tabs->addTab(m_impl->scsiTab, QStringLiteral("SCSI"));
 
     m_impl->nubusTab = new QWidget;
+    m_impl->nubusTab->setObjectName(QStringLiteral("nubusTab"));
     auto* nubusLayout = new QVBoxLayout(m_impl->nubusTab);
     m_impl->nubus = new NonEditableTableWidget(0, 2);
+    m_impl->nubus->setObjectName(QStringLiteral("nubusCards"));
     m_impl->nubus->setHorizontalHeaderLabels({ QStringLiteral("Slot"), QStringLiteral("Card") });
     m_impl->nubus->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_impl->nubus->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -749,6 +762,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         access->addItem(QStringLiteral("Read/write"), false);
         access->addItem(QStringLiteral("Read-only"), true);
         access->setCurrentIndex(device.readOnly ? 1 : 0);
+        const auto updateAccess = [type, access]() {
+            const bool cdRom = type->currentData().toInt() == static_cast<int>(config::ScsiDeviceType::CdRom);
+            if (cdRom) access->setCurrentIndex(1);
+            access->setEnabled(!cdRom);
+        };
+        connect(type, &QComboBox::currentIndexChanged, this, updateAccess);
+        updateAccess();
         m_impl->scsi->setCellWidget(row, 3, access);
     };
     const auto firstAvailableScsiId = [this](int preferred) {
@@ -766,7 +786,8 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
     for (const auto& device : m_impl->original.scsiDevices) addScsiRow(device);
 
     m_impl->nubusDevices = m_impl->original.nubusDevices;
-    const auto refreshNuBus = [this]() {
+    m_impl->currentMachineId = m_impl->original.machineId;
+    const auto refreshNuBus = [this, addNuBus]() {
         m_impl->nubus->setRowCount(0);
         for (const auto& device : m_impl->nubusDevices) {
             const int row = m_impl->nubus->rowCount();
@@ -774,11 +795,21 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             m_impl->nubus->setItem(row, 0, new QTableWidgetItem(QString::number(device.slot)));
             m_impl->nubus->setItem(row, 1, new QTableWidgetItem(nubusCardName(device.type)));
         }
+        const auto availableSlots = machines::MachineCatalog::nubusSlots(m_impl->machine->currentData().toString());
+        addNuBus->setEnabled(m_impl->nubusDevices.size() < availableSlots.size());
     };
     refreshNuBus();
 
-    const auto updateCapabilities = [this]() {
+    const auto updateCapabilities = [this, nvramBrowse, nvramNew, nvramZap, refreshNuBus]() {
         const auto machineId = m_impl->machine->currentData().toString();
+        if (machineId != m_impl->currentMachineId) {
+            m_impl->nubusDevicesByMachine.insert(m_impl->currentMachineId, m_impl->nubusDevices);
+            m_impl->nubusDevices = m_impl->nubusDevicesByMachine.value(machineId);
+            m_impl->currentMachineId = machineId;
+            refreshNuBus();
+        }
+        const int selectedRam = m_impl->ram->count() == 0
+            ? m_impl->original.ramSizeKiB : m_impl->ram->currentData().toInt();
         const auto profiles = machines::MachineCatalog::supportedMachines();
         const auto it = std::find_if(profiles.cbegin(), profiles.cend(), [&](const auto& profile) { return profile.id == machineId; });
         const auto devices = it == profiles.cend() ? QStringList {} : it->reusableDevices;
@@ -792,6 +823,12 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->scsiTab), scsi);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->nubusTab), nubus);
         m_impl->tabs->setTabVisible(m_impl->tabs->indexOf(m_impl->serialTab), serial);
+        const bool rtc = devices.contains(QStringLiteral("device.rtc.pram"));
+        m_impl->nvram->setEnabled(rtc);
+        nvramBrowse->setEnabled(rtc);
+        nvramNew->setEnabled(rtc);
+        nvramZap->setEnabled(rtc);
+        m_impl->skipRamTest->setEnabled(it != profiles.cend() && !it->ramPatternPatchId.isEmpty());
         m_impl->ram->clear();
         if (it != profiles.cend()) {
             for (const auto sizeKiB : it->supportedRamSizesKiB) {
@@ -801,7 +838,7 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
                 m_impl->ram->addItem(label, sizeKiB);
             }
         }
-        auto ramIndex = m_impl->ram->findData(m_impl->original.ramSizeKiB);
+        auto ramIndex = m_impl->ram->findData(selectedRam);
         if (ramIndex < 0) ramIndex = 0;
         m_impl->ram->setCurrentIndex(ramIndex);
     };
@@ -886,9 +923,11 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         return availableSlots.isEmpty() ? -1 : availableSlots.first();
     };
     const auto warnOnboardVideo = [this]() {
-        if (m_impl->machine->currentData().toString() != QStringLiteral("quadra-700")) return;
-        QMessageBox::information(this, QStringLiteral("Quadra 700 video"),
-            QStringLiteral("The Quadra 700 already has built-in DAFB video. A NuBus video card is an additional display; the emulator window currently shows the built-in display only."));
+        const auto machine = machines::MachineCatalog::find(m_impl->machine->currentData().toString());
+        if (!machine || machine->onboardVideoName.isEmpty()) return;
+        QMessageBox::information(this, QStringLiteral("Built-in video"),
+            QStringLiteral("%1 already has built-in %2 video. A NuBus video card is an additional display; the emulator window currently shows the built-in display only.")
+                .arg(machine->displayName, machine->onboardVideoName));
     };
     connect(addCuteMacVideo, &QAction::triggered, this, [this, refreshNuBus, firstAvailableNuBusSlot, warnOnboardVideo]() {
         warnOnboardVideo();
@@ -951,7 +990,9 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             QMessageBox::warning(this, windowTitle(), QStringLiteral("Profile name is required."));
             return;
         }
-        for (int channel = 0; channel < 2; ++channel) {
+        const auto machineId = m_impl->machine->currentData().toString();
+        const bool serialAvailable = machines::MachineCatalog::hasDevicePrefix(machineId, QStringLiteral("device.scc."));
+        for (int channel = 0; serialAvailable && channel < 2; ++channel) {
             if (m_impl->serialDevice[channel]->currentData().toInt() < 0) continue;
             auto serial = m_impl->serialConfiguration[channel];
             serial.channel = channel;
@@ -964,35 +1005,12 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
                 return;
             }
         }
-        QSet<int> ids;
-        for (int row = 0; row < m_impl->scsi->rowCount(); ++row) {
-            const int id = qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 0))->currentData().toInt();
-            if (ids.contains(id)) {
-                QMessageBox::warning(this, windowTitle(), QStringLiteral("Each SCSI ID can only be used once."));
-                return;
-            }
-            ids.insert(id);
-        }
-        QSet<int> occupiedSlots;
-        const auto validSlots = machines::MachineCatalog::nubusSlots(m_impl->machine->currentData().toString());
-        for (const auto& device : m_impl->nubusDevices) {
-            const int slot = device.slot;
-            if (!validSlots.contains(slot)) {
-                QMessageBox::warning(this, windowTitle(), QStringLiteral("NuBus slot %1 is not available on this machine.").arg(slot));
-                return;
-            }
-            if (occupiedSlots.contains(slot)) {
-                QMessageBox::warning(this, windowTitle(), QStringLiteral("Each NuBus slot can only be used once."));
-                return;
-            }
-            const auto validation = nubusValidationMessage(device);
-            if (!validation.isEmpty()) {
-                QMessageBox::warning(this, windowTitle(), validation);
-                return;
-            }
-            occupiedSlots.insert(slot);
-        }
         auto prospective = this->configuration();
+        const auto error = config::configurationValidationError(prospective);
+        if (!error.isEmpty()) {
+            QMessageBox::warning(this, windowTitle(), error);
+            return;
+        }
         const auto romWarning = rom::RomCatalog::shared().warningForConfiguration(prospective);
         if (!romWarning.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("ROMs Missing or Discouraged"), romWarning
@@ -1016,12 +1034,12 @@ config::Configuration ConfigurationDialog::configuration() const
     result.profileName = m_impl->name->text().trimmed();
     result.machineId = m_impl->machine->currentData().toString();
     result.romPath.clear();
-    result.nvramPath = m_impl->nvram->text().trimmed();
+    result.nvramPath = m_impl->nvram->isEnabled() ? m_impl->nvram->text().trimmed() : QString();
     result.ramSizeKiB = m_impl->ram->currentData().toInt();
     result.runtimeSpeed = static_cast<config::RuntimeSpeed>(m_impl->speed->currentData().toInt());
-    result.skipRamPatternTest = m_impl->skipRamTest->isChecked();
+    result.skipRamPatternTest = m_impl->skipRamTest->isEnabled() && m_impl->skipRamTest->isChecked();
     result.serialDevices.clear();
-    for (int channel = 0; channel < 2; ++channel) {
+    for (int channel = 0; m_impl->tabs->isTabVisible(m_impl->tabs->indexOf(m_impl->serialTab)) && channel < 2; ++channel) {
         if (m_impl->serialDevice[channel]->currentData().toInt() >= 0) {
             auto serial = m_impl->serialConfiguration[channel];
             serial.channel = channel;
@@ -1045,7 +1063,8 @@ config::Configuration ConfigurationDialog::configuration() const
         result.floppyPath.clear();
     }
     result.scsiDevices.clear();
-    for (int row = 0; row < m_impl->scsi->rowCount(); ++row) {
+    for (int row = 0; m_impl->tabs->isTabVisible(m_impl->tabs->indexOf(m_impl->scsiTab))
+            && row < m_impl->scsi->rowCount(); ++row) {
         result.scsiDevices.append({
             qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 0))->currentData().toInt(),
             static_cast<config::ScsiDeviceType>(qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 1))->currentData().toInt()),
@@ -1053,7 +1072,8 @@ config::Configuration ConfigurationDialog::configuration() const
             qobject_cast<QComboBox*>(m_impl->scsi->cellWidget(row, 3))->currentData().toBool(),
         });
     }
-    result.nubusDevices = m_impl->nubusDevices;
+    result.nubusDevices = m_impl->tabs->isTabVisible(m_impl->tabs->indexOf(m_impl->nubusTab))
+        ? m_impl->nubusDevices : QList<config::NuBusDeviceConfiguration> {};
     for (auto& device : result.nubusDevices) device.declarationRomPath.clear();
     result.diskPath = result.scsiDevices.isEmpty() ? QString() : result.scsiDevices.first().imagePath;
     return result;

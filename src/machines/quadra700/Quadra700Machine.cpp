@@ -63,6 +63,24 @@ constexpr std::uint8_t bitswapMacAddress(std::uint8_t value)
 
 } // namespace
 
+MachineProfile Quadra700Machine::configurationProfile()
+{
+    return {
+        QStringLiteral("quadra-700"), QStringLiteral("Macintosh Quadra 700"), QStringLiteral("68040"),
+        {
+            QStringLiteral("device.via6522.primary"), QStringLiteral("device.via6522.secondary"),
+            QStringLiteral("device.scc.z8530"), QStringLiteral("device.adb.bus"),
+            QStringLiteral("device.swim1"), QStringLiteral("device.scsi.ncr53c96"),
+            QStringLiteral("device.nubus"), QStringLiteral("device.video.dafb"),
+            QStringLiteral("device.audio.asc"), QStringLiteral("device.rtc.pram"),
+        },
+        { 4096, 8192 },
+        { 13, 14 },
+        {},
+        QStringLiteral("DAFB"),
+    };
+}
+
 Quadra700Machine::Quadra700Machine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(std::max<std::size_t>(ramSize, 4U * 1024U * 1024U)), 0)
     , m_sizingRam(m_ram.size(), 0)
@@ -552,7 +570,7 @@ void Quadra700Machine::rebuildPhysicalMemoryMap()
 
 bool Quadra700Machine::installNuBusCard(int slot, std::shared_ptr<devices::nubus::NuBusCard> card)
 {
-    return slot >= 13 && slot <= 14 && m_nubus.install(slot, std::move(card));
+    return configurationProfile().nubusSlots.contains(slot) && m_nubus.install(slot, std::move(card));
 }
 
 QString Quadra700Machine::debugCpuArchitecture() const { return QStringLiteral("m68k:68040"); }

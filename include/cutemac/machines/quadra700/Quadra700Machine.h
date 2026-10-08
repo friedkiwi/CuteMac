@@ -16,6 +16,7 @@
 #include "cutemac/core/IMachine.h"
 #include "cutemac/core/MachineScheduler.h"
 #include "cutemac/core/PhysicalMemoryMap.h"
+#include "cutemac/machines/MachineProfile.h"
 #include "cutemac/cpu/m68k/M68kBus.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/adb/AdbTransceiver.h"
@@ -35,6 +36,7 @@ namespace cutemac::machines::quadra700 {
 class Quadra700Machine final : public core::IMachine, public core::IDebugCpuAccess, public core::IDebugDeviceAccess, public cpu::m68k::M68kBus {
 public:
     explicit Quadra700Machine(std::size_t ramSize, const QString& nvramPath = {});
+    [[nodiscard]] static MachineProfile configurationProfile();
 
     [[nodiscard]] QString machineId() const override;
     [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& patches) override;

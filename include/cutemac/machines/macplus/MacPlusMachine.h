@@ -14,6 +14,7 @@
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/core/MachineScheduler.h"
 #include "cutemac/core/BusTransaction.h"
+#include "cutemac/machines/MachineProfile.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/bus/ByteWideMmioAdapter.h"
 #include "cutemac/devices/iwm/IwmController.h"
@@ -75,6 +76,7 @@ public:
 
     explicit MacPlusMachine(std::size_t ramSize = 4 * 1024 * 1024, const QString& nvramPath = {},
         Model model = Model::MacintoshPlus);
+    [[nodiscard]] static MachineProfile configurationProfile(Model model);
 
     [[nodiscard]] QString machineId() const override;
     [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& enabledPatches = {}) override;

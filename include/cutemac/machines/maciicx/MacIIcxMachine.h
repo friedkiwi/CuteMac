@@ -16,6 +16,7 @@
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/core/MachineScheduler.h"
 #include "cutemac/core/PhysicalMemoryMap.h"
+#include "cutemac/machines/MachineProfile.h"
 #include "cutemac/cpu/m68k/M68kBus.h"
 #include "cutemac/cpu/m68k/M68kCpuCore.h"
 #include "cutemac/devices/audio/AppleSoundChip.h"
@@ -35,6 +36,7 @@ namespace cutemac::machines::maciicx {
 class MacIIcxMachine final : public core::IMachine, public core::IDebugCpuAccess, public core::IDebugDeviceAccess, public cpu::m68k::M68kBus {
 public:
     explicit MacIIcxMachine(std::size_t ramSize, const QString& nvramPath = {});
+    [[nodiscard]] static MachineProfile configurationProfile();
 
     [[nodiscard]] QString machineId() const override;
     [[nodiscard]] bool loadRomFile(const QString& path, const QStringList& patches) override;

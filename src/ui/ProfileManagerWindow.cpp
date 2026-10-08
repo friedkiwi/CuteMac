@@ -12,6 +12,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStatusBar>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QUrl>
@@ -166,7 +167,10 @@ void ProfileManagerWindow::ensureDefaultProfile()
         return;
     }
     const auto configuration = config::ConfigurationManager::defaultMacPlusConfiguration();
-    (void)m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration);
+    if (!m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration)) {
+        QMessageBox::warning(this, windowTitle(), QStringLiteral("Could not save the profile. Check its configuration and destination."));
+        return;
+    }
 }
 
 void ProfileManagerWindow::rescanCatalogs()
@@ -189,12 +193,17 @@ void ProfileManagerWindow::loadProfiles()
     const auto previousPath = previousRow >= 0 ? m_profiles[previousRow].path : QString();
 
     m_profiles.clear();
+    QStringList invalidProfiles;
     for (const auto& path : m_manager.profileFilePaths()) {
         const auto configuration = m_manager.loadTomlFile(path);
         if (configuration.has_value()) {
             m_profiles.append({ path, *configuration });
+        } else {
+            invalidProfiles.append(QFileInfo(path).fileName());
         }
     }
+    if (invalidProfiles.isEmpty()) statusBar()->clearMessage();
+    else statusBar()->showMessage(QStringLiteral("Skipped invalid profiles: %1").arg(invalidProfiles.join(QStringLiteral(", "))));
 
     m_table->setRowCount(m_profiles.size());
     int restoredRow = -1;
@@ -274,7 +283,10 @@ void ProfileManagerWindow::createProfile()
     }
 
     const auto configuration = dialog.configuration();
-    (void)m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration);
+    if (!m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration)) {
+        QMessageBox::warning(this, windowTitle(), QStringLiteral("Could not save the profile. Check its configuration and destination."));
+        return;
+    }
     loadProfiles();
 }
 
@@ -292,7 +304,10 @@ void ProfileManagerWindow::editSelectedProfile()
 
     const auto configuration = dialog.configuration();
     const auto path = m_profiles[row].path;
-    (void)m_manager.saveTomlFile(path, configuration);
+    if (!m_manager.saveTomlFile(path, configuration)) {
+        QMessageBox::warning(this, windowTitle(), QStringLiteral("Could not save the profile. Check its configuration and destination."));
+        return;
+    }
     loadProfiles();
 }
 
@@ -311,7 +326,10 @@ void ProfileManagerWindow::cloneSelectedProfile()
     }
 
     configuration = dialog.configuration();
-    (void)m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration);
+    if (!m_manager.saveTomlFile(m_manager.profilePathForName(configuration.profileName), configuration)) {
+        QMessageBox::warning(this, windowTitle(), QStringLiteral("Could not save the profile. Check its configuration and destination."));
+        return;
+    }
     loadProfiles();
 }
 

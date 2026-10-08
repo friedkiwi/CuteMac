@@ -8,6 +8,7 @@
 
 #include <toml++/toml.hpp>
 
+#include <algorithm>
 #include <sstream>
 
 #include "cutemac/machines/MachineCatalog.h"
@@ -251,12 +252,64 @@ RuntimeSpeed runtimeSpeedFromName(const QString& name)
 QStringList Configuration::enabledRomPatches() const
 {
     QStringList patches;
-    if (skipRamPatternTest && machineId == QStringLiteral("mac-iicx")) {
-        patches.append(QStringLiteral("maciicx.skip_ram_pattern_test"));
-    } else if (skipRamPatternTest && machineId == QStringLiteral("mac-plus")) {
-        patches.append(QStringLiteral("macplus.skip_ram_pattern_test"));
-    }
+    const auto machine = machines::MachineCatalog::find(machineId);
+    if (skipRamPatternTest && machine && !machine->ramPatternPatchId.isEmpty())
+        patches.append(machine->ramPatternPatchId);
     return patches;
+}
+
+QString configurationValidationError(const Configuration& configuration)
+{
+    using machines::MachineCatalog;
+    const auto& machineId = configuration.machineId;
+    if (configuration.profileName.trimmed().isEmpty()) return QStringLiteral("Profile name is required.");
+    const auto machine = MachineCatalog::find(machineId);
+    if (!machine) return QStringLiteral("Unsupported machine type.");
+    if (!machine->supportedRamSizesKiB.contains(configuration.ramSizeKiB))
+        return QStringLiteral("Unsupported RAM size for this machine.");
+    if (configuration.cyclesPerFrame <= 0) return QStringLiteral("Cycles per frame must be positive.");
+    const auto hasPrefix = [&machine](const QString& prefix) {
+        return std::any_of(machine->reusableDevices.cbegin(), machine->reusableDevices.cend(),
+            [&prefix](const QString& device) { return device.startsWith(prefix); });
+    };
+    if (!machine->reusableDevices.contains(QStringLiteral("device.rtc.pram"))
+        && !configuration.nvramPath.isEmpty())
+        return QStringLiteral("NVRAM is unavailable on this machine.");
+    const bool floppy = machine->reusableDevices.contains(QStringLiteral("device.iwm"))
+        || machine->reusableDevices.contains(QStringLiteral("device.swim1"));
+    if ((!floppy && (!configuration.iwmDevices.isEmpty() || !configuration.floppyPath.isEmpty()))
+        || configuration.iwmDevices.size() > 2)
+        return QStringLiteral("Floppy drives are unavailable on this machine.");
+    const bool scsi = hasPrefix(QStringLiteral("device.scsi."));
+    if (!scsi && (!configuration.scsiDevices.isEmpty() || !configuration.diskPath.isEmpty()))
+        return QStringLiteral("SCSI devices are unavailable on this machine.");
+    QSet<int> scsiIds;
+    for (const auto& device : configuration.scsiDevices) {
+        if (device.id < 0 || device.id > 6 || scsiIds.contains(device.id))
+            return QStringLiteral("SCSI target IDs must be unique and between 0 and 6.");
+        if (device.imagePath.trimmed().isEmpty()) return QStringLiteral("Each SCSI device needs an image.");
+        if (device.type != ScsiDeviceType::HardDisk && device.type != ScsiDeviceType::CdRom)
+            return QStringLiteral("Unsupported SCSI device type.");
+        if (device.type == ScsiDeviceType::CdRom && !device.readOnly)
+            return QStringLiteral("CD-ROM devices must be read-only.");
+        scsiIds.insert(device.id);
+    }
+    if (!isValidNuBusSlots(machineId, configuration.nubusDevices))
+        return QStringLiteral("NuBus cards must use unique slots available on this machine.");
+    for (const auto& device : configuration.nubusDevices) {
+        if (!isValidNuBusDeviceConfiguration(device)) return QStringLiteral("Invalid NuBus card configuration.");
+    }
+    if (!hasPrefix(QStringLiteral("device.scc.")) && !configuration.serialDevices.isEmpty())
+        return QStringLiteral("Serial devices are unavailable on this machine.");
+    QSet<int> serialChannels;
+    for (const auto& device : configuration.serialDevices) {
+        if (!isValidSerialDeviceConfiguration(device) || serialChannels.contains(device.channel))
+            return QStringLiteral("Serial ports must have one valid device per channel.");
+        serialChannels.insert(device.channel);
+    }
+    if (configuration.skipRamPatternTest && machine->ramPatternPatchId.isEmpty())
+        return QStringLiteral("The RAM test patch is unavailable on this machine.");
+    return {};
 }
 
 QString ConfigurationManager::configRootPath()
@@ -351,7 +404,10 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
             return std::nullopt;
         }
         configuration.cyclesPerFrame = static_cast<int>(document["machine"]["cycles_per_frame"].value_or<std::int64_t>(configuration.cyclesPerFrame));
-        configuration.runtimeSpeed = runtimeSpeedFromName(fromTomlString(document["runtime"]["speed"].value_or<std::string>("unlimited")));
+        const auto speedName = fromTomlString(document["runtime"]["speed"].value_or<std::string>("unlimited"));
+        if (speedName.compare(QStringLiteral("realtime"), Qt::CaseInsensitive) != 0
+            && speedName.compare(QStringLiteral("unlimited"), Qt::CaseInsensitive) != 0) return std::nullopt;
+        configuration.runtimeSpeed = runtimeSpeedFromName(speedName);
         configuration.skipRamPatternTest = document["rom_patches"]["skip_ram_pattern_test"].value_or(false);
 
         if (const auto* devices = document["iwm"]["drives"].as_array()) {
@@ -368,11 +424,12 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
             for (const auto& node : *devices) {
                 if (const auto* device = node.as_table()) {
                     const auto type = fromTomlString((*device)["type"].value_or<std::string>("hard_disk"));
+                    if (type != QStringLiteral("hard_disk") && type != QStringLiteral("cd_rom")) return std::nullopt;
                     configuration.scsiDevices.append({
                         static_cast<int>((*device)["id"].value_or<std::int64_t>(0)),
                         type == QStringLiteral("cd_rom") ? ScsiDeviceType::CdRom : ScsiDeviceType::HardDisk,
                         fromTomlString((*device)["image_path"].value_or<std::string>("")),
-                        (*device)["read_only"].value_or(false),
+                        (*device)["read_only"].value_or(type == QStringLiteral("cd_rom")),
                     });
                 }
             }
@@ -381,6 +438,15 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
             for (const auto& node : *devices) {
                 if (const auto* device = node.as_table()) {
                     const auto type = fromTomlString((*device)["type"].value_or<std::string>("cutemac_video"));
+                    if (type != QStringLiteral("cutemac_video")
+                        && type != QStringLiteral("cutemac_video_accelerated")
+                        && type != QStringLiteral("apple_m2_video")
+                        && type != QStringLiteral("apple_display_card_824")
+                        && type != QStringLiteral("apple_nubus_ethernet")) return std::nullopt;
+                    const auto monitor = fromTomlString((*device)["monitor"].value_or<std::string>("hi_res_rgb"));
+                    const auto backend = fromTomlString((*device)["network_backend"].value_or<std::string>("none"));
+                    if (monitorName(monitorFromName(monitor)) != monitor
+                        || networkBackendName(networkBackendFromName(backend)) != backend) return std::nullopt;
                     const auto nubusType = type == QStringLiteral("apple_m2_video") ? NuBusDeviceType::MacintoshIIVideo
                         : type == QStringLiteral("apple_display_card_824") ? NuBusDeviceType::AppleDisplayCard824
                         : type == QStringLiteral("apple_nubus_ethernet")   ? NuBusDeviceType::AppleNuBusEthernet
@@ -398,8 +464,8 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                         static_cast<int>(vramKiB),
                         (*device)["acceleration"].value_or(true),
                         (*device)["absolute_pointer"].value_or(true),
-                        monitorFromName(fromTomlString((*device)["monitor"].value_or<std::string>("hi_res_rgb"))),
-                        networkBackendFromName(fromTomlString((*device)["network_backend"].value_or<std::string>("none"))),
+                        monitorFromName(monitor),
+                        networkBackendFromName(backend),
                         fromTomlString((*device)["mac_address"].value_or<std::string>("")),
                     });
                 }
@@ -409,6 +475,9 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
             for (const auto& node : *devices) {
                 if (const auto* device = node.as_table()) {
                     const auto typeName = fromTomlString((*device)["type"].value_or<std::string>("imagewriter_ii"));
+                    if (typeName != QStringLiteral("imagewriter_ii")
+                        && typeName != QStringLiteral("hayes_modem")
+                        && typeName != QStringLiteral("null_modem")) return std::nullopt;
                     SerialDeviceConfiguration serial;
                     serial.channel = static_cast<int>((*device)["channel"].value_or<std::int64_t>(1));
                     serial.type = typeName == QStringLiteral("hayes_modem") ? SerialDeviceType::HayesModem
@@ -416,6 +485,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
                                                                              : SerialDeviceType::ImageWriterII;
                     serial.outputDirectory = fromTomlString((*device)["output_directory"].value_or<std::string>(""));
                     const auto tcpMode = fromTomlString((*device)["tcp_mode"].value_or<std::string>("listen"));
+                    if (tcpMode != QStringLiteral("listen") && tcpMode != QStringLiteral("dial")) return std::nullopt;
                     serial.tcpMode = tcpMode == QStringLiteral("dial") ? SerialTcpMode::Dial : SerialTcpMode::Listen;
                     serial.tcpHost = fromTomlString((*device)["tcp_host"].value_or<std::string>("127.0.0.1"));
                     serial.tcpPort = static_cast<int>((*device)["tcp_port"].value_or<std::int64_t>(0));
@@ -454,19 +524,15 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     if (configuration.machineId.isEmpty()) {
         configuration.machineId = QStringLiteral("mac-plus");
     }
+    if (!machineHasFloppyController(configuration.machineId)
+        && (!configuration.iwmDevices.isEmpty() || !configuration.floppyPath.isEmpty())) return std::nullopt;
     normalizeFloppyDevices(configuration);
     if (configuration.scsiDevices.isEmpty() && !configuration.diskPath.isEmpty()) {
         configuration.scsiDevices.append({ 0, ScsiDeviceType::HardDisk, configuration.diskPath, false });
     } else if (!configuration.scsiDevices.isEmpty()) {
         configuration.diskPath = configuration.scsiDevices.first().imagePath;
     }
-    if (!isValidNuBusSlots(configuration.machineId, configuration.nubusDevices)) return std::nullopt;
-    for (const auto& device : configuration.nubusDevices) {
-        if (!isValidNuBusDeviceConfiguration(device)) return std::nullopt;
-    }
-    for (const auto& device : configuration.serialDevices) {
-        if (!isValidSerialDeviceConfiguration(device)) return std::nullopt;
-    }
+    if (!configurationValidationError(configuration).isEmpty()) return std::nullopt;
 
     return configuration;
 }
@@ -475,16 +541,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
 // same TOML the profile writer produces, without a temporary file.
 std::optional<QByteArray> ConfigurationManager::toTomlBytes(const Configuration& configuration) const
 {
-    if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
-        return std::nullopt;
-    }
-    if (!isValidNuBusSlots(configuration.machineId, configuration.nubusDevices)) return std::nullopt;
-    for (const auto& device : configuration.nubusDevices) {
-        if (!isValidNuBusDeviceConfiguration(device)) return std::nullopt;
-    }
-    for (const auto& device : configuration.serialDevices) {
-        if (!isValidSerialDeviceConfiguration(device)) return std::nullopt;
-    }
+    if (!configurationValidationError(configuration).isEmpty()) return std::nullopt;
 
     toml::array iwmDevices;
     for (const auto& drive : configuration.iwmDevices) {

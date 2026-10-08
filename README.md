@@ -137,7 +137,7 @@ Mac Plus profiles can configure a 256-byte NVRAM image. RTC reads expose the cur
 nvram_path = "/path/to/mac-plus.nvram"
 ```
 
-New profiles default to unlimited speed. The shared machine configuration window provides capability-dependent general, floppy, SCSI, and NuBus tabs. Tools → ROM Manager scans the shared ROM folder by checksum and supplies machine and device ROMs centrally; profiles do not store ROM paths. The Tools menu also provides a disk image manager for typed floppy and hard-disk images.
+New profiles default to unlimited speed. Each implemented machine declares its RAM choices, devices, NuBus slots, and optional ROM patch; the shared configuration window shows the corresponding floppy, SCSI, NuBus, and serial controls and rejects unsupported settings. Tools → ROM Manager scans the shared ROM folder by checksum and supplies machine and device ROMs centrally; profiles do not store ROM paths. The Tools menu also provides a disk image manager for typed floppy and hard-disk images.
 
 Mac Plus ROM smoke test:
 

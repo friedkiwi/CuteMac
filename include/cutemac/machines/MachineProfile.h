@@ -13,6 +13,9 @@ public:
     QString cpuModel;
     QStringList reusableDevices;
     QVector<int> supportedRamSizesKiB;
+    QVector<int> nubusSlots;
+    QString ramPatternPatchId;
+    QString onboardVideoName;
 };
 
 } // namespace cutemac::machines

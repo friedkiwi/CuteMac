@@ -32,6 +32,25 @@ bool isScsiDma(std::uint32_t address)
 
 } // namespace
 
+MachineProfile MacIIcxMachine::configurationProfile()
+{
+    return {
+        QStringLiteral("mac-iicx"), QStringLiteral("Macintosh IIcx"), QStringLiteral("68030"),
+        {
+            QStringLiteral("device.via6522.primary"), QStringLiteral("device.via6522.secondary"),
+            QStringLiteral("device.scc.z8530"), QStringLiteral("device.adb.bus"),
+            QStringLiteral("device.swim1"), QStringLiteral("device.scsi.ncr5380"),
+            QStringLiteral("device.nubus"), QStringLiteral("device.audio.asc"),
+            QStringLiteral("device.rtc.pram"),
+        },
+        { 1024, 2048, 4096, 5120, 8192, 16384, 17408, 20480,
+            32768, 65536, 66560, 69632, 81920, 131072 },
+        { 9, 10, 11 },
+        QStringLiteral("maciicx.skip_ram_pattern_test"),
+        {},
+    };
+}
+
 MacIIcxMachine::MacIIcxMachine(std::size_t ramSize, const QString& nvramPath)
     : m_ram(static_cast<qsizetype>(std::max<std::size_t>(ramSize, 1024 * 1024)), 0)
     , m_scsiBus(m_scsi, {
@@ -525,7 +544,7 @@ void MacIIcxMachine::rebuildPhysicalMemoryMap()
 
 bool MacIIcxMachine::installNuBusCard(int slot, std::shared_ptr<devices::nubus::NuBusCard> card)
 {
-    return slot >= 9 && slot <= 11 && m_nubus.install(slot, std::move(card));
+    return configurationProfile().nubusSlots.contains(slot) && m_nubus.install(slot, std::move(card));
 }
 
 cpu::m68k::M68kCpuCore::RegisterSnapshot MacIIcxMachine::cpuRegisters() const { return m_cpu.registers(); }

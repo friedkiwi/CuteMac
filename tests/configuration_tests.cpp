@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "cutemac/config/Configuration.h"
+#include "cutemac/core/EmulationSession.h"
 #include "cutemac/machines/MachineCatalog.h"
 
 namespace {
@@ -54,7 +55,6 @@ int main()
     nullModem.tcpMode = cutemac::config::SerialTcpMode::Dial;
     nullModem.tcpHost = QStringLiteral("debug.example.org");
     nullModem.tcpPort = 2323;
-    configuration.serialDevices.append(nullModem);
     configuration.skipRamPatternTest = true;
 
     cutemac::config::ConfigurationManager manager;
@@ -78,7 +78,7 @@ int main()
                 && loaded->nubusDevices[1].vramKiB == 8192
                 && loaded->nubusDevices[2].type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
             "NuBus devices did not round-trip");
-        ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
+        ok &= expect(loaded->serialDevices.size() == 2 && loaded->serialDevices.first().channel == 1
                 && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
                 && loaded->serialDevices[1].type == cutemac::config::SerialDeviceType::HayesModem
                 && loaded->serialDevices[1].directTcpDialing
@@ -87,18 +87,26 @@ int main()
                 && loaded->serialDevices[1].phonebook.first().target == QStringLiteral("slip:libslirp")
                 && loaded->serialDevices[1].phonebook[1].number == QStringLiteral("1001")
                 && loaded->serialDevices[1].phonebook[1].target == QStringLiteral("ppp:libslirp")
-                && loaded->serialDevices[1].phonebook[2].telnet
-                && loaded->serialDevices[2].type == cutemac::config::SerialDeviceType::NullModem
-                && loaded->serialDevices[2].tcpMode == cutemac::config::SerialTcpMode::Dial
-                && loaded->serialDevices[2].tcpHost == QStringLiteral("debug.example.org")
-                && loaded->serialDevices[2].tcpPort == 2323,
+                && loaded->serialDevices[1].phonebook[2].telnet,
             "serial devices did not round-trip");
         ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("maciicx.skip_ram_pattern_test") },
             "enabled ROM patch ID is incorrect");
     }
 
+    auto nullModemConfiguration = configuration;
+    nullModemConfiguration.serialDevices[1] = nullModem;
+    ok &= expect(manager.saveTomlFile(path, nullModemConfiguration), "null modem configuration save failed");
+    const auto loadedNullModem = manager.loadTomlFile(path);
+    ok &= expect(loadedNullModem && loadedNullModem->serialDevices.size() == 2
+            && loadedNullModem->serialDevices[1].type == cutemac::config::SerialDeviceType::NullModem
+            && loadedNullModem->serialDevices[1].tcpMode == cutemac::config::SerialTcpMode::Dial
+            && loadedNullModem->serialDevices[1].tcpHost == QStringLiteral("debug.example.org")
+            && loadedNullModem->serialDevices[1].tcpPort == 2323,
+        "null modem settings did not round-trip");
+
     auto quadra = configuration;
     quadra.machineId = QStringLiteral("quadra-700");
+    quadra.skipRamPatternTest = false;
     quadra.nubusDevices.clear();
     quadra.nubusDevices.append({ 13, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb16Inch });
     quadra.nubusDevices.append({ 14, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, ethernetBackend, QStringLiteral("02:00:1b:00:00:0e") });
@@ -117,6 +125,43 @@ int main()
     ok &= expect(!manager.loadTomlFile(path).has_value(), "Q700 must reject unavailable slot 9 on load");
     quadra.nubusDevices[0].slot = 14;
     ok &= expect(!manager.saveTomlFile(path, quadra), "Q700 must reject duplicate slot 14");
+
+    auto compactWithScsi = configuration;
+    compactWithScsi.machineId = QStringLiteral("mac-128k");
+    compactWithScsi.ramSizeKiB = 128;
+    compactWithScsi.nvramPath.clear();
+    compactWithScsi.skipRamPatternTest = false;
+    compactWithScsi.nubusDevices.clear();
+    ok &= expect(!manager.saveTomlFile(path, compactWithScsi),
+        "compact Macintosh must reject a hidden SCSI disk");
+    auto compactWithPatch = compactWithScsi;
+    compactWithPatch.scsiDevices.clear();
+    compactWithPatch.diskPath.clear();
+    compactWithPatch.skipRamPatternTest = true;
+    ok &= expect(!manager.saveTomlFile(path, compactWithPatch),
+        "compact Macintosh must reject a RAM patch that has no implementation");
+    auto duplicateScsi = configuration;
+    duplicateScsi.scsiDevices.append(duplicateScsi.scsiDevices.first());
+    ok &= expect(!manager.saveTomlFile(path, duplicateScsi),
+        "duplicate SCSI target IDs must be rejected at save time");
+    auto writableCd = configuration;
+    writableCd.scsiDevices[0].type = cutemac::config::ScsiDeviceType::CdRom;
+    ok &= expect(!manager.saveTomlFile(path, writableCd),
+        "CD-ROM target must be read-only");
+    auto duplicateSerial = configuration;
+    duplicateSerial.serialDevices.append(duplicateSerial.serialDevices.last());
+    ok &= expect(!manager.saveTomlFile(path, duplicateSerial),
+        "duplicate serial channel attachments must be rejected");
+    ok &= expect(!cutemac::machines::MachineCatalog::find(QStringLiteral("quadra-800")),
+        "machine catalog must not offer a model with no machine factory implementation");
+    for (const auto& profile : cutemac::machines::MachineCatalog::supportedMachines()) {
+        auto runnable = cutemac::config::ConfigurationManager::defaultMacPlusConfiguration();
+        runnable.machineId = profile.id;
+        runnable.ramSizeKiB = profile.supportedRamSizesKiB.first();
+        cutemac::core::EmulationSession session(runnable);
+        ok &= expect(session.debugCpuAccess() != nullptr,
+            "every selectable machine schema must have a matching machine factory");
+    }
 
     QFile legacy(path);
     ok &= expect(legacy.open(QIODevice::WriteOnly | QIODevice::Truncate), "legacy fixture open failed");
@@ -201,8 +246,8 @@ int main()
     invalidModemConfiguration.serialDevices[1].slip.enabled = false;
     ok &= expect(!manager.saveTomlFile(path, invalidModemConfiguration),
         "saving a SLIP phonebook target with SLIP disabled must fail");
-    auto invalidNullModemConfiguration = configuration;
-    invalidNullModemConfiguration.serialDevices[2].tcpPort = 0;
+    auto invalidNullModemConfiguration = nullModemConfiguration;
+    invalidNullModemConfiguration.serialDevices[1].tcpPort = 0;
     ok &= expect(!manager.saveTomlFile(path, invalidNullModemConfiguration),
         "saving a null modem without a TCP port must fail");
 
@@ -248,6 +293,28 @@ int main()
     malformed.write("[machine\nid =");
     malformed.close();
     ok &= expect(!manager.loadTomlFile(path).has_value(), "malformed TOML must be rejected");
+
+    const auto rejectUnknownChoice = [&](const QByteArray& contents, const char* description) {
+        QFile profile(path);
+        if (!profile.open(QIODevice::WriteOnly | QIODevice::Truncate)) return expect(false, "invalid choice fixture open failed");
+        profile.write(contents);
+        profile.close();
+        return expect(!manager.loadTomlFile(path).has_value(), description);
+    };
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-plus\"\n[runtime]\nspeed = \"fast\"\n",
+        "unknown runtime speed must be rejected");
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-iicx\"\n[[scsi.devices]]\nid = 0\ntype = \"tape\"\nimage_path = \"tape.img\"\n",
+        "unknown SCSI device type must be rejected");
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-iicx\"\n[[nubus.devices]]\nslot = 9\ntype = \"mystery_card\"\n",
+        "unknown NuBus card type must be rejected");
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-iicx\"\n[[nubus.devices]]\nslot = 9\nmonitor = \"mystery_monitor\"\n",
+        "unknown monitor type must be rejected");
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-iicx\"\n[[nubus.devices]]\nslot = 9\nnetwork_backend = \"mystery_backend\"\n",
+        "unknown network backend must be rejected");
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-plus\"\n[[serial.devices]]\nchannel = 0\ntype = \"mystery_printer\"\n",
+        "unknown serial device type must be rejected");
+    ok &= rejectUnknownChoice("[machine]\nid = \"mac-plus\"\n[[serial.devices]]\nchannel = 0\ntcp_mode = \"relay\"\n",
+        "unknown serial TCP mode must be rejected");
 
     return ok ? 0 : 1;
 }

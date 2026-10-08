@@ -6,7 +6,6 @@
 #include "cutemac/machines/macplus/MacPlusMachine.h"
 #include "cutemac/machines/maciicx/MacIIcxMachine.h"
 #include "cutemac/machines/quadra700/Quadra700Machine.h"
-#include "cutemac/machines/MachineCatalog.h"
 #include "cutemac/core/IDebugCpuAccess.h"
 #include "cutemac/devices/network/nubus/AppleNuBusEthernetCard.h"
 #include "cutemac/devices/network/SlirpEthernetBackend.h"
@@ -123,7 +122,7 @@ EmulationSession::~EmulationSession() = default;
 
 std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configuration& configuration)
 {
-    if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
+    if (!config::configurationValidationError(configuration).isEmpty()) {
         return {};
     }
     std::unique_ptr<IMachine> result;

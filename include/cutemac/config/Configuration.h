@@ -147,6 +147,8 @@ public:
     [[nodiscard]] QStringList enabledRomPatches() const;
 };
 
+[[nodiscard]] QString configurationValidationError(const Configuration& configuration);
+
 class ConfigurationManager {
 public:
     [[nodiscard]] static QString configRootPath();

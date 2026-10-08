@@ -103,6 +103,41 @@ constexpr std::uint8_t viaRtcEnableBit = 0x04;
 
 } // namespace
 
+MachineProfile MacPlusMachine::configurationProfile(Model model)
+{
+    MachineProfile profile;
+    profile.id = machineIdForModel(model);
+    profile.cpuModel = QStringLiteral("68000");
+    profile.reusableDevices = {
+        QStringLiteral("device.via6522"), QStringLiteral("device.scc.z8530"),
+        QStringLiteral("device.iwm"), QStringLiteral("device.video.compact-mac"),
+        QStringLiteral("device.audio.compact-mac"),
+    };
+    switch (model) {
+    case Model::Macintosh128K:
+        profile.displayName = QStringLiteral("Macintosh 128K");
+        profile.supportedRamSizesKiB = { 128 };
+        break;
+    case Model::Macintosh512K:
+        profile.displayName = QStringLiteral("Macintosh 512K");
+        profile.supportedRamSizesKiB = { 512 };
+        break;
+    case Model::Macintosh512Ke:
+        profile.displayName = QStringLiteral("Macintosh 512Ke");
+        profile.supportedRamSizesKiB = { 512 };
+        profile.reusableDevices.append(QStringLiteral("device.rtc.pram"));
+        break;
+    case Model::MacintoshPlus:
+        profile.displayName = QStringLiteral("Macintosh Plus");
+        profile.supportedRamSizesKiB = { 1024, 2560, 4096 };
+        profile.reusableDevices.append(QStringLiteral("device.scsi.ncr5380"));
+        profile.reusableDevices.append(QStringLiteral("device.rtc.pram"));
+        profile.ramPatternPatchId = QStringLiteral("macplus.skip_ram_pattern_test");
+        break;
+    }
+    return profile;
+}
+
 QString MacPlusMachine::machineId() const { return machineIdForModel(m_model); }
 
 void MacPlusMachine::attachSerialEndpoint(int channel, std::shared_ptr<devices::serial::SerialEndpoint> endpoint)

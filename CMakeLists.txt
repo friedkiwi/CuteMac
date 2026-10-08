@@ -564,6 +564,10 @@ if(BUILD_TESTING)
 
     add_test(NAME configuration-toml COMMAND CuteMacConfigurationTests)
 
+    add_executable(CuteMacConfigurationDialogTests tests/configuration_dialog_tests.cpp)
+    target_link_libraries(CuteMacConfigurationDialogTests PRIVATE CuteMacWidgets)
+    add_test(NAME configuration-dialog COMMAND CuteMacConfigurationDialogTests)
+
     add_executable(CuteMacProfileResolverTests tests/profile_resolver_tests.cpp)
     target_link_libraries(CuteMacProfileResolverTests PRIVATE CuteMacCore)
     add_test(NAME profile-resolver COMMAND CuteMacProfileResolverTests)
