@@ -120,6 +120,27 @@ EmulationSession::EmulationSession(config::Configuration configuration)
 
 EmulationSession::~EmulationSession() = default;
 
+std::unique_lock<std::timed_mutex> EmulationSession::lockForHost() const
+{
+    m_hostWaiters.fetch_add(1, std::memory_order_acq_rel);
+    std::unique_lock lock(m_mutex);
+    {
+        std::lock_guard waitLock(m_hostWaitMutex);
+        m_hostWaiters.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    m_hostWaitWake.notify_all();
+    return lock;
+}
+
+void EmulationSession::serviceHostRequests() const
+{
+    if (m_hostWaiters.load(std::memory_order_acquire) == 0) return;
+    std::unique_lock lock(m_hostWaitMutex);
+    m_hostWaitWake.wait(lock, [this]() {
+        return m_hostWaiters.load(std::memory_order_acquire) == 0;
+    });
+}
+
 std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configuration& configuration)
 {
     if (!config::configurationValidationError(configuration).isEmpty()) {
@@ -173,7 +194,7 @@ std::unique_ptr<IMachine> EmulationSession::createMachine(const config::Configur
 
 bool EmulationSession::initialize()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (!m_machine) {
         return false;
     }
@@ -204,7 +225,7 @@ bool EmulationSession::initialize()
 
 bool EmulationSession::reconfigure(config::Configuration configuration)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     m_configuration = std::move(configuration);
     ensureFloppyDriveCount(m_configuration);
     m_machine = createMachine(m_configuration);
@@ -239,7 +260,7 @@ bool EmulationSession::reconfigure(config::Configuration configuration)
 
 void EmulationSession::reset()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (m_machine && m_romLoaded) {
         m_machine->reset();
         m_powerRequest = GuestPowerRequest::None;
@@ -248,7 +269,7 @@ void EmulationSession::reset()
 
 bool EmulationSession::triggerProgrammersInterrupt()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_machine && m_romLoaded && m_machine->triggerProgrammersInterrupt();
 }
 
@@ -267,19 +288,19 @@ int EmulationSession::runCycles(int cycles)
 
 void EmulationSession::setPaused(bool paused)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     m_paused = paused || !m_romLoaded;
 }
 
 bool EmulationSession::paused() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_paused;
 }
 
 EmulationSession::Status EmulationSession::status() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (!m_machine) {
         return { m_configuration.machineId, 0, 0, 0, false, false, true };
     }
@@ -289,31 +310,31 @@ EmulationSession::Status EmulationSession::status() const
 
 QByteArray EmulationSession::framebufferBytes() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_machine ? m_machine->framebufferBytes() : QByteArray {};
 }
 
 devices::video::VideoFrame EmulationSession::videoFrame() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_machine ? m_machine->videoFrame() : devices::video::VideoFrame {};
 }
 
 devices::audio::AudioFrame EmulationSession::takeAudioFrame()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_machine ? m_machine->takeAudioFrame() : devices::audio::AudioFrame {};
 }
 
 bool EmulationSession::audioPlaybackActive() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_machine && m_machine->audioPlaybackActive();
 }
 
 GuestPowerRequest EmulationSession::takePowerRequest()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     const auto request = m_powerRequest;
     m_powerRequest = GuestPowerRequest::None;
     return request;
@@ -321,13 +342,13 @@ GuestPowerRequest EmulationSession::takePowerRequest()
 
 config::Configuration EmulationSession::configuration() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_configuration;
 }
 
 void EmulationSession::queueInput(GuestInputEvent event)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (m_machine) {
         m_machine->queueInput(event, m_machine->cycleCount());
     }
@@ -360,7 +381,7 @@ void EmulationSession::queueKeyboardReset()
 
 bool EmulationSession::insertDisk(const QString& path)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (!m_machine || !m_machine->loadDiskImage(path)) {
         return false;
     }
@@ -370,7 +391,7 @@ bool EmulationSession::insertDisk(const QString& path)
 
 void EmulationSession::ejectDisk()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (m_machine) {
         m_machine->ejectDiskImage();
     }
@@ -379,7 +400,7 @@ void EmulationSession::ejectDisk()
 
 bool EmulationSession::insertScsiDevice(int id, config::ScsiDeviceType type, const QString& path, bool readOnly)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (!m_machine || path.isEmpty()) return false;
     const bool loaded = type == config::ScsiDeviceType::CdRom
         ? m_machine->loadScsiCdRom(id, path)
@@ -397,7 +418,7 @@ bool EmulationSession::insertScsiDevice(int id, config::ScsiDeviceType type, con
 
 void EmulationSession::ejectScsiDevice(int id)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (!m_machine) return;
     for (auto& device : m_configuration.scsiDevices) {
         if (device.id != id) continue;
@@ -410,7 +431,7 @@ void EmulationSession::ejectScsiDevice(int id)
 
 EmulationSession::MediaState EmulationSession::mediaState() const
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     MediaState state;
     if (!m_machine || !m_machine->tracksMediaState()) return state;
     state.tracked = true;
@@ -430,7 +451,7 @@ bool EmulationSession::insertFloppy(const QString& path, bool readOnly)
 
 bool EmulationSession::insertFloppy(int drive, const QString& path, bool readOnly)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (drive < 0 || drive >= 2 || !m_machine || !m_machine->loadFloppyImage(drive, path, readOnly)) {
         return false;
     }
@@ -448,7 +469,7 @@ void EmulationSession::ejectFloppy()
 
 void EmulationSession::ejectFloppy(int drive)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     if (drive < 0 || drive >= 2) return;
     if (m_machine) {
         m_machine->ejectFloppyImage(drive);
@@ -461,26 +482,32 @@ void EmulationSession::ejectFloppy(int drive)
 
 void* EmulationSession::debugMachine(const QString& machineId)
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return m_machine && m_machine->machineId() == machineId ? m_machine.get() : nullptr;
 }
 
 IDebugCpuAccess* EmulationSession::debugCpuAccess()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return dynamic_cast<IDebugCpuAccess*>(m_machine.get());
 }
 
 IDebugDeviceAccess* EmulationSession::debugDeviceAccess()
 {
-    std::lock_guard lock(m_mutex);
+    auto lock = lockForHost();
     return dynamic_cast<IDebugDeviceAccess*>(m_machine.get());
 }
 
 debug::MachineSnapshot EmulationSession::debugSnapshot(std::chrono::milliseconds lockTimeout)
 {
     std::unique_lock lock(m_mutex, std::defer_lock);
+    m_hostWaiters.fetch_add(1, std::memory_order_acq_rel);
     const bool locked = lock.try_lock_for(lockTimeout);
+    {
+        std::lock_guard waitLock(m_hostWaitMutex);
+        m_hostWaiters.fetch_sub(1, std::memory_order_acq_rel);
+    }
+    m_hostWaitWake.notify_all();
 
     if (!m_machine) {
         debug::MachineSnapshot snapshot;

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -38,6 +40,9 @@ public:
     void reset();
     [[nodiscard]] bool triggerProgrammersInterrupt();
     [[nodiscard]] int runCycles(int cycles);
+    // The worker yields its next quantum until pending frontend lock requests
+    // have acquired the session mutex.
+    void serviceHostRequests() const;
     void setPaused(bool paused);
     [[nodiscard]] bool paused() const;
     [[nodiscard]] Status status() const;
@@ -83,10 +88,14 @@ public:
 private:
     [[nodiscard]] static std::unique_ptr<IMachine> createMachine(const config::Configuration& configuration);
     void queueInput(GuestInputEvent event);
+    [[nodiscard]] std::unique_lock<std::timed_mutex> lockForHost() const;
 
     // Timed so panic capture can bound its wait instead of blocking forever on
     // a wedged emulation thread.
     mutable std::timed_mutex m_mutex;
+    mutable std::atomic<int> m_hostWaiters { 0 };
+    mutable std::mutex m_hostWaitMutex;
+    mutable std::condition_variable m_hostWaitWake;
     config::Configuration m_configuration;
     std::unique_ptr<IMachine> m_machine;
     bool m_romLoaded = false;

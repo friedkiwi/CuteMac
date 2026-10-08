@@ -564,6 +564,11 @@ if(BUILD_TESTING)
 
     add_test(NAME configuration-toml COMMAND CuteMacConfigurationTests)
 
+    add_executable(CuteMacSessionFairnessTests tests/session_fairness_tests.cpp)
+    target_link_libraries(CuteMacSessionFairnessTests PRIVATE CuteMacCore)
+    add_test(NAME session-host-access COMMAND CuteMacSessionFairnessTests)
+    set_tests_properties(session-host-access PROPERTIES TIMEOUT 15)
+
     add_executable(CuteMacConfigurationDialogTests tests/configuration_dialog_tests.cpp)
     target_link_libraries(CuteMacConfigurationDialogTests PRIVATE CuteMacWidgets)
     add_test(NAME configuration-dialog COMMAND CuteMacConfigurationDialogTests)

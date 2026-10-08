@@ -125,15 +125,15 @@ void SessionRunner::workerLoop()
             previousRealtimeThrottle = realtimeThrottle;
         }
         (void)m_session.runCycles(m_cyclesPerFrame.load());
+        m_session.serviceHostRequests();
         m_machineAudioPlaybackActive = m_session.audioPlaybackActive();
         if (!realtimeThrottle) {
             deadline = clock::now();
             // Give the frontend a deterministic lock-acquisition window for input and display work.
             std::unique_lock lock(m_waitMutex);
-            // A 50 us gap lets the worker win the session mutex again before
-            // the GUI thread wakes, leaving status, input and control commands
-            // blocked for seconds on CPU-heavy machines such as the Q700.
-            m_wake.wait_for(lock, std::chrono::milliseconds(1), [this]() {
+            // The host-request handoff above handles mutex fairness; keep the
+            // idle service window short so unlimited mode stays responsive.
+            m_wake.wait_for(lock, std::chrono::microseconds(50), [this]() {
                 return !m_running || m_paused || m_speed.load() == config::RuntimeSpeed::Realtime
                     || m_interactiveInputActive.load()
                     || m_audioPlaybackActive.load() || m_machineAudioPlaybackActive.load();
