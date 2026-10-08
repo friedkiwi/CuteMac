@@ -208,7 +208,7 @@ QString runNvramSaveDialog(QWidget* parent, const QString& currentPath)
     });
 }
 
-bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
+bool editNuBusCard(config::NuBusDeviceConfiguration& device, const QString& machineId, QWidget* parent)
 {
     QDialog dialog(parent);
     dialog.setWindowTitle(QStringLiteral("NuBus Card Properties"));
@@ -217,7 +217,7 @@ bool editNuBusCard(config::NuBusDeviceConfiguration& device, QWidget* parent)
     outer->addLayout(form);
 
     auto* slot = new QComboBox;
-    for (int value = 9; value <= 11; ++value) slot->addItem(QString::number(value), value);
+    for (int value : machines::MachineCatalog::nubusSlots(machineId)) slot->addItem(QString::number(value), value);
     slot->setCurrentIndex(qMax(0, slot->findData(device.slot)));
     form->addRow(QStringLiteral("Slot"), slot);
 
@@ -783,7 +783,8 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         const auto it = std::find_if(profiles.cbegin(), profiles.cend(), [&](const auto& profile) { return profile.id == machineId; });
         const auto devices = it == profiles.cend() ? QStringList {} : it->reusableDevices;
         const bool iwm = devices.contains(QStringLiteral("device.iwm")) || devices.contains(QStringLiteral("device.swim1"));
-        const bool scsi = devices.contains(QStringLiteral("device.scsi.ncr5380")) || devices.contains(QStringLiteral("device.scsi.bus"));
+        const bool scsi = std::any_of(devices.cbegin(), devices.cend(),
+            [](const QString& device) { return device.startsWith(QStringLiteral("device.scsi.")); });
         const bool nubus = devices.contains(QStringLiteral("device.nubus"));
         const bool serial = std::any_of(devices.cbegin(), devices.cend(),
             [](const QString& device) { return device.startsWith(QStringLiteral("device.scc")); });
@@ -876,39 +877,56 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         }
         addScsiRow({ id, config::ScsiDeviceType::HardDisk, path, false });
     });
-    connect(addCuteMacVideo, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4096, true};
-        if (editNuBusCard(device, this)) {
+    const auto firstAvailableNuBusSlot = [this]() {
+        const auto availableSlots = machines::MachineCatalog::nubusSlots(m_impl->machine->currentData().toString());
+        for (int slot : availableSlots) {
+            if (std::none_of(m_impl->nubusDevices.cbegin(), m_impl->nubusDevices.cend(),
+                    [slot](const auto& device) { return device.slot == slot; })) return slot;
+        }
+        return availableSlots.isEmpty() ? -1 : availableSlots.first();
+    };
+    const auto warnOnboardVideo = [this]() {
+        if (m_impl->machine->currentData().toString() != QStringLiteral("quadra-700")) return;
+        QMessageBox::information(this, QStringLiteral("Quadra 700 video"),
+            QStringLiteral("The Quadra 700 already has built-in DAFB video. A NuBus video card is an additional display; the emulator window currently shows the built-in display only."));
+    };
+    connect(addCuteMacVideo, &QAction::triggered, this, [this, refreshNuBus, firstAvailableNuBusSlot, warnOnboardVideo]() {
+        warnOnboardVideo();
+        config::NuBusDeviceConfiguration device {firstAvailableNuBusSlot(), config::NuBusDeviceType::CuteMacVideo, {}, 640, 480, 8, 4096, true};
+        if (editNuBusCard(device, m_impl->machine->currentData().toString(), this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
         }
     });
-    connect(addCuteMacAcceleratedVideo, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3),
+    connect(addCuteMacAcceleratedVideo, &QAction::triggered, this, [this, refreshNuBus, firstAvailableNuBusSlot, warnOnboardVideo]() {
+        warnOnboardVideo();
+        config::NuBusDeviceConfiguration device {firstAvailableNuBusSlot(),
             config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 640, 480, 8, 4096, true};
-        if (editNuBusCard(device, this)) {
+        if (editNuBusCard(device, m_impl->machine->currentData().toString(), this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
         }
     });
-    connect(addAppleVideo, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false};
-        if (editNuBusCard(device, this)) {
+    connect(addAppleVideo, &QAction::triggered, this, [this, refreshNuBus, firstAvailableNuBusSlot, warnOnboardVideo]() {
+        warnOnboardVideo();
+        config::NuBusDeviceConfiguration device {firstAvailableNuBusSlot(), config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false};
+        if (editNuBusCard(device, m_impl->machine->currentData().toString(), this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
         }
     });
-    connect(addApple824, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3), config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false};
-        if (editNuBusCard(device, this)) {
+    connect(addApple824, &QAction::triggered, this, [this, refreshNuBus, firstAvailableNuBusSlot, warnOnboardVideo]() {
+        warnOnboardVideo();
+        config::NuBusDeviceConfiguration device {firstAvailableNuBusSlot(), config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false};
+        if (editNuBusCard(device, m_impl->machine->currentData().toString(), this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
         }
     });
-    connect(addAppleEthernet, &QAction::triggered, this, [this, refreshNuBus]() {
-        config::NuBusDeviceConfiguration device {9 + static_cast<int>(m_impl->nubusDevices.size() % 3),
+    connect(addAppleEthernet, &QAction::triggered, this, [this, refreshNuBus, firstAvailableNuBusSlot]() {
+        config::NuBusDeviceConfiguration device {firstAvailableNuBusSlot(),
             config::NuBusDeviceType::AppleNuBusEthernet};
-        if (editNuBusCard(device, this)) {
+        if (editNuBusCard(device, m_impl->machine->currentData().toString(), this)) {
             m_impl->nubusDevices.append(device);
             refreshNuBus();
         }
@@ -921,7 +939,8 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
         }
     });
     connect(m_impl->nubus, &QTableWidget::cellDoubleClicked, this, [this, refreshNuBus](int row, int) {
-        if (row >= 0 && row < m_impl->nubusDevices.size() && editNuBusCard(m_impl->nubusDevices[row], this)) refreshNuBus();
+        if (row >= 0 && row < m_impl->nubusDevices.size()
+            && editNuBusCard(m_impl->nubusDevices[row], m_impl->machine->currentData().toString(), this)) refreshNuBus();
     });
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
@@ -955,8 +974,13 @@ ConfigurationDialog::ConfigurationDialog(config::Configuration configuration, QW
             ids.insert(id);
         }
         QSet<int> occupiedSlots;
+        const auto validSlots = machines::MachineCatalog::nubusSlots(m_impl->machine->currentData().toString());
         for (const auto& device : m_impl->nubusDevices) {
             const int slot = device.slot;
+            if (!validSlots.contains(slot)) {
+                QMessageBox::warning(this, windowTitle(), QStringLiteral("NuBus slot %1 is not available on this machine.").arg(slot));
+                return;
+            }
             if (occupiedSlots.contains(slot)) {
                 QMessageBox::warning(this, windowTitle(), QStringLiteral("Each NuBus slot can only be used once."));
                 return;

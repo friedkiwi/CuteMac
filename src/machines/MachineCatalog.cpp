@@ -95,7 +95,7 @@ QVector<MachineProfile> MachineCatalog::supportedMachines()
                 QStringLiteral("device.audio.asc"),
                 QStringLiteral("device.rtc.pram"),
             },
-            { 4096, 8192, 20480, 36864, 69632 },
+            { 4096, 8192 },
         },
         {
             QStringLiteral("quadra-800"),
@@ -125,6 +125,13 @@ bool MachineCatalog::isValidRamSize(const QString& machineId, int sizeKiB)
 {
     const auto machine = find(machineId);
     return machine && machine->supportedRamSizesKiB.contains(sizeKiB);
+}
+
+QVector<int> MachineCatalog::nubusSlots(const QString& machineId)
+{
+    if (machineId == QStringLiteral("mac-iicx")) return { 9, 10, 11 };
+    if (machineId == QStringLiteral("quadra-700")) return { 13, 14 };
+    return {};
 }
 
 } // namespace cutemac::machines

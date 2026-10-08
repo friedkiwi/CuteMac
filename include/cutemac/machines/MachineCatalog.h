@@ -14,6 +14,7 @@ public:
     [[nodiscard]] static QVector<MachineProfile> supportedMachines();
     [[nodiscard]] static std::optional<MachineProfile> find(const QString& machineId);
     [[nodiscard]] static bool isValidRamSize(const QString& machineId, int sizeKiB);
+    [[nodiscard]] static QVector<int> nubusSlots(const QString& machineId);
 };
 
 } // namespace cutemac::machines

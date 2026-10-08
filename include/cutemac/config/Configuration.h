@@ -83,6 +83,7 @@ struct NuBusDeviceConfiguration {
 [[nodiscard]] int cuteMacVideoFramebufferLimitBytes();
 [[nodiscard]] int framebufferStrideBytes(int width, int depth);
 [[nodiscard]] bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device);
+[[nodiscard]] bool isValidNuBusSlots(const QString& machineId, const QVector<NuBusDeviceConfiguration>& devices);
 
 enum class SerialDeviceType {
     ImageWriterII,

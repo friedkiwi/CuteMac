@@ -184,6 +184,17 @@ bool isValidNuBusDeviceConfiguration(const NuBusDeviceConfiguration& device)
     return stride > 0 && stride * device.height <= cuteMacVideoFramebufferLimitBytes();
 }
 
+bool isValidNuBusSlots(const QString& machineId, const QVector<NuBusDeviceConfiguration>& devices)
+{
+    const auto availableSlots = machines::MachineCatalog::nubusSlots(machineId);
+    QVector<int> occupied;
+    for (const auto& device : devices) {
+        if (!availableSlots.contains(device.slot) || occupied.contains(device.slot)) return false;
+        occupied.append(device.slot);
+    }
+    return true;
+}
+
 QVector<SerialPhonebookEntry> defaultSerialModemPhonebook()
 {
     return {
@@ -449,6 +460,7 @@ std::optional<Configuration> ConfigurationManager::loadTomlFile(const QString& p
     } else if (!configuration.scsiDevices.isEmpty()) {
         configuration.diskPath = configuration.scsiDevices.first().imagePath;
     }
+    if (!isValidNuBusSlots(configuration.machineId, configuration.nubusDevices)) return std::nullopt;
     for (const auto& device : configuration.nubusDevices) {
         if (!isValidNuBusDeviceConfiguration(device)) return std::nullopt;
     }
@@ -466,6 +478,7 @@ std::optional<QByteArray> ConfigurationManager::toTomlBytes(const Configuration&
     if (!machines::MachineCatalog::isValidRamSize(configuration.machineId, configuration.ramSizeKiB)) {
         return std::nullopt;
     }
+    if (!isValidNuBusSlots(configuration.machineId, configuration.nubusDevices)) return std::nullopt;
     for (const auto& device : configuration.nubusDevices) {
         if (!isValidNuBusDeviceConfiguration(device)) return std::nullopt;
     }

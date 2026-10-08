@@ -26,7 +26,7 @@ int main()
 
     cutemac::config::Configuration configuration;
     configuration.profileName = QStringLiteral("Quoted \"Plus\"");
-    configuration.machineId = QStringLiteral("mac-plus");
+    configuration.machineId = QStringLiteral("mac-iicx");
     configuration.nvramPath = QStringLiteral("/tmp/mac-plus.nvram");
     configuration.ramSizeKiB = 4096;
     configuration.cyclesPerFrame = 130560;
@@ -37,11 +37,9 @@ int main()
     configuration.nubusDevices.append({ 9, cutemac::config::NuBusDeviceType::CuteMacVideo, {}, 832, 624, 8, 4096, true, false });
     configuration.nubusDevices.append({ 11, cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated, {}, 1024, 768, 8, 8192, true, true });
     configuration.nubusDevices.append({ 10, cutemac::config::NuBusDeviceType::MacintoshIIVideo, {}, 640, 480, 1, 512, false });
-    configuration.nubusDevices.append({ 12, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb16Inch });
     const auto ethernetBackend = cutemac::config::slirpNetworkingAvailable()
         ? cutemac::config::NetworkBackendType::Slirp
         : cutemac::config::NetworkBackendType::None;
-    configuration.nubusDevices.append({ 13, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, ethernetBackend, QStringLiteral("02:00:1b:00:00:0d") });
     configuration.serialDevices.append({ 1, cutemac::config::SerialDeviceType::ImageWriterII, QStringLiteral("/tmp/prints") });
     cutemac::config::SerialDeviceConfiguration modem;
     modem.channel = 0;
@@ -73,18 +71,12 @@ int main()
                 && loaded->iwmDevices[1].imagePath == QStringLiteral("/tmp/external.dsk"),
             "IWM devices did not round-trip");
         ok &= expect(loaded->scsiDevices.size() == 1 && loaded->scsiDevices.first().id == 4, "SCSI device did not round-trip");
-        ok &= expect(loaded->nubusDevices.size() == 5 && loaded->nubusDevices.first().width == 832
+        ok &= expect(loaded->nubusDevices.size() == 3 && loaded->nubusDevices.first().width == 832
                 && loaded->nubusDevices.first().vramKiB == 4096
                 && !loaded->nubusDevices.first().absolutePointer
                 && loaded->nubusDevices[1].type == cutemac::config::NuBusDeviceType::CuteMacVideoAccelerated
                 && loaded->nubusDevices[1].vramKiB == 8192
-                && loaded->nubusDevices[2].type == cutemac::config::NuBusDeviceType::MacintoshIIVideo
-                && loaded->nubusDevices[3].type == cutemac::config::NuBusDeviceType::AppleDisplayCard824
-                && loaded->nubusDevices[3].vramKiB == 1024
-                && loaded->nubusDevices[3].monitor == cutemac::config::MacMonitorType::Rgb16Inch
-                && loaded->nubusDevices.last().type == cutemac::config::NuBusDeviceType::AppleNuBusEthernet
-                && loaded->nubusDevices.last().networkBackend == ethernetBackend
-                && loaded->nubusDevices.last().macAddress == QStringLiteral("02:00:1b:00:00:0d"),
+                && loaded->nubusDevices[2].type == cutemac::config::NuBusDeviceType::MacintoshIIVideo,
             "NuBus devices did not round-trip");
         ok &= expect(loaded->serialDevices.size() == 3 && loaded->serialDevices.first().channel == 1
                 && loaded->serialDevices.first().outputDirectory == QStringLiteral("/tmp/prints")
@@ -101,9 +93,30 @@ int main()
                 && loaded->serialDevices[2].tcpHost == QStringLiteral("debug.example.org")
                 && loaded->serialDevices[2].tcpPort == 2323,
             "serial devices did not round-trip");
-        ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("macplus.skip_ram_pattern_test") },
+        ok &= expect(loaded->enabledRomPatches() == QStringList { QStringLiteral("maciicx.skip_ram_pattern_test") },
             "enabled ROM patch ID is incorrect");
     }
+
+    auto quadra = configuration;
+    quadra.machineId = QStringLiteral("quadra-700");
+    quadra.nubusDevices.clear();
+    quadra.nubusDevices.append({ 13, cutemac::config::NuBusDeviceType::AppleDisplayCard824, {}, 640, 480, 8, 1024, false, true, cutemac::config::MacMonitorType::Rgb16Inch });
+    quadra.nubusDevices.append({ 14, cutemac::config::NuBusDeviceType::AppleNuBusEthernet, {}, 640, 480, 8, 4096, true, true, cutemac::config::MacMonitorType::HiResRgb, ethernetBackend, QStringLiteral("02:00:1b:00:00:0e") });
+    ok &= expect(manager.saveTomlFile(path, quadra), "Q700 slots 13 and 14 must save");
+    const auto loadedQuadra = manager.loadTomlFile(path);
+    ok &= expect(loadedQuadra && loadedQuadra->nubusDevices.size() == 2
+            && loadedQuadra->nubusDevices[0].monitor == cutemac::config::MacMonitorType::Rgb16Inch
+            && loadedQuadra->nubusDevices[1].networkBackend == ethernetBackend,
+        "Q700 NuBus cards must round-trip");
+    quadra.nubusDevices[0].slot = 9;
+    ok &= expect(!manager.saveTomlFile(path, quadra), "Q700 must reject unavailable slot 9");
+    QFile invalidQuadraSlot(path);
+    ok &= expect(invalidQuadraSlot.open(QIODevice::WriteOnly | QIODevice::Truncate), "invalid Q700 slot fixture open failed");
+    invalidQuadraSlot.write("[machine]\nid = 'quadra-700'\nram_size_kib = 4096\n[[nubus.devices]]\nslot = 9\ntype = 'apple_display_card_824'\nvram_kib = 1024\n");
+    invalidQuadraSlot.close();
+    ok &= expect(!manager.loadTomlFile(path).has_value(), "Q700 must reject unavailable slot 9 on load");
+    quadra.nubusDevices[0].slot = 14;
+    ok &= expect(!manager.saveTomlFile(path, quadra), "Q700 must reject duplicate slot 14");
 
     QFile legacy(path);
     ok &= expect(legacy.open(QIODevice::WriteOnly | QIODevice::Truncate), "legacy fixture open failed");
@@ -219,6 +232,10 @@ int main()
         "IIcx RAM combo must contain only complete four-SIMM bank configurations");
     ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-128k"), 128),
         "catalog must accept the Macintosh 128K fixed RAM size");
+    ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("quadra-700"), 4096)
+            && cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("quadra-700"), 8192)
+            && !cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("quadra-700"), 36864),
+        "Q700 catalog must offer only RAM layouts that pass ROM sizing and reach DAFB video");
     ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-512k"), 512),
         "catalog must accept the Macintosh 512K fixed RAM size");
     ok &= expect(cutemac::machines::MachineCatalog::isValidRamSize(QStringLiteral("mac-512ke"), 512),
