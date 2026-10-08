@@ -64,7 +64,15 @@ std::uint8_t Ncr53c94::readRegister(std::uint8_t index)
         return value;
     }
     case 6: return m_sequenceStep;
-    case 7: return static_cast<std::uint8_t>(m_fifo.size() & 0x1f);
+    case 7:
+        if (m_dmaActive && m_dataIn && m_dataPosition < m_data.size()) {
+            // The SCSI side has filled the 16-byte FIFO before the host drains
+            // the DMA aperture. Report that staged block even though the
+            // target payload is kept in m_data until each DMA read.
+            return static_cast<std::uint8_t>(std::min<qsizetype>({16,
+                static_cast<qsizetype>(m_transferCount), m_data.size() - m_dataPosition}));
+        }
+        return static_cast<std::uint8_t>(m_fifo.size() & 0x1f);
     case 8: case 0xb: case 0xc: case 0xd: return m_registers[index];
     case 0xe: return static_cast<std::uint8_t>(m_transferCount >> 16);
     default: return 0;

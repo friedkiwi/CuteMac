@@ -248,6 +248,49 @@ int main()
     ok &= expect(m68ki_cpu.mmu_sr_040 == 0x00003001U,
         "68040 PTESTR must report the translated physical page in MMUSR");
 
+    // The Quadra ROM uses single-word 68040 cache controls while loading
+    // System 7. An extra extension-word fetch skips the following MOVEQ/RTS.
+    m68ki_cpu.pmmu_enabled = 0;
+    m68ki_cpu.s_flag = SFLAG_SET;
+    bus.write16(0x0100, 0xf478U);
+    bus.write16(0x0102, 0x7000U); // MOVEQ #0,D0
+    ok &= expect(core.disassembleBytes(0x0100U) == 2
+            && core.disassemble(0x0100U).startsWith(QStringLiteral("cpusha")),
+        "68040 disassembly must identify the single-word CPUSHA encoding");
+    core.setProgramCounter(0x0100U);
+    (void)core.stepInstruction();
+    ok &= expect(core.programCounter() == 0x0102U,
+        "68040 $f478 cache control must consume only its opcode word");
+    m68ki_cpu.dar[0] = 0xffffffffU;
+    (void)core.stepInstruction();
+    ok &= expect(core.programCounter() == 0x0104U && m68ki_cpu.dar[0] == 0,
+        "the MOVEQ following $f478 must execute");
+
+    bus.write16(0x0100, 0xf4f8U);
+    core.setProgramCounter(0x0100U);
+    (void)core.stepInstruction();
+    ok &= expect(core.programCounter() == 0x0102U,
+        "68040 $f4f8 cache control must consume only its opcode word");
+
+    bus.write16(0x0100, 0xf458U); // CINVA, instruction cache
+    core.setProgramCounter(0x0100U);
+    (void)core.stepInstruction();
+    ok &= expect(core.programCounter() == 0x0102U,
+        "68040 CINV must consume only its opcode word");
+
+    bus.write32(0x0020, 0x00000200U); // privilege-violation vector
+    bus.write16(0x0100, 0xf4f8U);
+    m68ki_cpu.sp[4] = 0x3f00U;
+    m68ki_cpu.dar[15] = 0x3000U;
+    m68ki_cpu.s_flag = 0;
+    core.setProgramCounter(0x0100U);
+    (void)core.stepInstruction();
+    ok &= expect(core.programCounter() == 0x0200U
+            && m68ki_cpu.dar[15] == 0x3ef8U
+            && bus.read32(0x3efaU) == 0x0100U
+            && bus.read16(0x3efeU) == 0x0020U,
+        "user-mode 68040 cache control must trap at the opcode with a format-0 frame");
+
     core.setModel(cutemac::cpu::m68k::M68kCpuCore::Model::M68030);
 
     // A/UX saves a freshly reset 68882 frame through FSAVE (A7). This valid

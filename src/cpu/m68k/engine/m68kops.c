@@ -28177,6 +28177,25 @@ static void m68k_op_pflush_32(void)
 }
 
 
+static void m68k_op_cache_040(void)
+{
+	/* CINV and CPUSH are single-word privileged 68040 instructions. The
+	   emulated CPU has no instruction or data cache to invalidate or push. */
+	if (!CPU_TYPE_IS_040_PLUS(CPU_TYPE))
+	{
+		m68k_op_1111();
+		return;
+	}
+	if ((REG_IR & 0x18) == 0)
+	{
+		m68ki_exception_illegal();
+		return;
+	}
+	if (!FLAG_S)
+		m68ki_exception_privilege_violation();
+}
+
+
 static void m68k_op_ptest_32(void)
 {
 	if (CPU_TYPE_IS_040_PLUS(CPU_TYPE) && HAS_PMMU)
@@ -34472,6 +34491,8 @@ static const opcode_handler_struct m68k_opcode_handler_table[] =
 	{m68k_op_cpgen_32            , 0xf1c0, 0xf000, {  0,   0,   4,   4,   0}},
 	{m68k_op_cpscc_32            , 0xf1c0, 0xf040, {  0,   0,   4,   4,   0}},
 	{m68k_op_pmmu_32             , 0xfe00, 0xf000, {  0,   0,   8,   8,   8}},
+	{m68k_op_cache_040           , 0xff20, 0xf400, {  0,   0,   0,   4,   4}},
+	{m68k_op_cache_040           , 0xff20, 0xf420, {  0,   0,   0,   4,   4}},
 	{m68k_op_pflush_32           , 0xffe0, 0xf500, {  0,   0,   0,   4,   4}},
 	{m68k_op_ptest_32            , 0xffd8, 0xf548, {  0,   0,   0,   0,   8}},
 	{m68k_op_bra_8               , 0xff00, 0x6000, { 10,  10,  10,  10,  10}},
@@ -36486,6 +36507,10 @@ void m68ki_build_opcode_table(void)
 			for(j = 0;j < 8;j++)
 			{
 				instr = ostruct->match | (i << 9) | j;
+				/* The 68040 cache opcodes overlap coprocessor-2 CPTRAPcc.
+				   Keep the more specific cache handler installed above. */
+				if ((instr & 0xff20) == 0xf400 || (instr & 0xff20) == 0xf420)
+					continue;
 				m68ki_instruction_jump_table[instr] = ostruct->opcode_handler;
 				for(k=0;k<NUM_CPU_TYPES;k++)
 					m68ki_cycles[k][instr] = ostruct->cycles[k];

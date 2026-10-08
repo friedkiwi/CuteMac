@@ -12,7 +12,7 @@ bool expect(bool condition, const char* message)
     return condition;
 }
 
-class InquiryTarget final : public cutemac::devices::scsi::ScsiTarget {
+class ProbeTarget final : public cutemac::devices::scsi::ScsiTarget {
 public:
     [[nodiscard]] bool ready() const override { return true; }
     [[nodiscard]] bool selectable() const override { return true; }
@@ -26,6 +26,10 @@ public:
                 result.data[index] = static_cast<char>(index);
             result.data[0] = 0;
             result.data[4] = 31;
+        } else if (!cdb.isEmpty() && static_cast<std::uint8_t>(cdb[0]) == 0x08) {
+            result.data = QByteArray(512, 0);
+            for (int index = 0; index < result.data.size(); ++index)
+                result.data[index] = static_cast<char>(index);
         }
         return result;
     }
@@ -132,7 +136,7 @@ bool testTurboScsiRegisterRouting()
     DafbVideo dafb;
     Ncr53c94 scsi;
     scsi.reset();
-    scsi.attachTarget(3, std::make_shared<InquiryTarget>());
+    scsi.attachTarget(3, std::make_shared<ProbeTarget>());
     dafb.attachTurboScsi(0, &scsi);
     dafb.writeTurboScsiRegister(0, 0x40, 3);
     dafb.writeTurboScsiRegister(0, 0x20, 0x80);
@@ -183,13 +187,43 @@ bool testTurboScsiBusResetTiming()
     return ok;
 }
 
+bool testTurboScsiRead6DmaFifoPolling()
+{
+    using cutemac::devices::scsi::ncr53c94::Ncr53c94;
+    using cutemac::devices::video::DafbVideo;
+    DafbVideo dafb;
+    Ncr53c94 scsi;
+    scsi.reset();
+    scsi.attachTarget(0, std::make_shared<ProbeTarget>());
+    dafb.attachTurboScsi(0, &scsi);
+    dafb.writeTurboScsiRegister(0, 0x40, 0); // target 0
+    for (const auto byte : QByteArray::fromHex("080000000100"))
+        dafb.writeTurboScsiRegister(0, 0x20, static_cast<std::uint8_t>(byte));
+    dafb.writeTurboScsiRegister(0, 0x30, 0x41); // Select
+    (void)dafb.readTurboScsiRegister(0, 0x50); // acknowledge service interrupt
+    dafb.writeTurboScsiRegister(0, 0x00, 16);
+    dafb.writeTurboScsiRegister(0, 0x10, 0);
+    dafb.writeTurboScsiRegister(0, 0x30, 0x90); // DMA Transfer Information
+    bool ok = expect((dafb.readTurboScsiRegister(0, 0x40) & 0x10U) != 0
+            && (dafb.readTurboScsiRegister(0, 0x70) & 0x10U) != 0,
+        "System 7 READ(6) must see terminal count and a full 16-byte FIFO before DMA");
+    ok &= expect(dafb.readTurboScsiDma16(0) == 0x0001U
+            && dafb.readTurboScsiRegister(0, 0x70) == 14,
+        "DMA reads must drain the reported FIFO count in big-endian word order");
+    for (int word = 1; word < 8; ++word) (void)dafb.readTurboScsiDma16(0);
+    ok &= expect(dafb.readTurboScsiRegister(0, 0x70) == 0
+            && scsi.debugState().dataPosition == 16 && scsi.debugState().dataIn,
+        "the FIFO count must clear after the first READ(6) block without ending DATA IN");
+    return ok;
+}
+
 bool testTurboScsiDelayedDmaSelectCdb()
 {
     using cutemac::devices::scsi::ncr53c94::Ncr53c94;
     bool ok = true;
     Ncr53c94 scsi;
     scsi.reset();
-    scsi.attachTarget(3, std::make_shared<InquiryTarget>());
+    scsi.attachTarget(3, std::make_shared<ProbeTarget>());
     scsi.writeRegister(4, 3);
     scsi.writeRegister(3, 0xc1); // DMA Select with ATN, before the FIFO is populated.
     ok &= expect(scsi.debugState().command && !scsi.interruptActive(),
@@ -211,7 +245,7 @@ bool testTurboScsiSplitDmaSelectCdb()
     Ncr53c94 scsi;
     DafbVideo dafb;
     scsi.reset();
-    scsi.attachTarget(3, std::make_shared<InquiryTarget>());
+    scsi.attachTarget(3, std::make_shared<ProbeTarget>());
     dafb.attachTurboScsi(0, &scsi);
     dafb.writeTurboScsiRegister(0, 0x40, 3);
     dafb.writeTurboScsiRegister(0, 0x00, 1);
@@ -239,6 +273,7 @@ int main()
     ok &= testVblankInterrupt();
     ok &= testTurboScsiRegisterRouting();
     ok &= testTurboScsiBusResetTiming();
+    ok &= testTurboScsiRead6DmaFifoPolling();
     ok &= testTurboScsiDelayedDmaSelectCdb();
     ok &= testTurboScsiSplitDmaSelectCdb();
     return ok ? 0 : 1;
